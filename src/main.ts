@@ -1,37 +1,19 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { REFRESH_COOKIE_NAME } from './auth/refresh-cookie';
 import { NodeEnv } from './common/config/env.validation';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
-
-const CORS_DISABLED = '';
-const CORS_ANY_ORIGIN = '*';
-
-function parseCorsOrigin(raw: string): boolean | string[] {
-  const value = (raw ?? '').trim();
-  if (value === CORS_DISABLED) return false;
-  if (value === CORS_ANY_ORIGIN) return true;
-
-  return value
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-}
-
-function parseTrustProxy(raw: string): boolean | number | string {
-  const value = (raw ?? '').trim();
-  if (value === '' || value === 'false') return false;
-  if (value === 'true') return true;
-
-  const proxyHops = Number(value);
-
-  return Number.isInteger(proxyHops) ? proxyHops : value;
-}
+import { parseCorsOrigin } from './common/utils/parse-cors-origin';
+import { parseTrustProxy } from './common/utils/parse-trust-proxy';
 
 async function bootstrap() {
+  const logger = new Logger('bootstrap');
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
@@ -41,6 +23,8 @@ async function bootstrap() {
     origin: parseCorsOrigin(config.get<string>('CORS_ORIGIN')),
     credentials: config.get<boolean>('CORS_CREDENTIALS'),
   });
+
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -56,6 +40,8 @@ async function bootstrap() {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Paybull API')
       .setVersion('0.0.1')
+      .addBearerAuth()
+      .addCookieAuth(REFRESH_COOKIE_NAME)
       .build();
 
     SwaggerModule.setup(
@@ -65,6 +51,10 @@ async function bootstrap() {
     );
   }
 
-  await app.listen(config.get<number>('PORT'));
+  const port = config.get<number>('PORT');
+
+  await app.listen(port);
+
+  logger.verbose(`Application is listening on the port ${port}`);
 }
 void bootstrap();

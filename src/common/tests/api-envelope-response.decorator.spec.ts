@@ -6,7 +6,7 @@ import {
   SwaggerModule,
 } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
-import { ApiEnvelopeResponse } from './api-envelope-response.decorator';
+import { ApiEnvelopeResponse } from '../decorators/api-envelope-response.decorator';
 
 class SampleDto {
   @ApiProperty()

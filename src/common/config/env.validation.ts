@@ -7,6 +7,8 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
+  ValidateIf,
   validateSync,
 } from 'class-validator';
 
@@ -16,6 +18,7 @@ export enum NodeEnv {
   Test = 'test',
 }
 
+const MIN_SECRET_LENGTH = 32;
 const TRUE_VALUES = ['true', '1', 'yes'];
 const FALSE_VALUES = ['false', '0', 'no'];
 
@@ -83,6 +86,79 @@ export class EnvironmentVariables {
 
   @IsString()
   TRUST_PROXY: string = 'false';
+
+  @IsString()
+  @MinLength(MIN_SECRET_LENGTH)
+  JWT_ACCESS_SECRET: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  JWT_ACCESS_TTL_SECONDS: number = 900;
+
+  @IsString()
+  @MinLength(MIN_SECRET_LENGTH)
+  JWT_REFRESH_SECRET: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  JWT_REFRESH_TTL_SECONDS: number = 2592000;
+
+  @IsString()
+  @MinLength(MIN_SECRET_LENGTH)
+  JWT_REGISTRATION_SECRET: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  JWT_REGISTRATION_TTL_SECONDS: number = 900;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  EMAIL_CONFIRMATION_TTL_SECONDS: number = 900;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PASSWORD_RESET_TTL_MINUTES: number = 15;
+
+  @IsString()
+  APP_URL: string = '';
+
+  @IsString()
+  @IsNotEmpty()
+  TOTP_ISSUER: string = 'Paybull';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  INVITE_TTL_HOURS: number = 72;
+
+  @IsString()
+  MAIL_HOST: string = '';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  MAIL_PORT: number = 587;
+
+  @ToBoolean()
+  @IsBoolean()
+  MAIL_SECURE: boolean = false;
+
+  @IsString()
+  MAIL_USER: string = '';
+
+  @IsString()
+  MAIL_PASSWORD: string = '';
+
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.MAIL_HOST))
+  @IsString()
+  @IsNotEmpty({ message: 'MAIL_FROM is required when MAIL_HOST is set' })
+  MAIL_FROM: string = '';
 }
 
 export function validateEnv(
