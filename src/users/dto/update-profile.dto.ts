@@ -1,15 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, Matches } from 'class-validator';
+import { IsEmail, Matches, ValidateIf } from 'class-validator';
 import { TELEGRAM_USERNAME_PATTERN } from '../../common/utils/telegram-username-pattern';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'user@example.com' })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsEmail()
   email?: string;
 
   @ApiPropertyOptional({ example: '@durov' })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @Matches(TELEGRAM_USERNAME_PATTERN)
   telegramUsername?: string;
 }

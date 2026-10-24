@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext } from '@nestjs/common';
+import { CallHandler, ExecutionContext, StreamableFile } from '@nestjs/common';
 import { lastValueFrom, of } from 'rxjs';
 import { ResponseEnvelopeInterceptor } from '../interceptors/response-envelope.interceptor';
 import { toPage } from '../types/page';
@@ -89,5 +89,11 @@ describe('ResponseEnvelopeInterceptor', () => {
       expect(result).not.toHaveProperty('meta');
       expect(result).toEqual({ data: { items: [{ id: 1 }] } });
     });
+  });
+
+  it('passes a StreamableFile through untouched so a download is not wrapped', async () => {
+    const file = new StreamableFile(Buffer.from('a,b\r\n'));
+
+    await expect(wrap(file)).resolves.toBe(file);
   });
 });

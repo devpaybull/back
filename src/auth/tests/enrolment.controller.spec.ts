@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { PUBLIC_METADATA_KEY } from '../../common/decorators/public.decorator';
 import { EnrolmentController } from '../controllers/enrolment.controller';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from '../refresh-cookie';
@@ -11,6 +11,17 @@ const session = {
   expiresIn: 900,
   refreshExpiresIn: 2592000,
 };
+
+const loginRequest = {
+  ip: '203.0.113.7',
+  get: jest.fn(() => 'agent/1.0'),
+} as unknown as Request;
+
+const expectedContext = (fingerprint: string | null) => ({
+  ip: '203.0.113.7',
+  userAgent: 'agent/1.0',
+  fingerprint,
+});
 
 describe('EnrolmentController', () => {
   const enrolment = {
@@ -69,8 +80,14 @@ describe('EnrolmentController', () => {
     const res = response();
 
     const body = await controller.confirmRegistration(
-      { registrationToken: 'token', totp: '123456' },
+      { registrationToken: 'token', totp: '123456', fingerprint: 'fp-1' },
+      loginRequest,
       res,
+    );
+
+    expect(enrolment.confirmRegistration).toHaveBeenCalledWith(
+      expect.objectContaining({ registrationToken: 'token' }),
+      expectedContext('fp-1'),
     );
 
     expect(body).toEqual({
@@ -120,7 +137,13 @@ describe('EnrolmentController', () => {
 
     const body = await controller.confirmTwoFactorSetup(
       { setupToken: 'setup-token', totp: '123456' },
+      loginRequest,
       res,
+    );
+
+    expect(enrolment.confirmTwoFactorSetup).toHaveBeenCalledWith(
+      expect.objectContaining({ setupToken: 'setup-token' }),
+      expectedContext(null),
     );
 
     expect(body).toEqual({

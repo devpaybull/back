@@ -5,11 +5,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomInt } from 'crypto';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
+import { AuditService } from '../../audit/services/audit.service';
+import { RecordAuditEntry } from '../../audit/types/record-audit-entry';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { AccountMailService } from '../../mail/services/account-mail.service';
+import { User } from '../../users/entities/user.entity';
+import { UserChanges } from '../../users/types/user-changes';
 import { UserAdministrationService } from '../../users/services/user-administration.service';
 import { UserCredentialsService } from '../../users/services/user-credentials.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -26,6 +30,11 @@ const RESET_REJECTED = 'Password reset is invalid, used or expired';
 const RESET_CODE_LENGTH = 6;
 const RESET_CODE_EXCLUSIVE_MAX = 1000000;
 const RESET_MAX_FAILED_ATTEMPTS = 5;
+const PASSWORD_GENERATED_ACTION = 'user.password_generated';
+const PASSWORD_SET_ACTION = 'user.password_set';
+const GENERATED_PASSWORD_LENGTH = 12;
+const GENERATED_PASSWORD_ALPHABET =
+  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 @Injectable()
 export class PasswordService {
@@ -34,6 +43,9 @@ export class PasswordService {
   constructor(
     @InjectRepository(PasswordReset)
     private readonly passwordResets: Repository<PasswordReset>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
+    private readonly audit: AuditService,
     private readonly directory: UserDirectoryService,
     private readonly credentials: UserCredentialsService,
     private readonly administration: UserAdministrationService,
@@ -55,10 +67,41 @@ export class PasswordService {
       throw new UnauthorizedException(CURRENT_PASSWORD_REJECTED);
     }
 
-    await this.administration.update(userId, { password: dto.newPassword });
-    await this.sessions.revokeAllSessions(userId);
+    await this.replacePassword(userId, { password: dto.newPassword });
 
     return this.sessions.issueSession(user);
+  }
+
+  async issueGeneratedPassword(
+    userId: string,
+    actorUserId: string,
+  ): Promise<string> {
+    const password = Array.from(
+      { length: GENERATED_PASSWORD_LENGTH },
+      () =>
+        GENERATED_PASSWORD_ALPHABET[
+          randomInt(GENERATED_PASSWORD_ALPHABET.length)
+        ],
+    ).join('');
+
+    await this.replacePassword(
+      userId,
+      { password },
+      { actorUserId, action: PASSWORD_GENERATED_ACTION },
+    );
+
+    return password;
+  }
+
+  setPassword(
+    userId: string,
+    changes: UserChanges,
+    actorUserId: string,
+  ): Promise<User> {
+    return this.replacePassword(userId, changes, {
+      actorUserId,
+      action: PASSWORD_SET_ACTION,
+    });
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<void> {
@@ -76,8 +119,6 @@ export class PasswordService {
       Date.now() +
         this.config.get<number>('PASSWORD_RESET_TTL_MINUTES') * MINUTE_IN_MS,
     );
-
-    console.log('forgotPassword code', code);
 
     await this.passwordResets.save(
       this.passwordResets.create({
@@ -125,18 +166,48 @@ export class PasswordService {
     }
 
     if (reset.codeHash !== sha256Hex(dto.code)) {
-      reset.failedAttempts += 1;
-      await this.passwordResets.save(reset);
+      await this.passwordResets.increment(
+        { id: reset.id, failedAttempts: LessThan(RESET_MAX_FAILED_ATTEMPTS) },
+        'failedAttempts',
+        1,
+      );
 
       throw new BadRequestException(RESET_REJECTED);
     }
 
-    reset.usedAt = new Date();
-    await this.passwordResets.save(reset);
+    const now = new Date();
+    const { affected } = await this.passwordResets.update(
+      {
+        id: reset.id,
+        usedAt: IsNull(),
+        failedAttempts: LessThan(RESET_MAX_FAILED_ATTEMPTS),
+        expiresAt: MoreThan(now),
+      },
+      { usedAt: now },
+    );
 
-    await this.administration.update(reset.userId, {
-      password: dto.newPassword,
+    if (affected !== 1) {
+      throw new BadRequestException(RESET_REJECTED);
+    }
+
+    await this.replacePassword(reset.userId, { password: dto.newPassword });
+  }
+
+  private replacePassword(
+    userId: string,
+    changes: UserChanges,
+    audited?: Omit<RecordAuditEntry, 'targetUserId'>,
+  ): Promise<User> {
+    return this.dataSource.transaction(async (manager) => {
+      const user = await this.administration.update(userId, changes, manager);
+
+      await this.sessions.revokeAllSessions(userId, manager);
+
+      if (audited) {
+        await this.audit.record({ ...audited, targetUserId: userId }, manager);
+      }
+
+      return user;
     });
-    await this.sessions.revokeAllSessions(reset.userId);
   }
 }

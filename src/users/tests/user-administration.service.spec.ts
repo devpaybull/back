@@ -6,13 +6,18 @@ import {
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { hash } from 'bcryptjs';
+import { EntityManager, QueryFailedError } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { UserBackupCode } from '../entities/user-backup-code.entity';
 import { User } from '../entities/user.entity';
 import { UserAdministrationService } from '../services/user-administration.service';
 import { UserCredentialsService } from '../services/user-credentials.service';
-import { UserDirectoryService } from '../services/user-directory.service';
+import {
+  IDENTIFIER_TAKEN,
+  TELEGRAM_ID_TAKEN,
+  UserDirectoryService,
+} from '../services/user-directory.service';
 import { UserStatus } from '../types/user-status.enum';
 import { createFakeRepository, FakeRepository } from './fake-repository.spec';
 
@@ -58,6 +63,22 @@ describe('UserAdministrationService', () => {
     await expect(
       service.update(uuidOf(404), { role: Role.Merchant }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    expect(users.save).not.toHaveBeenCalled();
+  });
+
+  it('writes through the given transaction manager instead of its own repository', async () => {
+    stored.push(activeUser());
+    const transactional = createFakeRepository(stored);
+    const manager = { getRepository: jest.fn(() => transactional) };
+
+    await service.update(
+      uuidOf(1),
+      { role: Role.Merchant },
+      manager as unknown as EntityManager,
+    );
+
+    expect(manager.getRepository).toHaveBeenCalledWith(User);
+    expect(transactional.save).toHaveBeenCalledTimes(1);
     expect(users.save).not.toHaveBeenCalled();
   });
 
@@ -133,6 +154,123 @@ describe('UserAdministrationService', () => {
     await expect(
       service.update(uuidOf(1), { status: UserStatus.Active }),
     ).resolves.toMatchObject({ status: UserStatus.Active });
+  });
+
+  describe('telegram id and groups', () => {
+    it('writes both without touching the login', async () => {
+      stored.push(activeUser());
+
+      await expect(
+        service.update(uuidOf(1), {
+          telegramId: '777',
+          telegramGroups: 'a / b',
+        }),
+      ).resolves.toMatchObject({
+        telegramId: '777',
+        telegramGroups: 'a / b',
+        email: 'user@example.com',
+      });
+    });
+
+    it('clears them with null, and the groups with an empty string', async () => {
+      stored.push(activeUser({ telegramId: '777', telegramGroups: 'a' }));
+
+      await expect(
+        service.update(uuidOf(1), { telegramId: null, telegramGroups: '' }),
+      ).resolves.toMatchObject({ telegramId: null, telegramGroups: null });
+    });
+
+    it('leaves them alone when absent', async () => {
+      stored.push(activeUser({ telegramId: '777', telegramGroups: 'a' }));
+
+      await expect(
+        service.update(uuidOf(1), { role: Role.Cascade }),
+      ).resolves.toMatchObject({ telegramId: '777', telegramGroups: 'a' });
+    });
+
+    it('answers 409 when another user holds the id', async () => {
+      stored.push(
+        activeUser(),
+        activeUser({
+          id: uuidOf(2),
+          email: 'b@example.com',
+          telegramId: '777',
+        }),
+      );
+
+      await expect(
+        service.update(uuidOf(1), { telegramId: '777' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(users.save).not.toHaveBeenCalled();
+    });
+
+    it('lets the holder resend its own id', async () => {
+      stored.push(activeUser({ telegramId: '777' }));
+
+      await expect(
+        service.update(uuidOf(1), { telegramId: '777' }),
+      ).resolves.toMatchObject({ telegramId: '777' });
+    });
+
+    const uniqueViolationOn = (detail?: string) =>
+      new QueryFailedError('UPDATE', [], {
+        code: '23505',
+        detail,
+      } as unknown as Error);
+
+    it('translates a unique violation on the telegram id into its 409', async () => {
+      stored.push(activeUser());
+      users.save.mockRejectedValueOnce(
+        uniqueViolationOn('Key ("telegramId")=(888) already exists.'),
+      );
+
+      await expect(
+        service.update(uuidOf(1), { telegramId: '888' }),
+      ).rejects.toThrow(new ConflictException(TELEGRAM_ID_TAKEN));
+    });
+
+    it.each([
+      ['email', 'Key (email)=(race@example.com) already exists.'],
+      ['telegramUsername', 'Key ("telegramUsername")=(racer) already exists.'],
+    ])(
+      'translates a unique violation on %s into the identifier-taken 409',
+      async (_column, detail) => {
+        stored.push(activeUser());
+        users.save.mockRejectedValueOnce(uniqueViolationOn(detail));
+
+        await expect(
+          service.update(uuidOf(1), { telegramUsername: 'racer' }),
+        ).rejects.toThrow(new ConflictException(IDENTIFIER_TAKEN));
+      },
+    );
+
+    it.each([
+      ['another unique index', 'Key ("merchantId")=(x) already exists.'],
+      ['no detail at all', undefined],
+    ])(
+      'lets a unique violation on %s through untranslated',
+      async (_case, detail) => {
+        stored.push(activeUser());
+        const failure = uniqueViolationOn(detail);
+        users.save.mockRejectedValueOnce(failure);
+
+        await expect(
+          service.update(uuidOf(1), { telegramId: '888' }),
+        ).rejects.toBe(failure);
+      },
+    );
+
+    it('lets any other database error through', async () => {
+      stored.push(activeUser());
+      const failure = new QueryFailedError('INSERT', [], {
+        code: '08006',
+      } as unknown as Error);
+      users.save.mockRejectedValueOnce(failure);
+
+      await expect(
+        service.update(uuidOf(1), { telegramId: '888' }),
+      ).rejects.toBe(failure);
+    });
   });
 
   it('leaves absent fields alone', async () => {

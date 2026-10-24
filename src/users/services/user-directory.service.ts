@@ -1,16 +1,18 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, In, Repository } from 'typeorm';
 import { AccountIdentifier } from '../../common/types/account-identifier';
 import { Page, toPage } from '../../common/types/page';
+import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
 import { toAccountIdentifier } from '../../common/utils/to-account-identifier';
 import { User } from '../entities/user.entity';
+import { AUTHENTICATABLE_STATUSES } from '../types/authenticatable-statuses';
 import { UserListQuery } from '../types/user-list-query';
-import { UserStatus } from '../types/user-status.enum';
 import { identifierMatches } from '../utils/identifier-matches';
 import { registeredOnly } from '../utils/registered-only';
 import { userListOrder } from '../utils/user-list-order';
@@ -18,7 +20,9 @@ import { userListWhere } from '../utils/user-list-where';
 
 export const IDENTIFIER_TAKEN = 'User with this identifier already exists';
 
-const AUTHENTICATABLE_STATUSES = [UserStatus.Active, UserStatus.Suspended];
+export const TELEGRAM_ID_TAKEN = 'User with this Telegram ID already exists';
+
+export const MAX_SEARCH_MATCHED_ACCOUNTS = 1000;
 
 @Injectable()
 export class UserDirectoryService {
@@ -29,6 +33,12 @@ export class UserDirectoryService {
 
   findById(id: string): Promise<User> {
     return this.users.findOne({ where: { id } });
+  }
+
+  async findByIds(ids: string[]): Promise<User[]> {
+    if (ids.length === 0) return [];
+
+    return this.users.find({ where: { id: In(ids) } });
   }
 
   findAuthenticatableById(id: string): Promise<User> {
@@ -55,6 +65,8 @@ export class UserDirectoryService {
   }
 
   async isIdentifierTaken(identifier: AccountIdentifier): Promise<boolean> {
+    if (!identifier.email && !identifier.telegramUsername) return false;
+
     const found = await this.findFirstMatching(
       registeredOnly(identifierMatches(identifier)),
     );
@@ -72,6 +84,23 @@ export class UserDirectoryService {
       }),
       query,
     );
+  }
+
+  async findIdsMatching(search: string): Promise<string[]> {
+    const pattern = ILike(`%${escapeLikePattern(search)}%`);
+    const matches = await this.users.find({
+      select: { id: true },
+      take: MAX_SEARCH_MATCHED_ACCOUNTS + 1,
+      where: [{ email: pattern }, { telegramUsername: pattern }],
+    });
+
+    if (matches.length > MAX_SEARCH_MATCHED_ACCOUNTS) {
+      throw new BadRequestException(
+        `Search matches more than ${MAX_SEARCH_MATCHED_ACCOUNTS} accounts; narrow it`,
+      );
+    }
+
+    return matches.map((user) => user.id);
   }
 
   async requireById(id: string): Promise<User> {
@@ -94,6 +123,17 @@ export class UserDirectoryService {
 
     if (holder && holder.id !== userId) {
       throw new ConflictException(IDENTIFIER_TAKEN);
+    }
+  }
+
+  async assertTelegramIdHeldByNobodyElse(
+    userId: string,
+    telegramId: string,
+  ): Promise<void> {
+    const holder = await this.users.findOne({ where: { telegramId } });
+
+    if (holder && holder.id !== userId) {
+      throw new ConflictException(TELEGRAM_ID_TAKEN);
     }
   }
 

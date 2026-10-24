@@ -4,12 +4,6 @@ export interface MailMessage {
   text: string;
 }
 
-export interface InviteCodeMailInput {
-  to: string;
-  code: string;
-  expiresAt: Date;
-}
-
 export interface EmailConfirmationCodeMailInput {
   to: string;
   code: string;

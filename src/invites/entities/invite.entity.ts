@@ -19,10 +19,6 @@ export class Invite {
 
   @Index()
   @Column({ nullable: true })
-  email: string;
-
-  @Index()
-  @Column({ nullable: true })
   telegramUsername: string;
 
   @Column({ type: 'enum', enum: Role })

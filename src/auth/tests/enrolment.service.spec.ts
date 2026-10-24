@@ -17,6 +17,8 @@ import { UserEnrolmentService } from '../../users/services/user-enrolment.servic
 import { UserStatus } from '../../users/types/user-status.enum';
 import { RefreshToken } from '../entities/refresh-token.entity';
 import { EnrolmentService } from '../services/enrolment.service';
+import { AuditService } from '../../audit/services/audit.service';
+import { LoginFootprintService } from '../services/login-footprint.service';
 import { SessionService } from '../services/session.service';
 
 const ACCESS_SECRET = 'access-secret-that-is-long-enough-here';
@@ -30,6 +32,14 @@ const ENV: Record<string, unknown> = {
   JWT_ACCESS_TTL_SECONDS: 900,
   JWT_REFRESH_TTL_SECONDS: 2592000,
   JWT_REGISTRATION_TTL_SECONDS: 900,
+};
+
+const footprints = { record: jest.fn() };
+
+const context = {
+  ip: '203.0.113.7',
+  userAgent: 'agent/1.0',
+  fingerprint: 'fp-1',
 };
 
 describe('EnrolmentService', () => {
@@ -112,6 +122,8 @@ describe('EnrolmentService', () => {
         { provide: InvitesService, useValue: invites },
         { provide: MerchantsService, useValue: merchants },
         { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: LoginFootprintService, useValue: footprints },
         { provide: JwtService, useValue: jwt },
         {
           provide: ConfigService,
@@ -275,6 +287,19 @@ describe('EnrolmentService', () => {
         type: TokenType.Registration,
       });
 
+    it('records the login footprint of the new account', async () => {
+      invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+      userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+      userDirectory.findAuthenticatableById.mockResolvedValue(activeUser);
+
+      await service.confirmRegistration(
+        { registrationToken: validToken(), totp: '123456' },
+        context,
+      );
+
+      expect(footprints.record).toHaveBeenCalledWith(activeUser.id, context);
+    });
+
     it('burns the invite, returns backup codes and opens a session', async () => {
       invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
       userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
@@ -391,6 +416,24 @@ describe('EnrolmentService', () => {
         userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
         userDirectory.findAuthenticatableById.mockResolvedValue(
           merchantUser({ email: null, telegramUsername: 'shop' }),
+        );
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop'),
+          totp: '123456',
+        });
+
+        expect(merchants.create).toHaveBeenCalledWith(
+          'shop',
+          transactionManager,
+        );
+      });
+
+      it('names the merchant by the telegram username over the email', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(
+          merchantUser({ email: 'shop@example.com', telegramUsername: 'shop' }),
         );
 
         await service.confirmRegistration({
@@ -554,6 +597,30 @@ describe('EnrolmentService', () => {
         },
         (error: Error) => error,
       );
+
+    it('records the login footprint of the re-enrolled account', async () => {
+      userDirectory.findByLogin.mockResolvedValue(pendingUser);
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userEnrolment.startTwoFactorSetup.mockResolvedValue({
+        user: pendingUser,
+        secret: 'NEWSECRET',
+        otpauthUrl: 'otpauth://totp/Paybull:reset@example.com?secret=NEWSECRET',
+      });
+      userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+      userDirectory.findAuthenticatableById.mockResolvedValue(reEnrolledUser);
+
+      const started = await service.startTwoFactorSetup(credentials);
+
+      await service.confirmTwoFactorSetup(
+        { setupToken: started.setupToken, totp: '123456' },
+        context,
+      );
+
+      expect(footprints.record).toHaveBeenCalledWith(
+        reEnrolledUser.id,
+        context,
+      );
+    });
 
     it('turns a proven password into an active session with backup codes', async () => {
       userDirectory.findByLogin.mockResolvedValue(pendingUser);

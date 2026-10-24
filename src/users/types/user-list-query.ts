@@ -9,6 +9,6 @@ export interface UserListQuery {
   search?: string;
   sortBy: UserSortField;
   sortOrder: SortOrder;
-  role?: Role;
+  role?: Role[];
   status?: UserStatus;
 }

@@ -1,5 +1,5 @@
 import { ColumnOptions } from 'typeorm';
-import { ColumnNumericTransformer } from '../../common/utils/column-numeric-transformer';
+import { ColumnNumericTransformer } from './column-numeric-transformer';
 
 export function percentColumn(options: ColumnOptions = {}): ColumnOptions {
   return {

@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 export const TOTP_PATTERN = /^\d{6}$/;
 
@@ -12,4 +18,12 @@ export class ConfirmRegistrationDto {
   @ApiProperty({ example: '123456' })
   @Matches(TOTP_PATTERN, { message: 'totp must be a 6-digit code' })
   totp: string;
+
+  @ApiPropertyOptional({
+    description: 'Browser fingerprint, stored with the login footprint',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  fingerprint?: string;
 }

@@ -61,7 +61,11 @@ export class UsersController {
   ): Promise<TraderSettingsDto> {
     const row = await this.settings.ensure(user.id);
 
-    return toTraderSettingsDto(row, this.settings.insurancePayInMinOf(row));
+    return toTraderSettingsDto(row, {
+      insurancePayInMin: this.settings.insurancePayInMinOf(row),
+      insurancePayOutMin: this.settings.insurancePayOutMinOf(row),
+      nightStopThreshold: this.settings.nightStopThresholdOf(row),
+    });
   }
 
   @Patch('me')

@@ -30,6 +30,13 @@ export class User {
   @Column({ nullable: true })
   telegramUsername: string;
 
+  @Index({ unique: true })
+  @Column({ type: 'bigint', nullable: true })
+  telegramId: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  telegramGroups: string | null;
+
   @Column()
   passwordHash: string;
 

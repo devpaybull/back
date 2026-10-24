@@ -18,7 +18,6 @@ export const inviteListWhere = (
 
   return [
     { ...filters, code: searched },
-    { ...filters, email: searched },
     { ...filters, telegramUsername: searched },
   ];
 };

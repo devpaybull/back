@@ -151,14 +151,14 @@ describe('UsersController', () => {
     expect(result.telegramUsername).toBe('durov');
   });
 
-  it('prefers the email as the login and still reports both identifiers', async () => {
+  it('prefers the telegram username as the login and still reports both identifiers', async () => {
     directory.findAuthenticatableById.mockResolvedValue(
       user({ email: 'user@example.com', telegramUsername: 'durov' }),
     );
 
     const result = await controller.me(caller());
 
-    expect(result.login).toBe('user@example.com');
+    expect(result.login).toBe('durov');
     expect(result.email).toBe('user@example.com');
     expect(result.telegramUsername).toBe('durov');
   });

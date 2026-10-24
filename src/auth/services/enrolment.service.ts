@@ -26,7 +26,8 @@ import {
   RegistrationTokenPayload,
   TwoFactorSetupTokenPayload,
 } from '../types/token-payloads';
-import { loginOf } from '../utils/login-of';
+import { loginOf } from '../../common/utils/login-of';
+import { LoginContext } from '../types/login-context';
 import { SessionService } from './session.service';
 
 const TWO_FACTOR_SETUP_DENIED = 'Invalid login or password';
@@ -78,6 +79,7 @@ export class EnrolmentService {
 
   async confirmRegistration(
     dto: ConfirmRegistrationDto,
+    context?: LoginContext,
   ): Promise<IssuedSessionWithBackupCodes> {
     const payload = await this.verifyEnrolmentToken<RegistrationTokenPayload>(
       dto.registrationToken,
@@ -104,7 +106,10 @@ export class EnrolmentService {
 
     await this.invites.consume(payload.inviteCode, identifier, payload.sub);
 
-    return { session: await this.sessions.issueSession(user), backupCodes };
+    return {
+      session: await this.sessions.issueSession(user, context),
+      backupCodes,
+    };
   }
 
   async startTwoFactorSetup(
@@ -141,6 +146,7 @@ export class EnrolmentService {
 
   async confirmTwoFactorSetup(
     dto: ConfirmTwoFactorSetupDto,
+    context?: LoginContext,
   ): Promise<IssuedSessionWithBackupCodes> {
     const payload = await this.verifyEnrolmentToken<TwoFactorSetupTokenPayload>(
       dto.setupToken,
@@ -155,7 +161,10 @@ export class EnrolmentService {
 
     const user = await this.directory.findAuthenticatableById(payload.sub);
 
-    return { session: await this.sessions.issueSession(user), backupCodes };
+    return {
+      session: await this.sessions.issueSession(user, context),
+      backupCodes,
+    };
   }
 
   private signEnrolmentToken(

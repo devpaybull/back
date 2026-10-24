@@ -89,6 +89,7 @@ const byOrder =
   };
 
 export interface FakeRepository {
+  find: jest.Mock;
   findOne: jest.Mock;
   findAndCount: jest.Mock;
   create: jest.Mock;
@@ -99,6 +100,9 @@ export interface FakeRepository {
 
 export const createFakeRepository = (rows: Row[]): FakeRepository => {
   return {
+    find: jest.fn(async ({ where }: { where: unknown }) =>
+      rows.filter((row) => matchesWhere(row, where)),
+    ),
     findOne: jest.fn(
       async ({ where }: { where: unknown }) =>
         rows.find((row) => matchesWhere(row, where)) ?? null,
@@ -177,6 +181,12 @@ describe('the fake repository the users tests run against', () => {
     await expect(
       repository.findOne({ where: { id: uuidOf(2) } }),
     ).resolves.toBe(rows[1]);
+  });
+
+  it('finds every row an In condition names', async () => {
+    await expect(
+      repository.find({ where: { id: In([uuidOf(1), uuidOf(3)]) } }),
+    ).resolves.toEqual([rows[0], rows[2]]);
   });
 
   it('takes any of the conditions when the where is a list', async () => {

@@ -45,30 +45,6 @@ describe('AccountMailService', () => {
     createTransportMock.mockReturnValue({ sendMail });
   });
 
-  describe('sendInviteCode', () => {
-    const input = {
-      to: 'invited@example.com',
-      code: 'ABCD2345EFGH6789',
-      expiresAt: EXPIRES_AT,
-    };
-
-    it('mails the code and its expiry to the invited address', async () => {
-      const service = await build(ENABLED);
-
-      await expect(service.sendInviteCode(input)).resolves.toBe(true);
-      expect(sentMessage().to).toBe('invited@example.com');
-      expect(sentMessage().text).toContain('ABCD2345EFGH6789');
-      expect(sentMessage().text).toContain('2026-07-29T12:34:56.000Z');
-    });
-
-    it('reports failure without sending when mail is disabled', async () => {
-      const service = await build({ ...ENABLED, MAIL_HOST: '' });
-
-      await expect(service.sendInviteCode(input)).resolves.toBe(false);
-      expect(sendMail).not.toHaveBeenCalled();
-    });
-  });
-
   describe('sendEmailConfirmationCode', () => {
     const input = {
       to: 'new-address@example.com',

@@ -98,32 +98,33 @@ describe('UserEnrolmentService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('creates a pending user from an email invite', async () => {
+    it('leaves an email an admin added to a pending account alone', async () => {
+      stored.push({
+        id: uuidOf(1),
+        telegramUsername: 'durov',
+        email: 'added@example.com',
+        status: UserStatus.PendingTwoFactor,
+      });
+
       const result = await service.startRegistration({
-        identifier: { email: '  User@Example.com ' },
-        role: Role.Merchant,
+        identifier: { telegramUsername: 'durov' },
+        role: Role.Trader,
         password: 'password123',
       });
 
-      expect(result.user.email).toBe('user@example.com');
-      expect(result.user.telegramUsername).toBeNull();
-      expect(result.user.status).toBe(UserStatus.PendingTwoFactor);
-      expect(result.user.passwordHash).not.toBe('password123');
-      expect(result.otpauthUrl).toContain(`secret=${result.secret}`);
-      expect(result.otpauthUrl).toContain('issuer=Paybull');
-      expect(decodeURIComponent(result.otpauthUrl)).toContain(
-        'user@example.com',
-      );
+      expect(result.user.id).toBe(uuidOf(1));
+      expect(result.user.email).toBe('added@example.com');
+      expect(stored[0].email).toBe('added@example.com');
     });
 
-    it('trusts the address an email invite was redeemed at', async () => {
+    it('never starts an account with a verified email', async () => {
       const result = await service.startRegistration({
         identifier: { email: 'user@example.com' },
         role: Role.Merchant,
         password: 'password123',
       });
 
-      expect(result.user.emailVerified).toBe(true);
+      expect(result.user.emailVerified).toBe(false);
     });
 
     it('creates a pending user from a telegram invite', async () => {
@@ -134,7 +135,7 @@ describe('UserEnrolmentService', () => {
       });
 
       expect(result.user.telegramUsername).toBe('durov');
-      expect(result.user.email).toBeNull();
+      expect(result.user.email).toBeFalsy();
       expect(result.user.status).toBe(UserStatus.PendingTwoFactor);
       expect(decodeURIComponent(result.otpauthUrl)).toContain('durov');
     });
@@ -436,12 +437,13 @@ describe('UserEnrolmentService', () => {
       expect(decodeURIComponent(started.otpauthUrl)).toContain('durov');
     });
 
-    it('prefers the email when the user holds both identifiers', async () => {
+    it('labels the secret with the telegram username when the user holds both identifiers', async () => {
       stored.push(pendingUser({ telegramUsername: 'durov' }));
 
       const started = await service.startTwoFactorSetup(uuidOf(1));
 
-      expect(decodeURIComponent(started.otpauthUrl)).toContain(
+      expect(decodeURIComponent(started.otpauthUrl)).toContain('durov');
+      expect(decodeURIComponent(started.otpauthUrl)).not.toContain(
         'user@example.com',
       );
     });

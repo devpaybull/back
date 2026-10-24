@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { CurrenciesModule } from '../currencies/currencies.module';
 import { MailModule } from '../mail/mail.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { EmailVerification } from './entities/email-verification.entity';
@@ -27,6 +28,7 @@ import { UsersController } from './users.controller';
     MailModule,
     TraderSettingsModule,
     AuditModule,
+    CurrenciesModule,
   ],
   controllers: [UsersController],
   providers: [

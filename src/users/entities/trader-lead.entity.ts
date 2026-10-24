@@ -8,10 +8,12 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { percentColumn } from '../../common/utils/percent-column';
+import { Currency } from '../../currencies/entities/currency.entity';
 import { User } from './user.entity';
 
 @Entity('trader_leads')
-@Index(['traderUserId', 'leadUserId'], { unique: true })
+@Index(['traderUserId', 'leadUserId', 'currencyId'], { unique: true })
 export class TraderLead {
   @PrimaryGeneratedColumn()
   id: number;
@@ -30,6 +32,19 @@ export class TraderLead {
   @Index()
   @Column({ type: 'uuid' })
   leadUserId: string;
+
+  @ManyToOne(() => Currency, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'currencyId' })
+  currency: Currency;
+
+  @Column({ type: 'int' })
+  currencyId: number;
+
+  @Column(percentColumn())
+  payInPercent: number;
+
+  @Column(percentColumn())
+  payOutPercent: number;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

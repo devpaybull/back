@@ -1,5 +1,12 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches, ValidateIf } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 import { TOTP_PATTERN } from './confirm-registration.dto';
 
 export class LoginDto {
@@ -32,4 +39,12 @@ export class LoginDto {
   @IsString()
   @IsNotEmpty()
   backupCode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Browser fingerprint, stored with the login footprint',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  fingerprint?: string;
 }

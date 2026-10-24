@@ -23,6 +23,14 @@ export class RefreshToken {
   @Column({ type: 'uuid' })
   userId: string;
 
+  @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'impersonatedByUserId' })
+  impersonatedBy: User | null;
+
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  impersonatedByUserId: string | null;
+
   @Index({ unique: true })
   @Column()
   tokenHash: string;

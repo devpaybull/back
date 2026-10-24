@@ -11,7 +11,6 @@ import { FindOperator } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
-import { AccountMailService } from '../../mail/services/account-mail.service';
 import { MerchantsService } from '../../merchants/merchants.service';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -124,14 +123,12 @@ describe('InvitesService', () => {
   };
 
   const userDirectory = { isIdentifierTaken: jest.fn() };
-  const mail = { sendInviteCode: jest.fn() };
   const merchants = { findById: jest.fn() };
 
   const pendingInvite = (overrides: Partial<Invite> = {}): Invite =>
     ({
       id: 1,
-      email: 'user@example.com',
-      telegramUsername: null,
+      telegramUsername: 'someone',
       role: Role.Trader,
       code: 'ABCDEFGHJKLMNPQR',
       expiresAt: new Date(Date.now() + HOUR_IN_MS),
@@ -146,16 +143,9 @@ describe('InvitesService', () => {
       ...overrides,
     }) as Invite;
 
-  const telegramInvite = (overrides: Partial<Invite> = {}): Invite =>
-    pendingInvite({
-      email: null,
-      telegramUsername: 'someone',
-      ...overrides,
-    });
-
-  const createEmailInvite = () =>
+  const createInvite = () =>
     service.create({
-      identifier: { email: 'user@example.com' },
+      telegramUsername: 'someone',
       role: Role.Trader,
       createdByUserId: uuidOf(1),
     });
@@ -199,7 +189,6 @@ describe('InvitesService', () => {
       createdBy: issuer,
     }));
     userDirectory.isIdentifierTaken.mockResolvedValue(false);
-    mail.sendInviteCode.mockResolvedValue(true);
     merchants.findById.mockImplementation(async (id: string) =>
       id === uuidOf(50) ? { id, name: 'Ohla Shop' } : null,
     );
@@ -209,7 +198,6 @@ describe('InvitesService', () => {
         InvitesService,
         { provide: getRepositoryToken(Invite), useValue: invites },
         { provide: UserDirectoryService, useValue: userDirectory },
-        { provide: AccountMailService, useValue: mail },
         { provide: MerchantsService, useValue: merchants },
         { provide: ConfigService, useValue: { get: () => 72 } },
       ],
@@ -220,7 +208,7 @@ describe('InvitesService', () => {
 
   describe('create', () => {
     it('issues an unambiguous code with the configured lifetime', async () => {
-      const invite = await createEmailInvite();
+      const invite = await createInvite();
 
       expect(invite.code).toMatch(/^[A-HJ-NP-Z2-9]{16}$/);
       expect(invite.createdByUserId).toBe(uuidOf(1));
@@ -236,7 +224,7 @@ describe('InvitesService', () => {
       const expiresAt = new Date(Date.now() + 5 * HOUR_IN_MS);
 
       const invite = await service.create({
-        identifier: { email: 'user@example.com' },
+        telegramUsername: 'someone',
         role: Role.Trader,
         createdByUserId: uuidOf(1),
         expiresAt,
@@ -247,7 +235,7 @@ describe('InvitesService', () => {
 
     it('stores the role the invite was issued for', async () => {
       const invite = await service.create({
-        identifier: { email: 'user@example.com' },
+        telegramUsername: 'someone',
         role: Role.LeadTrader,
         createdByUserId: uuidOf(1),
       });
@@ -262,7 +250,7 @@ describe('InvitesService', () => {
         'stores the merchant of a %s invite',
         async (role) => {
           const invite = await service.create({
-            identifier: { email: 'user@example.com' },
+            telegramUsername: 'someone',
             role,
             createdByUserId: uuidOf(1),
             merchantId: uuidOf(50),
@@ -278,7 +266,7 @@ describe('InvitesService', () => {
         async (role) => {
           await expect(
             service.create({
-              identifier: { email: 'user@example.com' },
+              telegramUsername: 'someone',
               role,
               createdByUserId: uuidOf(1),
             }),
@@ -292,7 +280,7 @@ describe('InvitesService', () => {
         async (role) => {
           await expect(
             service.create({
-              identifier: { email: 'user@example.com' },
+              telegramUsername: 'someone',
               role,
               createdByUserId: uuidOf(1),
               merchantId: uuidOf(51),
@@ -307,7 +295,7 @@ describe('InvitesService', () => {
       )('refuses a merchant on a %s invite', async (role) => {
         await expect(
           service.create({
-            identifier: { email: 'user@example.com' },
+            telegramUsername: 'someone',
             role,
             createdByUserId: uuidOf(1),
             merchantId: uuidOf(50),
@@ -318,68 +306,49 @@ describe('InvitesService', () => {
       });
 
       it('stores no merchant on an invite for any other role', async () => {
-        const invite = await createEmailInvite();
+        const invite = await createInvite();
 
         expect(invite.merchantId).toBeNull();
         expect(merchants.findById).not.toHaveBeenCalled();
       });
     });
 
-    it('normalises an email invite and leaves telegram empty', async () => {
+    it('normalises the telegram username it is issued for', async () => {
       const invite = await service.create({
-        identifier: { email: '  User@Example.com ' },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-
-      expect(invite.email).toBe('user@example.com');
-      expect(invite.telegramUsername).toBeNull();
-    });
-
-    it('normalises a telegram invite and leaves email empty', async () => {
-      const invite = await service.create({
-        identifier: { telegramUsername: ' @SomeOne ' },
+        telegramUsername: ' @SomeOne ',
         role: Role.Merchant,
         createdByUserId: uuidOf(1),
       });
 
       expect(invite.telegramUsername).toBe('someone');
-      expect(invite.email).toBeNull();
     });
 
-    it('rejects an identifier carrying neither email nor telegram', async () => {
-      await expect(
-        service.create({
-          identifier: {},
-          role: Role.Trader,
-          createdByUserId: uuidOf(1),
-        }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(invites.save).not.toHaveBeenCalled();
+    it('writes no email onto the invite', async () => {
+      const invite = await createInvite();
+
+      expect(invite).not.toHaveProperty('email');
     });
 
-    it('rejects an identifier carrying both email and telegram', async () => {
-      await expect(
-        service.create({
-          identifier: {
-            email: 'user@example.com',
-            telegramUsername: 'someone',
-          },
-          role: Role.Trader,
-          createdByUserId: uuidOf(1),
-        }),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(invites.save).not.toHaveBeenCalled();
-    });
+    it.each([[''], ['   '], ['@']])(
+      'rejects the empty telegram username %p',
+      async (telegramUsername) => {
+        await expect(
+          service.create({
+            telegramUsername,
+            role: Role.Trader,
+            createdByUserId: uuidOf(1),
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(invites.save).not.toHaveBeenCalled();
+      },
+    );
 
     it('refuses an identifier that already belongs to a user', async () => {
       userDirectory.isIdentifierTaken.mockResolvedValue(true);
 
-      await expect(createEmailInvite()).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(createInvite()).rejects.toBeInstanceOf(ConflictException);
       expect(userDirectory.isIdentifierTaken).toHaveBeenCalledWith({
-        email: 'user@example.com',
+        telegramUsername: 'someone',
       });
       expect(invites.save).not.toHaveBeenCalled();
     });
@@ -387,11 +356,9 @@ describe('InvitesService', () => {
     it('refuses a second code while the first one still works', async () => {
       invites.find.mockResolvedValue([pendingInvite()]);
 
-      await expect(createEmailInvite()).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(createInvite()).rejects.toBeInstanceOf(ConflictException);
       expect(invites.find).toHaveBeenCalledWith({
-        where: { email: 'user@example.com' },
+        where: { telegramUsername: 'someone' },
       });
       expect(invites.save).not.toHaveBeenCalled();
     });
@@ -399,7 +366,7 @@ describe('InvitesService', () => {
     it('issues a new code once the previous one has been used', async () => {
       invites.find.mockResolvedValue([pendingInvite({ usedAt: new Date() })]);
 
-      await expect(createEmailInvite()).resolves.toBeDefined();
+      await expect(createInvite()).resolves.toBeDefined();
       expect(invites.save).toHaveBeenCalled();
     });
 
@@ -408,57 +375,28 @@ describe('InvitesService', () => {
         pendingInvite({ expiresAt: new Date(Date.now() - HOUR_IN_MS) }),
       ]);
 
-      await expect(createEmailInvite()).resolves.toBeDefined();
+      await expect(createInvite()).resolves.toBeDefined();
       expect(invites.save).toHaveBeenCalled();
-    });
-
-    it('emails the code to the invited address', async () => {
-      const invite = await createEmailInvite();
-
-      expect(mail.sendInviteCode).toHaveBeenCalledWith({
-        to: 'user@example.com',
-        code: invite.code,
-        expiresAt: invite.expiresAt,
-      });
-    });
-
-    it('sends no mail for a telegram invite', async () => {
-      const invite = await service.create({
-        identifier: { telegramUsername: 'someone' },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-
-      expect(invite.code).toMatch(/^[A-HJ-NP-Z2-9]{16}$/);
-      expect(mail.sendInviteCode).not.toHaveBeenCalled();
-    });
-
-    it('keeps the invite when the mail transport fails', async () => {
-      mail.sendInviteCode.mockRejectedValue(new Error('smtp is down'));
-
-      await expect(createEmailInvite()).resolves.toMatchObject({
-        email: 'user@example.com',
-      });
     });
 
     it('never repeats a code', async () => {
       const codes = new Set<string>();
 
       for (let attempt = 0; attempt < 20; attempt++) {
-        codes.add((await createEmailInvite()).code);
+        codes.add((await createInvite()).code);
       }
 
       expect(codes.size).toBe(20);
     });
 
     it('hands back the invite with its issuer loaded', async () => {
-      const invite = await createEmailInvite();
+      const invite = await createInvite();
 
       expect(invite.createdBy).toBe(issuer);
     });
 
     it('reloads the created invite exactly once, asking for the issuer', async () => {
-      await createEmailInvite();
+      await createInvite();
 
       expect(invites.findOne).toHaveBeenCalledTimes(1);
       expect(invites.findOne).toHaveBeenCalledWith({
@@ -479,14 +417,13 @@ describe('InvitesService', () => {
       pendingInvite({
         id: 1,
         code: 'AAAA1111',
-        email: 'anna@example.com',
+        telegramUsername: 'anna_k',
         expiresAt: usable,
         createdAt: dayOf(1),
       }),
       pendingInvite({
         id: 2,
         code: 'BBBB2222',
-        email: null,
         telegramUsername: 'durov',
         role: Role.Merchant,
         expiresAt: usable,
@@ -495,7 +432,7 @@ describe('InvitesService', () => {
       pendingInvite({
         id: 3,
         code: 'CCCC3333',
-        email: 'boris@example.com',
+        telegramUsername: 'boris_b',
         expiresAt: usable,
         usedAt: dayOf(3),
         usedBy: issuer,
@@ -505,7 +442,7 @@ describe('InvitesService', () => {
       pendingInvite({
         id: 4,
         code: 'DDDD4444',
-        email: 'carl@example.com',
+        telegramUsername: 'carl_c',
         role: Role.Admin,
         expiresAt: expired,
         usedAt: dayOf(4),
@@ -516,14 +453,14 @@ describe('InvitesService', () => {
       pendingInvite({
         id: 5,
         code: 'EEEE5555',
-        email: 'dana@example.com',
+        telegramUsername: 'dana_d',
         expiresAt: expired,
         createdAt: dayOf(5),
       }),
       pendingInvite({
         id: 6,
         code: 'FFFF6666',
-        email: 'discount100%@example.com',
+        telegramUsername: 'discount_100',
         role: Role.Merchant,
         expiresAt: expired,
         createdAt: dayOf(6),
@@ -531,7 +468,7 @@ describe('InvitesService', () => {
       pendingInvite({
         id: 7,
         code: 'GGGG7777',
-        email: 'agent100@example.com',
+        telegramUsername: 'agentx100',
         role: Role.Cascade,
         expiresAt: usable,
         createdAt: dayOf(7),
@@ -671,17 +608,25 @@ describe('InvitesService', () => {
         await expect(listedIds({ search: 'aaaa1111' })).resolves.toEqual([1]);
       });
 
-      it('matches a substring of the email', async () => {
-        await expect(listedIds({ search: 'boris' })).resolves.toEqual([3]);
-      });
-
       it('matches a substring of the telegram username', async () => {
         await expect(listedIds({ search: 'DUROV' })).resolves.toEqual([2]);
       });
 
-      it('treats a percent sign as text, not as a wildcard', async () => {
-        await expect(listedIds({ search: '100%' })).resolves.toEqual([6]);
+      it('treats an underscore as text, not as a wildcard', async () => {
+        await expect(listedIds({ search: '_100' })).resolves.toEqual([6]);
         await expect(listedIds({ search: '100' })).resolves.toEqual([7, 6]);
+      });
+
+      it('searches the code and the telegram username and nothing else', async () => {
+        await service.list(query({ search: 'boris' }));
+
+        const [options] = invites.findAndCount.mock.calls[0] as [
+          { where: Record<string, unknown>[] },
+        ];
+
+        expect(
+          options.where.map((condition) => Object.keys(condition)),
+        ).toEqual([['code'], ['telegramUsername']]);
       });
 
       it('narrows alongside the status rather than replacing it', async () => {
@@ -750,7 +695,7 @@ describe('InvitesService', () => {
 
       await expect(
         service.assertUsable('abcd-efgh-jklm-npqr', {
-          email: 'User@Example.com',
+          telegramUsername: 'someone',
         }),
       ).resolves.toBe(invite);
       expect(invites.findOne).toHaveBeenCalledWith({
@@ -758,8 +703,8 @@ describe('InvitesService', () => {
       });
     });
 
-    it('accepts a telegram invite redeemed by its telegram username', async () => {
-      const invite = telegramInvite();
+    it('accepts the telegram username however it is typed', async () => {
+      const invite = pendingInvite();
       invites.findOne.mockResolvedValue(invite);
 
       await expect(
@@ -773,7 +718,9 @@ describe('InvitesService', () => {
       invites.findOne.mockResolvedValue(null);
 
       await expect(
-        service.assertUsable('ABCDEFGHJKLMNPQR', { email: 'user@example.com' }),
+        service.assertUsable('ABCDEFGHJKLMNPQR', {
+          telegramUsername: 'someone',
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -781,7 +728,9 @@ describe('InvitesService', () => {
       invites.findOne.mockResolvedValue(pendingInvite({ usedAt: new Date() }));
 
       await expect(
-        service.assertUsable('ABCDEFGHJKLMNPQR', { email: 'user@example.com' }),
+        service.assertUsable('ABCDEFGHJKLMNPQR', {
+          telegramUsername: 'someone',
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -791,11 +740,23 @@ describe('InvitesService', () => {
       );
 
       await expect(
-        service.assertUsable('ABCDEFGHJKLMNPQR', { email: 'user@example.com' }),
+        service.assertUsable('ABCDEFGHJKLMNPQR', {
+          telegramUsername: 'someone',
+        }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('rejects a code issued for another email', async () => {
+    it('rejects a code issued for another telegram username', async () => {
+      invites.findOne.mockResolvedValue(pendingInvite());
+
+      await expect(
+        service.assertUsable('ABCDEFGHJKLMNPQR', {
+          telegramUsername: 'somebody_else',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('refuses to redeem an invite with an email login', async () => {
       invites.findOne.mockResolvedValue(pendingInvite());
 
       await expect(
@@ -805,25 +766,18 @@ describe('InvitesService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('refuses to redeem an email invite with a telegram login', async () => {
+    it('refuses a login carrying an email beside the right username', async () => {
       invites.findOne.mockResolvedValue(pendingInvite());
 
       await expect(
         service.assertUsable('ABCDEFGHJKLMNPQR', {
+          email: 'someone@example.com',
           telegramUsername: 'someone',
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('refuses to redeem a telegram invite with an email login', async () => {
-      invites.findOne.mockResolvedValue(telegramInvite());
-
-      await expect(
-        service.assertUsable('ABCDEFGHJKLMNPQR', { email: 'someone' }),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-    });
-
-    it('refuses an identifier that is not exactly one of the two', async () => {
+    it('refuses an identifier carrying nothing', async () => {
       invites.findOne.mockResolvedValue(pendingInvite());
 
       await expect(
@@ -839,7 +793,7 @@ describe('InvitesService', () => {
 
       await service.consume(
         'ABCDEFGHJKLMNPQR',
-        { email: 'user@example.com' },
+        { telegramUsername: 'someone' },
         uuidOf(7),
       );
 
@@ -854,7 +808,7 @@ describe('InvitesService', () => {
       await expect(
         service.consume(
           'ABCDEFGHJKLMNPQR',
-          { email: 'user@example.com' },
+          { telegramUsername: 'someone' },
           uuidOf(2),
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -925,7 +879,7 @@ describe('InvitesService', () => {
 
       await expect(
         service.assertUsable('ABCDEFGHJKLMNPQR', {
-          email: 'user@example.com',
+          telegramUsername: 'someone',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -935,7 +889,7 @@ describe('InvitesService', () => {
         pendingInvite({ revokedAt: new Date(), revokedByUserId: uuidOf(4) }),
       ]);
 
-      await expect(createEmailInvite()).resolves.toBeDefined();
+      await expect(createInvite()).resolves.toBeDefined();
     });
   });
 
@@ -1032,7 +986,7 @@ describe('InvitesService', () => {
         ConflictException,
       );
       expect(userDirectory.isIdentifierTaken).toHaveBeenCalledWith({
-        email: 'user@example.com',
+        telegramUsername: 'someone',
       });
       expect(invites.save).not.toHaveBeenCalled();
     });
@@ -1047,16 +1001,37 @@ describe('InvitesService', () => {
       expect(invites.save).not.toHaveBeenCalled();
     });
 
-    it('checks a telegram invite by its username', async () => {
-      invites.findOne.mockResolvedValue(
-        telegramInvite({ expiresAt: new Date(Date.now() - HOUR_IN_MS) }),
-      );
+    it('looks for another live invite by the telegram username', async () => {
+      invites.findOne.mockResolvedValue(expiredInvite());
 
       await service.extend(1, later());
 
-      expect(userDirectory.isIdentifierTaken).toHaveBeenCalledWith({
-        telegramUsername: 'someone',
+      expect(invites.find).toHaveBeenCalledWith({
+        where: { telegramUsername: 'someone' },
       });
+    });
+
+    it('refuses to extend a legacy invite with no telegram username', async () => {
+      invites.findOne.mockResolvedValue(
+        pendingInvite({ telegramUsername: null }),
+      );
+
+      await expect(service.extend(1, later())).rejects.toThrow(
+        'This invite can no longer be redeemed',
+      );
+      expect(userDirectory.isIdentifierTaken).not.toHaveBeenCalled();
+      expect(invites.find).not.toHaveBeenCalled();
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('still reports a used legacy invite as used', async () => {
+      invites.findOne.mockResolvedValue(
+        pendingInvite({ telegramUsername: null, usedAt: new Date() }),
+      );
+
+      await expect(service.extend(1, later())).rejects.toThrow(
+        'This invite has already been used',
+      );
     });
   });
 });
