@@ -19,7 +19,6 @@ import { TraderSettingsService } from '../../trader-settings/trader-settings.ser
 import { RateService } from '../../transactions/services/rate.service';
 import { MethodPercent } from '../../transactions/types/method-percent';
 import { RateScope } from '../../transactions/types/rate-scope.enum';
-import { TransactionMethod } from '../../transactions/types/transaction-method.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserStatus } from '../../users/types/user-status.enum';
@@ -47,10 +46,10 @@ describe('AdminInvitesController', () => {
 
   const GLOBAL_MIN = 100;
   const baseRates: MethodPercent[] = [
-    { method: TransactionMethod.Card, payInPercent: 5, payOutPercent: 4 },
+    { method: 'card', payInPercent: 5, payOutPercent: 4 },
   ];
   const ownRates: MethodPercent[] = [
-    { method: TransactionMethod.Card, payInPercent: 7, payOutPercent: 6 },
+    { method: 'card', payInPercent: 7, payOutPercent: 6 },
   ];
 
   const issuer = (role: Role, id = uuidOf(1)): AuthenticatedUser => ({
@@ -66,7 +65,7 @@ describe('AdminInvitesController', () => {
   const dto = (overrides: Partial<CreateInviteDto> = {}): CreateInviteDto =>
     ({
       role: Role.Trader,
-      email: 'user@example.com',
+      telegramUsername: 'someone',
       ...overrides,
     }) as CreateInviteDto;
 
@@ -87,8 +86,7 @@ describe('AdminInvitesController', () => {
   const invite = (overrides: Partial<Invite> = {}): Invite =>
     ({
       id: 1,
-      email: 'user@example.com',
-      telegramUsername: null,
+      telegramUsername: 'someone',
       role: Role.Trader,
       code: 'ABCDEFGHJKLMNPQR',
       expiresAt: new Date(Date.now() + HOUR_IN_MS),
@@ -257,60 +255,22 @@ describe('AdminInvitesController', () => {
   });
 
   describe('the identifier handed to the service', () => {
-    it('carries the email alone when only an email was given', async () => {
-      await controller.create(
-        dto({ email: 'user@example.com', telegramUsername: undefined }),
-        admin,
-      );
+    it('carries the telegram username it was given', async () => {
+      await controller.create(dto({ telegramUsername: '@durov' }), admin);
 
       expect(invites.create).toHaveBeenCalledWith({
-        identifier: { email: 'user@example.com' },
+        telegramUsername: '@durov',
         role: Role.Trader,
         createdByUserId: uuidOf(1),
       });
     });
+  });
 
-    it('carries the telegram username alone when only that was given', async () => {
-      await controller.create(
-        dto({ email: undefined, telegramUsername: '@durov' }),
-        admin,
-      );
+  it('answers with no email field, since an invite has none', async () => {
+    const created = await controller.create(dto(), admin);
 
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: { telegramUsername: '@durov' },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
-
-    it('passes both through so the service can reject the pair', async () => {
-      await controller.create(
-        dto({ email: 'user@example.com', telegramUsername: '@durov' }),
-        admin,
-      );
-
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: {
-          email: 'user@example.com',
-          telegramUsername: '@durov',
-        },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
-
-    it('passes neither through so the service can reject the absence', async () => {
-      await controller.create(
-        dto({ email: undefined, telegramUsername: undefined }),
-        admin,
-      );
-
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: {},
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
+    expect(created).not.toHaveProperty('email');
+    expect(created.telegramUsername).toBe('someone');
   });
 
   it('records which admin issued the invite', async () => {
@@ -368,7 +328,6 @@ describe('AdminInvitesController', () => {
       invite({
         id: 3,
         role: Role.Merchant,
-        email: null,
         telegramUsername: '@durov',
         expiresAt: new Date(Date.now() - HOUR_IN_MS),
       }),
@@ -423,12 +382,12 @@ describe('AdminInvitesController', () => {
       expect(listed.status).toBe(InviteStatus.Pending);
     });
 
-    it('falls back to the telegram username as the login', async () => {
+    it('takes the telegram username as the login over the email', async () => {
       const [listed] = await listedInvites([
         invite({
           createdBy: account({
             id: uuidOf(4),
-            email: null,
+            email: 'durov@example.com',
             telegramUsername: 'durov',
           }),
           createdByUserId: uuidOf(4),
@@ -436,6 +395,17 @@ describe('AdminInvitesController', () => {
       ]);
 
       expect(listed.createdBy.login).toBe('durov');
+    });
+
+    it('falls back to the email as the login when there is no telegram username', async () => {
+      const [listed] = await listedInvites([
+        invite({
+          createdBy: account({ id: uuidOf(4), email: 'boss@example.com' }),
+          createdByUserId: uuidOf(4),
+        }),
+      ]);
+
+      expect(listed.createdBy.login).toBe('boss@example.com');
     });
 
     it('carries nothing beyond the id, login and role', async () => {
@@ -695,8 +665,8 @@ describe('AdminInvitesController', () => {
 
     it('keeps the order of the rates the service returned for a redeemed invite', async () => {
       const ordered: MethodPercent[] = [
-        { method: TransactionMethod.Card, payInPercent: 7, payOutPercent: 6 },
-        { method: TransactionMethod.Sbp, payInPercent: 3, payOutPercent: 2 },
+        { method: 'card', payInPercent: 7, payOutPercent: 6 },
+        { method: 'sbp', payInPercent: 3, payOutPercent: 2 },
       ];
       rateService.getEffectiveGeneralRates.mockResolvedValue({
         base: baseRates,

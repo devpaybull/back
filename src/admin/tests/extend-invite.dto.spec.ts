@@ -48,3 +48,17 @@ describe('ExtendInviteDto', () => {
     expect(dto.expiresAt).toBeInstanceOf(Date);
   });
 });
+
+describe('ExtendInviteDto message for a past expiresAt', () => {
+  it('says the moment must be in the future instead of printing the bound function', () => {
+    const [error] = validateSync(
+      plainToInstance(ExtendInviteDto, {
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      }),
+    );
+
+    expect(Object.values(error.constraints ?? {})).toEqual([
+      'expiresAt must be a moment in the future',
+    ]);
+  });
+});

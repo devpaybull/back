@@ -45,16 +45,19 @@ describe('AdminBalancesController', () => {
   let wallets: { findByUserId: jest.Mock };
   let transactions: { createInternalTransfer: jest.Mock };
   let directory: { findById: jest.Mock; findByLogin: jest.Mock };
+  let debts: { debtIdsByBalanceOperation: jest.Mock };
   let controller: AdminBalancesController;
 
   beforeEach(() => {
     wallets = { findByUserId: jest.fn() };
     transactions = { createInternalTransfer: jest.fn() };
     directory = { findById: jest.fn(), findByLogin: jest.fn() };
+    debts = { debtIdsByBalanceOperation: jest.fn(async () => new Map()) };
     controller = new AdminBalancesController(
       wallets as never,
       transactions as never,
       directory as never,
+      debts as never,
     );
   });
 

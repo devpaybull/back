@@ -9,9 +9,17 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -19,15 +27,28 @@ import { WriteAccess } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
+import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
+import { DebtsService } from '../../debts/services/debts.service';
+import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { TransactionService } from '../../transactions/services/transaction.service';
 import { WalletService } from '../../transactions/services/wallet.service';
+import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
 import { StatusEventSource } from '../../transactions/types/status-event-source.enum';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
+import { BalanceOperationFilterDto } from '../dto/balance-operation-filter.dto';
+import {
+  BalanceOperationDto,
+  toBalanceOperationDto,
+} from '../dto/balance-operation.dto';
+import { ListBalanceOperationsQueryDto } from '../dto/list-balance-operations-query.dto';
+import { balanceOperationsCsv } from '../utils/balance-operations-csv';
 import { AdminTransferDto } from '../dto/admin-transfer.dto';
 import { BalancesDto, toBalancesDto } from '../dto/balances.dto';
 import { toTransactionDto, TransactionDto } from '../dto/transaction.dto';
 import { canIssueRole } from '../utils/can-issue-role';
+
+export const BALANCE_EXPORT_MAX_ROWS = 100000;
 
 const TRANSFER_RECIPIENT_ROLES: Role[] = [Role.Trader, Role.LeadTrader];
 
@@ -41,6 +62,7 @@ export class AdminBalancesController {
     private readonly wallets: WalletService,
     private readonly transactions: TransactionService,
     private readonly directory: UserDirectoryService,
+    private readonly debts: DebtsService,
   ) {}
 
   @Get('balances')
@@ -56,6 +78,74 @@ export class AdminBalancesController {
     if (!wallet) throw new NotFoundException('Wallet not found');
 
     return toBalancesDto(wallet);
+  }
+
+  @Get('balance-operations')
+  @ApiOperation({
+    summary: 'Lists an account’s balance journal, newest first',
+    description:
+      'Filters: from (inclusive) and to (exclusive) on createdAt, type (one or several), kind. An account with no wallet gets an empty page.',
+  })
+  @ApiPagedResponse(BalanceOperationDto)
+  async balanceOperations(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListBalanceOperationsQueryDto,
+  ): Promise<Page<BalanceOperationDto>> {
+    await this.requireUser(id);
+
+    const page = await this.wallets.listOperations({
+      userId: id,
+      from: query.from,
+      to: query.to,
+      types: query.type,
+      kind: query.kind,
+      page: query.page,
+      limit: query.limit,
+      sortOrder: query.sortOrder,
+    });
+    const debtIds = await this.debtIdsOf(page.items);
+
+    return page.map((operation) =>
+      toBalanceOperationDto(operation, debtIds.get(operation.id) ?? null),
+    );
+  }
+
+  @Get('balance-operations/export')
+  @ApiOperation({
+    summary: 'Exports an account’s balance journal as CSV',
+    description: `Same filters as the list, no pagination, newest first. Comma-separated, UTF-8, CRLF line endings, header row. More than ${BALANCE_EXPORT_MAX_ROWS} matching rows is a 400: narrow the period.`,
+  })
+  @ApiOkResponse({
+    description: 'text/csv attachment, not wrapped in the response envelope',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  async exportBalanceOperations(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: BalanceOperationFilterDto,
+  ): Promise<StreamableFile> {
+    await this.requireUser(id);
+
+    const operations = await this.wallets.exportOperations(
+      {
+        userId: id,
+        from: query.from,
+        to: query.to,
+        types: query.type,
+        kind: query.kind,
+      },
+      BALANCE_EXPORT_MAX_ROWS,
+    );
+    const debtIds = await this.debtIdsOf(operations);
+    const csv = balanceOperationsCsv(
+      operations.map((operation) =>
+        toBalanceOperationDto(operation, debtIds.get(operation.id) ?? null),
+      ),
+    );
+
+    return new StreamableFile(Buffer.from(csv, 'utf-8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="balance-operations-${id}.csv"`,
+    });
   }
 
   @Post('transfer')
@@ -99,5 +189,25 @@ export class AdminBalancesController {
     });
 
     return toTransactionDto(transaction);
+  }
+
+  private async requireUser(id: string): Promise<void> {
+    if (!(await this.directory.findById(id))) {
+      throw new NotFoundException('User not found');
+    }
+  }
+
+  private debtIdsOf(
+    operations: BalanceOperation[],
+  ): Promise<Map<number, number>> {
+    return this.debts.debtIdsByBalanceOperation(
+      operations
+        .filter(
+          (operation) =>
+            operation.type === BalanceOperationType.DebtIssued ||
+            operation.type === BalanceOperationType.DebtWriteOff,
+        )
+        .map((operation) => operation.id),
+    );
   }
 }

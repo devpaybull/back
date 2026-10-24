@@ -49,9 +49,13 @@ export class AdminTraderSettingsController {
 
     if (!user) throw new NotFoundException('User not found');
 
-    const row = await this.settings.ensure(id);
+    const row = await this.settings.findOrDefaults(id);
 
-    return toTraderSettingsDto(row, this.settings.insurancePayInMinOf(row));
+    return toTraderSettingsDto(row, {
+      insurancePayInMin: this.settings.insurancePayInMinOf(row),
+      insurancePayOutMin: this.settings.insurancePayOutMinOf(row),
+      nightStopThreshold: this.settings.nightStopThresholdOf(row),
+    });
   }
 
   @Patch()
@@ -96,6 +100,10 @@ export class AdminTraderSettingsController {
       reason,
     });
 
-    return toTraderSettingsDto(row, this.settings.insurancePayInMinOf(row));
+    return toTraderSettingsDto(row, {
+      insurancePayInMin: this.settings.insurancePayInMinOf(row),
+      insurancePayOutMin: this.settings.insurancePayOutMinOf(row),
+      nightStopThreshold: this.settings.nightStopThresholdOf(row),
+    });
   }
 }

@@ -3,9 +3,11 @@ import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
+import { BankDetailsSortField } from '../../bank-details/types/bank-details-sort-field';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Role } from '../../common/enums/role.enum';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -13,6 +15,7 @@ import { toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { User } from '../../users/entities/user.entity';
 import { UserStatus } from '../../users/types/user-status.enum';
+import { BankDetailsTurnoverService } from '../../transactions/services/bank-details-turnover.service';
 import { AdminBankDetailsController } from '../controllers/admin-bank-details.controller';
 import { ListBankDetailsQueryDto } from '../dto/list-bank-details-query.dto';
 import { SuperviseBankDetailsDto } from '../dto/supervise-bank-details.dto';
@@ -73,6 +76,14 @@ describe('AdminBankDetailsController', () => {
     findById: jest.fn(),
     supervise: jest.fn(),
     delete: jest.fn(),
+    listIds: jest.fn(),
+    findByIdsInOrder: jest.fn(),
+    counterpartyMinAmount: 5000,
+  };
+
+  const turnover = {
+    turnoverOfBankDetails: jest.fn(),
+    pageOfBankDetailsByTurnover: jest.fn(),
   };
 
   const query = (
@@ -89,10 +100,17 @@ describe('AdminBankDetailsController', () => {
     );
     bankDetails.findById.mockResolvedValue(details());
     bankDetails.supervise.mockResolvedValue(details({ active: false }));
+    turnover.turnoverOfBankDetails.mockImplementation(
+      async (ids: string[]) =>
+        new Map(ids.map((id) => [id, { total: 1000, today: 200, month: 700 }])),
+    );
 
     const module = await Test.createTestingModule({
       controllers: [AdminBankDetailsController],
-      providers: [{ provide: BankDetailsService, useValue: bankDetails }],
+      providers: [
+        { provide: BankDetailsService, useValue: bankDetails },
+        { provide: BankDetailsTurnoverService, useValue: turnover },
+      ],
     }).compile();
 
     controller = module.get(AdminBankDetailsController);
@@ -134,6 +152,105 @@ describe('AdminBankDetailsController', () => {
     expect(listed.items[0]).toMatchObject({
       userId: uuidOf(1),
       user: { id: uuidOf(1), login: 'trader@example.com', role: Role.Trader },
+    });
+  });
+
+  it('carries the turnover and the trader on every listed row, from one batched call', async () => {
+    bankDetails.list.mockResolvedValue(
+      toPage(
+        [[details({ id: uuidOf(100) }), details({ id: uuidOf(101) })], 2],
+        { page: 1, limit: 20 },
+      ),
+    );
+
+    const listed = await controller.list(query());
+
+    expect(turnover.turnoverOfBankDetails).toHaveBeenCalledTimes(1);
+    expect(turnover.turnoverOfBankDetails).toHaveBeenCalledWith(
+      [uuidOf(100), uuidOf(101)],
+      expect.any(Date),
+    );
+    expect(listed.items[0]).toMatchObject({
+      turnoverTotal: 1000,
+      turnoverToday: 200,
+      turnoverMonth: 700,
+      trader: { id: uuidOf(1), login: 'trader@example.com' },
+    });
+  });
+
+  it('carries the same fields on a single row', async () => {
+    await expect(controller.findOne(uuidOf(100))).resolves.toMatchObject({
+      turnoverTotal: 1000,
+      turnoverToday: 200,
+      turnoverMonth: 700,
+      trader: { id: uuidOf(1), login: 'trader@example.com' },
+    });
+  });
+
+  describe('sorting by turnoverTotal', () => {
+    beforeEach(() => {
+      bankDetails.listIds.mockResolvedValue([
+        uuidOf(100),
+        uuidOf(101),
+        uuidOf(102),
+      ]);
+      turnover.pageOfBankDetailsByTurnover.mockResolvedValue([
+        uuidOf(102),
+        uuidOf(100),
+      ]);
+      bankDetails.findByIdsInOrder.mockResolvedValue([
+        details({ id: uuidOf(102) }),
+        details({ id: uuidOf(100) }),
+      ]);
+    });
+
+    it('filters first, orders the ids in SQL, then pages by the requested offset', async () => {
+      const listed = await controller.list(
+        query({
+          sortBy: BankDetailsSortField.TurnoverTotal,
+          sortOrder: 'asc',
+          page: '2',
+          limit: '2',
+          banned: 'false',
+        }),
+      );
+
+      expect(bankDetails.list).not.toHaveBeenCalled();
+      expect(bankDetails.listIds).toHaveBeenCalledWith(
+        expect.objectContaining({ banned: false }),
+      );
+      expect(turnover.pageOfBankDetailsByTurnover).toHaveBeenCalledWith(
+        [uuidOf(100), uuidOf(101), uuidOf(102)],
+        'ASC',
+        2,
+        2,
+      );
+      expect(listed.items.map((row) => row.id)).toEqual([
+        uuidOf(102),
+        uuidOf(100),
+      ]);
+      expect(listed.meta).toEqual({ total: 3, page: 2, limit: 2, pages: 2 });
+    });
+
+    it('sorts descending by default', async () => {
+      await controller.list(
+        query({ sortBy: BankDetailsSortField.TurnoverTotal }),
+      );
+
+      expect(turnover.pageOfBankDetailsByTurnover).toHaveBeenCalledWith(
+        expect.any(Array),
+        'DESC',
+        0,
+        20,
+      );
+    });
+
+    it('accepts turnoverTotal as a sort field', () => {
+      expect(
+        validateSync(
+          plainToInstance(ListBankDetailsQueryDto, { sortBy: 'turnoverTotal' }),
+        ),
+      ).toEqual([]);
     });
   });
 
@@ -200,9 +317,9 @@ describe('AdminBankDetailsController', () => {
   });
 
   it('deletes any account’s details', async () => {
-    await controller.remove(uuidOf(100));
+    await controller.remove(uuidOf(100), admin);
 
-    expect(bankDetails.delete).toHaveBeenCalledWith(uuidOf(100));
+    expect(bankDetails.delete).toHaveBeenCalledWith(uuidOf(100), uuidOf(9));
   });
 
   it('has no way to switch active through the patch, so there is one route to it', () => {
@@ -229,4 +346,18 @@ describe('AdminBankDetailsController', () => {
     );
     expect(bankDetails.supervise).not.toHaveBeenCalled();
   });
+});
+
+describe('AdminBankDetailsController switch status codes', () => {
+  it.each(['enable', 'disable'])(
+    'answers %s with 200, since a switch creates nothing',
+    (handler) => {
+      expect(
+        Reflect.getMetadata(
+          HTTP_CODE_METADATA,
+          AdminBankDetailsController.prototype[handler],
+        ),
+      ).toBe(200);
+    },
+  );
 });

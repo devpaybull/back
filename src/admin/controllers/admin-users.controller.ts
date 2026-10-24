@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
   Get,
+  HttpCode,
   HttpStatus,
   NotFoundException,
   Param,
@@ -15,6 +17,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { LoginLinkService } from '../../auth/services/login-link.service';
+import { LOGIN_LINK_PROTECTED_ROLES } from '../../auth/types/login-link-protected-roles';
+import { PasswordService } from '../../auth/services/password.service';
 import { SessionService } from '../../auth/services/session.service';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
@@ -37,9 +42,13 @@ import { UserAdministrationService } from '../../users/services/user-administrat
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserEnrolmentService } from '../../users/services/user-enrolment.service';
 import { UserTeamService } from '../../users/services/user-team.service';
+import { AUTHENTICATABLE_STATUSES } from '../../users/types/authenticatable-statuses';
+import { UserStatus } from '../../users/types/user-status.enum';
 import { AddLeadDto } from '../dto/add-lead.dto';
 import { toBalancesDto } from '../dto/balances.dto';
+import { GeneratedPasswordDto } from '../dto/generated-password.dto';
 import { ListUsersQueryDto } from '../dto/list-users-query.dto';
+import { LoginLinkDto } from '../dto/login-link.dto';
 import { TeamMemberDto } from '../dto/team-member.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { toUserDto, UserDto } from '../dto/user.dto';
@@ -68,6 +77,8 @@ export class AdminUsersController {
     private readonly traderSettings: TraderSettingsService,
     private readonly rates: RateService,
     private readonly merchants: MerchantsService,
+    private readonly passwords: PasswordService,
+    private readonly loginLinks: LoginLinkService,
   ) {}
 
   private async withDetails(users: User[]): Promise<UserListItemDto[]> {
@@ -100,29 +111,21 @@ export class AdminUsersController {
     const merchantById = new Map(
       merchants.map((merchant) => [merchant.id, merchant]),
     );
-    const effectiveRates = (
-      scope: RateScope,
-      userIds: string[],
-    ): Promise<EffectiveGeneralRates | null> =>
-      userIds.length
-        ? this.rates.getEffectiveGeneralRates(
-            scope,
-            userIds.map((userId) => ({
-              userId,
-              individualEnabled:
-                settingsByUser.get(userId)?.individualRatesEnabled ?? false,
-            })),
-          )
-        : Promise.resolve(null);
-    const [traderRates, leadRates] = await Promise.all([
-      effectiveRates(RateScope.Trader, traderIds),
-      effectiveRates(RateScope.Lead, leadIds),
-    ]);
+    const traderRates: EffectiveGeneralRates | null = traderIds.length
+      ? await this.rates.getEffectiveGeneralRates(
+          RateScope.Trader,
+          traderIds.map((userId) => ({
+            userId,
+            individualEnabled:
+              settingsByUser.get(userId)?.individualRatesEnabled ?? false,
+          })),
+        )
+      : null;
 
     return users.map((user) => {
       const isTrader = user.role === Role.Trader;
       const isLead = user.role === Role.LeadTrader;
-      const rates = isTrader ? traderRates : isLead ? leadRates : null;
+      const rates = isTrader ? traderRates : null;
       const wallet = isTrader || isLead ? walletByUser.get(user.id) : null;
       const merchant = MERCHANT_ROLES.includes(user.role)
         ? merchantById.get(user.merchantId)
@@ -175,6 +178,24 @@ export class AdminUsersController {
     return new Page(await this.withDetails(page.items), page.meta);
   }
 
+  @Get(':id')
+  @ApiOperation({
+    summary:
+      'Reads one user, in the same shape as a list row, whatever its status',
+  })
+  @ApiEnvelopeResponse(UserListItemDto)
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserListItemDto> {
+    const target = await this.directory.findById(id);
+
+    if (!target) throw new NotFoundException('User not found');
+
+    const [row] = await this.withDetails([target]);
+
+    return row;
+  }
+
   @Post(':id/leads')
   @WriteAccess()
   @ApiOperation({ summary: 'Puts a trader under a lead trader' })
@@ -188,7 +209,7 @@ export class AdminUsersController {
     @CurrentUser() admin: AuthenticatedUser,
   ): Promise<TeamMemberDto[]> {
     await this.assertMayEdit(id, admin);
-    await this.team.addLead(id, dto.leadUserId, admin.id);
+    await this.team.addLead(id, dto, admin.id);
 
     return (await this.team.leadsOf([id])).get(id) ?? [];
   }
@@ -208,6 +229,76 @@ export class AdminUsersController {
     return (await this.team.leadsOf([id])).get(id) ?? [];
   }
 
+  @Post(':id/sessions/revoke')
+  @HttpCode(HttpStatus.OK)
+  @WriteAccess()
+  @ApiOperation({ summary: 'Signs the user out of every session' })
+  @ApiEnvelopeResponse()
+  async revokeSessions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<null> {
+    await this.assertMayEdit(id, admin);
+    await this.sessions.revokeAllSessionsAudited(id, admin.id);
+
+    return null;
+  }
+
+  @Post(':id/password/reset')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.Superadmin)
+  @WriteAccess()
+  @ApiOperation({
+    summary:
+      'Replaces the password with a generated one, shown once, and signs the user out everywhere',
+  })
+  @ApiEnvelopeResponse(GeneratedPasswordDto)
+  async resetPassword(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<GeneratedPasswordDto> {
+    await this.assertMayEdit(id, admin);
+
+    return {
+      password: await this.passwords.issueGeneratedPassword(id, admin.id),
+    };
+  }
+
+  @Post(':id/login-link')
+  @Roles(Role.Superadmin)
+  @WriteAccess()
+  @ApiOperation({
+    summary:
+      'Issues a one-time link that opens an ordinary session of the user, shown once',
+  })
+  @ApiEnvelopeResponse(LoginLinkDto, { status: HttpStatus.CREATED })
+  async issueLoginLink(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<LoginLinkDto> {
+    if (admin.id === id) {
+      throw new ForbiddenException('Cannot issue a login link for yourself');
+    }
+
+    const target = await this.directory.findById(id);
+
+    if (!target) throw new NotFoundException('User not found');
+
+    if (LOGIN_LINK_PROTECTED_ROLES.includes(target.role)) {
+      throw new ForbiddenException(
+        `Cannot issue a login link for a ${target.role}`,
+      );
+    }
+
+    if (!AUTHENTICATABLE_STATUSES.includes(target.status)) {
+      throw new ConflictException(
+        `Cannot issue a login link for a ${target.status} account`,
+      );
+    }
+
+    return this.loginLinks.issue(id, admin.id);
+  }
+
   @Patch(':id')
   @WriteAccess()
   @ApiOperation({ summary: 'Updates a user account' })
@@ -221,6 +312,15 @@ export class AdminUsersController {
 
     if (Object.keys(dto).length === 0) {
       throw new BadRequestException('No changes were given');
+    }
+
+    if (
+      admin.role !== Role.Superadmin &&
+      (dto.password !== undefined || resetTwoFactor !== undefined)
+    ) {
+      throw new ForbiddenException(
+        'Only a superadmin may set a password or reset the second factor',
+      );
     }
 
     if (admin.id === id) {
@@ -239,16 +339,33 @@ export class AdminUsersController {
       throw new ForbiddenException(`Cannot grant the ${changes.role} role`);
     }
 
-    let edited = Object.keys(changes).length
-      ? await this.administration.update(id, changes)
-      : target;
+    let edited = target;
 
     if (changes.password !== undefined) {
-      await this.sessions.revokeAllSessions(id);
+      edited = await this.passwords.setPassword(id, changes, admin.id);
+    } else if (Object.keys(changes).length) {
+      edited = await this.administration.update(id, changes);
     }
 
     if (resetTwoFactor) {
       edited = await this.enrolment.resetTwoFactor(id);
+    }
+
+    const leftSuperadminAuthority =
+      target.role === Role.Superadmin &&
+      (edited.role !== Role.Superadmin || edited.status !== UserStatus.Active);
+
+    if (leftSuperadminAuthority) {
+      await this.sessions.revokeImpersonationSessions(id);
+      await this.loginLinks.invalidateIssuedBy(id);
+    }
+
+    const becameLinkProtected =
+      !LOGIN_LINK_PROTECTED_ROLES.includes(target.role) &&
+      LOGIN_LINK_PROTECTED_ROLES.includes(edited.role);
+
+    if (becameLinkProtected) {
+      await this.sessions.revokeImpersonatedSessions(id);
     }
 
     return toUserDto(edited);

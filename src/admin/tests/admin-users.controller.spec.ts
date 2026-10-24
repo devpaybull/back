@@ -1,17 +1,23 @@
 import {
   BadRequestException,
   ConflictException,
+  ExecutionContext,
   ForbiddenException,
   NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
+import { LoginLinkService } from '../../auth/services/login-link.service';
+import { PasswordService } from '../../auth/services/password.service';
 import { SessionService } from '../../auth/services/session.service';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page, toPage } from '../../common/types/page';
@@ -24,7 +30,6 @@ import { RateService } from '../../transactions/services/rate.service';
 import { WalletService } from '../../transactions/services/wallet.service';
 import { RateScope } from '../../transactions/types/rate-scope.enum';
 import { RateSubject } from '../../transactions/types/rate-subject';
-import { TransactionMethod } from '../../transactions/types/transaction-method.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserAdministrationService } from '../../users/services/user-administration.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -46,7 +51,9 @@ describe('AdminUsersController', () => {
   const userEnrolment = { resetTwoFactor: jest.fn() };
 
   const sessions = {
-    revokeAllSessions: jest.fn(),
+    revokeAllSessionsAudited: jest.fn(),
+    revokeImpersonationSessions: jest.fn(),
+    revokeImpersonatedSessions: jest.fn(),
   };
 
   const team = {
@@ -67,14 +74,16 @@ describe('AdminUsersController', () => {
 
   const merchants = { findByIds: jest.fn() };
 
+  const passwords = {
+    issueGeneratedPassword: jest.fn(),
+    setPassword: jest.fn(),
+  };
+
+  const loginLinks = { issue: jest.fn(), invalidateIssuedBy: jest.fn() };
+
   const GLOBAL_MIN = 500;
 
-  const traderBase = [
-    { method: TransactionMethod.Sbp, payInPercent: 8.5, payOutPercent: 1.5 },
-  ];
-  const leadBase = [
-    { method: TransactionMethod.Sbp, payInPercent: 2, payOutPercent: 0.5 },
-  ];
+  const traderBase = [{ method: 'sbp', payInPercent: 8.5, payOutPercent: 1.5 }];
 
   const issuer = (role: Role, id = uuidOf(1)): AuthenticatedUser => ({
     id,
@@ -121,14 +130,10 @@ describe('AdminUsersController', () => {
         settings?.insurancePayInMin ?? GLOBAL_MIN,
     );
     rateService.getEffectiveGeneralRates.mockImplementation(
-      async (scope: RateScope, subjects: RateSubject[]) => {
-        const base = scope === RateScope.Lead ? leadBase : traderBase;
-
-        return {
-          base,
-          bySubject: new Map(subjects.map(({ userId }) => [userId, base])),
-        };
-      },
+      async (_scope: RateScope, subjects: RateSubject[]) => ({
+        base: traderBase,
+        bySubject: new Map(subjects.map(({ userId }) => [userId, traderBase])),
+      }),
     );
     merchants.findByIds.mockResolvedValue([]);
 
@@ -144,6 +149,8 @@ describe('AdminUsersController', () => {
         { provide: TraderSettingsService, useValue: traderSettings },
         { provide: RateService, useValue: rateService },
         { provide: MerchantsService, useValue: merchants },
+        { provide: PasswordService, useValue: passwords },
+        { provide: LoginLinkService, useValue: loginLinks },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: () => '' } },
       ],
@@ -176,6 +183,86 @@ describe('AdminUsersController', () => {
     ).toBeUndefined();
   });
 
+  it('leaves the single read unmarked as a write', () => {
+    expect(
+      Reflect.getMetadata(
+        WRITE_ACCESS_METADATA_KEY,
+        AdminUsersController.prototype.findOne,
+      ),
+    ).toBeUndefined();
+  });
+
+  describe('findOne', () => {
+    it('answers with the list-row shape and the role details', async () => {
+      userDirectory.findById.mockResolvedValue(
+        user({ telegramId: '777', telegramGroups: 'a / b' }),
+      );
+      team.leadsOf.mockResolvedValue(
+        new Map([[uuidOf(7), [{ id: uuidOf(20), login: 'lead@example.com' }]]]),
+      );
+
+      const row = await controller.findOne(uuidOf(7));
+
+      expect(userDirectory.findById).toHaveBeenCalledWith(uuidOf(7));
+      expect(row).toMatchObject({
+        id: uuidOf(7),
+        telegramId: '777',
+        telegramGroups: 'a / b',
+        leads: [{ id: uuidOf(20), login: 'lead@example.com' }],
+        subordinates: null,
+        merchant: null,
+      });
+    });
+
+    it('agrees with the list for the same account', async () => {
+      const account = user();
+      userDirectory.findById.mockResolvedValue(account);
+      userDirectory.list.mockResolvedValue(pageOf([account]));
+
+      const [listed] = (await controller.list(query())).items;
+
+      expect(await controller.findOne(uuidOf(7))).toEqual(listed);
+    });
+
+    it.each([UserStatus.Blocked, UserStatus.PendingTwoFactor])(
+      'still shows a %s account',
+      async (status) => {
+        userDirectory.findById.mockResolvedValue(user({ status }));
+
+        await expect(controller.findOne(uuidOf(7))).resolves.toMatchObject({
+          status,
+        });
+      },
+    );
+
+    it('is a 404 for an unknown id', async () => {
+      userDirectory.findById.mockResolvedValue(null);
+
+      await expect(controller.findOne(uuidOf(404))).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('does not apply the issuing policy to a read', async () => {
+      userDirectory.findById.mockResolvedValue(user({ role: Role.Superadmin }));
+
+      await expect(controller.findOne(uuidOf(7))).resolves.toMatchObject({
+        role: Role.Superadmin,
+      });
+    });
+
+    it('parses the id as a uuid', () => {
+      const routeArgs = Reflect.getMetadata(
+        '__routeArguments__',
+        AdminUsersController,
+        'findOne',
+      ) as Record<string, { pipes: unknown[] }>;
+      const [argument] = Object.values(routeArgs);
+
+      expect(argument.pipes).toEqual([ParseUUIDPipe]);
+    });
+  });
+
   describe('list', () => {
     it('hands the whole query to the module that owns the data', async () => {
       userDirectory.list.mockResolvedValue(pageOf([user()]));
@@ -184,7 +271,7 @@ describe('AdminUsersController', () => {
         page: 2,
         limit: 50,
         search: 'durov',
-        role: Role.Trader,
+        role: [Role.Trader],
         status: UserStatus.Active,
         sortBy: UserSortField.Email,
         sortOrder: SortOrder.Asc,
@@ -240,11 +327,35 @@ describe('AdminUsersController', () => {
         'role',
         'status',
         'subordinates',
+        'telegramGroups',
+        'telegramId',
         'telegramUsername',
       ]);
     });
 
-    it('falls back to the telegram username as the login', async () => {
+    it('takes the telegram username as the login over the email', async () => {
+      userDirectory.list.mockResolvedValue(
+        pageOf([
+          user({ email: 'durov@example.com', telegramUsername: 'durov' }),
+        ]),
+      );
+
+      const [listed] = (await controller.list(query())).items;
+
+      expect(listed.login).toBe('durov');
+    });
+
+    it('falls back to the email as the login when there is no telegram username', async () => {
+      userDirectory.list.mockResolvedValue(
+        pageOf([user({ email: 'user@example.com', telegramUsername: null })]),
+      );
+
+      const [listed] = (await controller.list(query())).items;
+
+      expect(listed.login).toBe('user@example.com');
+    });
+
+    it('takes the telegram username as the login when there is no email', async () => {
       userDirectory.list.mockResolvedValue(
         pageOf([user({ email: null, telegramUsername: '@durov' })]),
       );
@@ -321,19 +432,15 @@ describe('AdminUsersController', () => {
         expect(row.leads).toEqual([]);
       });
 
-      it('gives a lead trader the lead-scope rates and its subordinates', async () => {
+      it('gives a lead trader its subordinates and no rates, since a lead has no rate of its own', async () => {
         team.subordinatesOf.mockResolvedValue(
           new Map([[uuidOf(7), [{ id: uuidOf(30), login: 'trader3_tg' }]]]),
         );
 
         const [row] = await listed([user({ role: Role.LeadTrader })]);
 
-        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
-        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
-          RateScope.Lead,
-          [{ userId: uuidOf(7), individualEnabled: false }],
-        );
-        expect(row.rates).toEqual(leadBase);
+        expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
+        expect(row.rates).toBeNull();
         expect(row.insurancePayInMin).toBe(GLOBAL_MIN);
         expect(row.subordinates).toEqual([
           { id: uuidOf(30), login: 'trader3_tg' },
@@ -348,7 +455,7 @@ describe('AdminUsersController', () => {
         ]);
         const individual = [
           {
-            method: TransactionMethod.Sbp,
+            method: 'sbp',
             payInPercent: 8,
             payOutPercent: 1.2,
           },
@@ -466,13 +573,9 @@ describe('AdminUsersController', () => {
           uuidOf(50),
           uuidOf(51),
         ]);
-        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(2);
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
         expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
           RateScope.Trader,
-          expect.any(Array),
-        );
-        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
-          RateScope.Lead,
           expect.any(Array),
         );
       });
@@ -491,7 +594,7 @@ describe('AdminUsersController', () => {
         expect(merchants.findByIds).toHaveBeenCalledWith([]);
       });
 
-      it('asks for the lead scope only when a lead is on the page', async () => {
+      it('asks for the trader scope once for a page of traders', async () => {
         await listed([user()]);
 
         expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
@@ -520,9 +623,16 @@ describe('AdminUsersController', () => {
       team.leadsOf.mockResolvedValue(new Map([[uuidOf(7), leads]]));
     });
 
+    const assignment = {
+      leadUserId: uuidOf(20),
+      currencyId: 1,
+      payInPercent: 2.5,
+      payOutPercent: 0.5,
+    };
+
     const calls = {
       addLead: (editor: AuthenticatedUser, id = uuidOf(7)) =>
-        controller.addLead(id, { leadUserId: uuidOf(20) }, editor),
+        controller.addLead(id, assignment, editor),
       removeLead: (editor: AuthenticatedUser, id = uuidOf(7)) =>
         controller.removeLead(id, uuidOf(20), editor),
     };
@@ -532,7 +642,7 @@ describe('AdminUsersController', () => {
 
       expect(team.addLead).toHaveBeenCalledWith(
         uuidOf(7),
-        uuidOf(20),
+        assignment,
         uuidOf(1),
       );
       expect(team.leadsOf).toHaveBeenCalledWith([uuidOf(7)]);
@@ -677,17 +787,19 @@ describe('AdminUsersController', () => {
 
     it('changes the password on its own', async () => {
       userDirectory.findById.mockResolvedValue(user());
-      userAdministration.update.mockResolvedValue(user());
+      passwords.setPassword.mockResolvedValue(user());
 
       const edited = await controller.update(
         uuidOf(7),
         { password: 'a brand new password' },
-        admin,
+        superadmin,
       );
 
-      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(7), {
-        password: 'a brand new password',
-      });
+      expect(passwords.setPassword).toHaveBeenCalledWith(
+        uuidOf(7),
+        { password: 'a brand new password' },
+        superadmin.id,
+      );
       expect(edited).not.toHaveProperty('password');
       expect(edited).not.toHaveProperty('passwordHash');
     });
@@ -833,22 +945,28 @@ describe('AdminUsersController', () => {
       expect(edited.role).toBe(Role.Cascade);
     });
 
-    it('revokes every session after a password change', async () => {
+    it('writes a password together with its session revocation in the owning module', async () => {
       userDirectory.findById.mockResolvedValue(user());
-      userAdministration.update.mockResolvedValue(user());
+      passwords.setPassword.mockResolvedValue(user());
 
       await controller.update(
         uuidOf(7),
-        { password: 'a brand new password' },
-        admin,
+        { password: 'a brand new password', status: UserStatus.Suspended },
+        superadmin,
       );
 
-      expect(sessions.revokeAllSessions).toHaveBeenCalledWith(uuidOf(7));
+      expect(passwords.setPassword).toHaveBeenCalledWith(
+        uuidOf(7),
+        { password: 'a brand new password', status: UserStatus.Suspended },
+        superadmin.id,
+      );
+      expect(userAdministration.update).not.toHaveBeenCalled();
+      expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
     });
 
-    it('revokes sessions only after the update has succeeded', async () => {
+    it('does not answer success when the password could not be written', async () => {
       userDirectory.findById.mockResolvedValue(user());
-      userAdministration.update.mockRejectedValue(
+      passwords.setPassword.mockRejectedValue(
         new Error('conflicting identifier'),
       );
 
@@ -856,11 +974,9 @@ describe('AdminUsersController', () => {
         controller.update(
           uuidOf(7),
           { password: 'a brand new password' },
-          admin,
+          superadmin,
         ),
       ).rejects.toThrow('conflicting identifier');
-
-      expect(sessions.revokeAllSessions).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -874,7 +990,7 @@ describe('AdminUsersController', () => {
 
       await controller.update(uuidOf(7), changes, admin);
 
-      expect(sessions.revokeAllSessions).not.toHaveBeenCalled();
+      expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
     });
 
     it('resets the second factor through the owning module', async () => {
@@ -886,7 +1002,7 @@ describe('AdminUsersController', () => {
       const edited = await controller.update(
         uuidOf(7),
         { resetTwoFactor: true },
-        admin,
+        superadmin,
       );
 
       expect(userEnrolment.resetTwoFactor).toHaveBeenCalledWith(uuidOf(7));
@@ -905,7 +1021,7 @@ describe('AdminUsersController', () => {
       const edited = await controller.update(
         uuidOf(7),
         { resetTwoFactor: true },
-        admin,
+        superadmin,
       );
 
       expect(edited).not.toHaveProperty('secret');
@@ -924,7 +1040,7 @@ describe('AdminUsersController', () => {
       await controller.update(
         uuidOf(7),
         { status: UserStatus.Suspended, resetTwoFactor: false },
-        admin,
+        superadmin,
       );
 
       expect(userEnrolment.resetTwoFactor).not.toHaveBeenCalled();
@@ -935,7 +1051,7 @@ describe('AdminUsersController', () => {
 
     it('applies the changes before the side effects and returns the last state', async () => {
       userDirectory.findById.mockResolvedValue(user());
-      userAdministration.update.mockResolvedValue(
+      passwords.setPassword.mockResolvedValue(
         user({ email: 'new@example.com' }),
       );
       userEnrolment.resetTwoFactor.mockResolvedValue(
@@ -952,14 +1068,14 @@ describe('AdminUsersController', () => {
           password: 'a brand new password',
           resetTwoFactor: true,
         },
-        admin,
+        superadmin,
       );
 
-      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(7), {
-        email: 'new@example.com',
-        password: 'a brand new password',
-      });
-      expect(sessions.revokeAllSessions).toHaveBeenCalledWith(uuidOf(7));
+      expect(passwords.setPassword).toHaveBeenCalledWith(
+        uuidOf(7),
+        { email: 'new@example.com', password: 'a brand new password' },
+        superadmin.id,
+      );
       expect(userEnrolment.resetTwoFactor).toHaveBeenCalledWith(uuidOf(7));
       expect(edited.email).toBe('new@example.com');
       expect(edited.status).toBe(UserStatus.PendingTwoFactor);
@@ -991,6 +1107,518 @@ describe('AdminUsersController', () => {
       ).rejects.toThrow(NotFoundException);
 
       expect(userAdministration.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the fields only a superadmin may send', () => {
+    it.each([
+      ['a password', { password: 'a brand new password' }],
+      ['a second-factor reset', { resetTwoFactor: true }],
+      ['a second-factor reset set to false', { resetTwoFactor: false }],
+      [
+        'a password beside an ordinary field',
+        { status: UserStatus.Suspended, password: 'a brand new password' },
+      ],
+    ])('refuses an admin sending %s', async (_label, changes) => {
+      userDirectory.findById.mockResolvedValue(user());
+
+      await expect(
+        controller.update(uuidOf(7), changes, admin),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(userAdministration.update).not.toHaveBeenCalled();
+      expect(userEnrolment.resetTwoFactor).not.toHaveBeenCalled();
+      expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
+    });
+
+    it('still lets an admin change the other fields', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      userAdministration.update.mockResolvedValue(
+        user({ status: UserStatus.Suspended }),
+      );
+
+      const edited = await controller.update(
+        uuidOf(7),
+        { status: UserStatus.Suspended },
+        admin,
+      );
+
+      expect(edited.status).toBe(UserStatus.Suspended);
+    });
+
+    it('lets a superadmin set a password', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      passwords.setPassword.mockResolvedValue(user());
+
+      await controller.update(
+        uuidOf(7),
+        { password: 'a brand new password' },
+        superadmin,
+      );
+
+      expect(passwords.setPassword).toHaveBeenCalledWith(
+        uuidOf(7),
+        { password: 'a brand new password' },
+        superadmin.id,
+      );
+    });
+  });
+
+  describe('blocking', () => {
+    it('lets an admin block a trader', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      userAdministration.update.mockResolvedValue(
+        user({ status: UserStatus.Blocked }),
+      );
+
+      const edited = await controller.update(
+        uuidOf(7),
+        { status: UserStatus.Blocked },
+        admin,
+      );
+
+      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(7), {
+        status: UserStatus.Blocked,
+      });
+      expect(edited.status).toBe(UserStatus.Blocked);
+    });
+
+    it('lets an admin unblock a trader', async () => {
+      userDirectory.findById.mockResolvedValue(
+        user({ status: UserStatus.Blocked }),
+      );
+      userAdministration.update.mockResolvedValue(
+        user({ status: UserStatus.Active }),
+      );
+
+      const edited = await controller.update(
+        uuidOf(7),
+        { status: UserStatus.Active },
+        admin,
+      );
+
+      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(7), {
+        status: UserStatus.Active,
+      });
+      expect(edited.status).toBe(UserStatus.Active);
+    });
+  });
+
+  describe('the sessions a superadmin opened through login links', () => {
+    const otherSuperadmin = (overrides: Partial<User> = {}): User =>
+      user({ role: Role.Superadmin, ...overrides });
+
+    it.each([
+      [
+        'blocked',
+        { status: UserStatus.Blocked },
+        { status: UserStatus.Blocked },
+      ],
+      [
+        'suspended',
+        { status: UserStatus.Suspended },
+        { status: UserStatus.Suspended },
+      ],
+      ['demoted', { role: Role.Admin }, { role: Role.Admin }],
+      [
+        'demoted and suspended at once',
+        { role: Role.Trader, status: UserStatus.Suspended },
+        { role: Role.Trader, status: UserStatus.Suspended },
+      ],
+    ])(
+      'are revoked when the superadmin is %s',
+      async (_label, changes, after) => {
+        userDirectory.findById.mockResolvedValue(otherSuperadmin());
+        userAdministration.update.mockResolvedValue(otherSuperadmin(after));
+
+        await controller.update(uuidOf(7), changes, superadmin);
+
+        expect(sessions.revokeImpersonationSessions).toHaveBeenCalledWith(
+          uuidOf(7),
+        );
+        expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
+        expect(loginLinks.invalidateIssuedBy).toHaveBeenCalledWith(uuidOf(7));
+      },
+    );
+
+    it('are revoked when the second factor of the superadmin is reset', async () => {
+      userDirectory.findById.mockResolvedValue(otherSuperadmin());
+      userEnrolment.resetTwoFactor.mockResolvedValue(
+        otherSuperadmin({ status: UserStatus.PendingTwoFactor }),
+      );
+
+      await controller.update(uuidOf(7), { resetTwoFactor: true }, superadmin);
+
+      expect(sessions.revokeImpersonationSessions).toHaveBeenCalledWith(
+        uuidOf(7),
+      );
+    });
+
+    it('are revoked only after the change itself was written', async () => {
+      const order: string[] = [];
+      userDirectory.findById.mockResolvedValue(otherSuperadmin());
+      userAdministration.update.mockImplementation(async () => {
+        order.push('update');
+
+        return otherSuperadmin({ status: UserStatus.Blocked });
+      });
+      sessions.revokeImpersonationSessions.mockImplementation(async () => {
+        order.push('revoke');
+      });
+
+      await controller.update(
+        uuidOf(7),
+        { status: UserStatus.Blocked },
+        superadmin,
+      );
+
+      expect(order).toEqual(['update', 'revoke']);
+    });
+
+    it.each([
+      ['given another email', { email: 'root2@example.com' }],
+      ['re-confirmed as a superadmin', { role: Role.Superadmin }],
+    ])(
+      'are left alone when the superadmin is only %s',
+      async (_label, changes) => {
+        userDirectory.findById.mockResolvedValue(otherSuperadmin());
+        userAdministration.update.mockResolvedValue(
+          otherSuperadmin(changes as Partial<User>),
+        );
+
+        await controller.update(uuidOf(7), changes, superadmin);
+
+        expect(sessions.revokeImpersonationSessions).not.toHaveBeenCalled();
+        expect(loginLinks.invalidateIssuedBy).not.toHaveBeenCalled();
+      },
+    );
+
+    it('are not looked for when a trader is blocked', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      userAdministration.update.mockResolvedValue(
+        user({ status: UserStatus.Blocked }),
+      );
+
+      await controller.update(uuidOf(7), { status: UserStatus.Blocked }, admin);
+
+      expect(sessions.revokeImpersonationSessions).not.toHaveBeenCalled();
+      expect(loginLinks.invalidateIssuedBy).not.toHaveBeenCalled();
+    });
+
+    it('are not looked for when an admin is promoted to superadmin', async () => {
+      userDirectory.findById.mockResolvedValue(user({ role: Role.Admin }));
+      userAdministration.update.mockResolvedValue(
+        user({ role: Role.Superadmin }),
+      );
+
+      await controller.update(uuidOf(7), { role: Role.Superadmin }, superadmin);
+
+      expect(sessions.revokeImpersonationSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('link sessions opened into an account that is promoted', () => {
+    it.each([Role.Admin, Role.Superadmin])(
+      'are revoked when a trader becomes %s, after the change was written',
+      async (role) => {
+        const order: string[] = [];
+        userDirectory.findById.mockResolvedValue(user());
+        userAdministration.update.mockImplementation(async () => {
+          order.push('update');
+
+          return user({ role });
+        });
+        sessions.revokeImpersonatedSessions.mockImplementation(async () => {
+          order.push('revoke');
+        });
+
+        await controller.update(uuidOf(7), { role }, superadmin);
+
+        expect(sessions.revokeImpersonatedSessions).toHaveBeenCalledWith(
+          uuidOf(7),
+        );
+        expect(order).toEqual(['update', 'revoke']);
+      },
+    );
+
+    it.each([
+      ['a trader stays unprotected', user(), Role.LeadTrader],
+      ['an admin is promoted', user({ role: Role.Admin }), Role.Superadmin],
+    ])('are not looked for when %s', async (_label, before, role) => {
+      userDirectory.findById.mockResolvedValue(before);
+      userAdministration.update.mockResolvedValue(user({ role }));
+
+      await controller.update(uuidOf(7), { role }, superadmin);
+
+      expect(sessions.revokeImpersonatedSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('who reaches the superadmin-only handlers', () => {
+    const contextFor = (
+      handler: (...args: never[]) => unknown,
+      caller: AuthenticatedUser,
+    ): ExecutionContext =>
+      ({
+        getHandler: () => handler,
+        getClass: () => AdminUsersController,
+        switchToHttp: () => ({ getRequest: () => ({ user: caller }) }),
+      }) as unknown as ExecutionContext;
+
+    const guard = new RolesGuard(new Reflector());
+
+    it.each(['resetPassword', 'issueLoginLink'] as const)(
+      '%s refuses an admin before the handler runs',
+      (name) => {
+        expect(() =>
+          guard.canActivate(
+            contextFor(AdminUsersController.prototype[name], admin),
+          ),
+        ).toThrow(ForbiddenException);
+      },
+    );
+
+    it.each(['resetPassword', 'issueLoginLink'] as const)(
+      '%s lets a superadmin through',
+      (name) => {
+        expect(
+          guard.canActivate(
+            contextFor(AdminUsersController.prototype[name], superadmin),
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it('revokeSessions lets an admin through', () => {
+      expect(
+        guard.canActivate(
+          contextFor(AdminUsersController.prototype.revokeSessions, admin),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe('revokeSessions', () => {
+    it('is a write open to admins and superadmins', () => {
+      const handler = AdminUsersController.prototype.revokeSessions;
+
+      expect(Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, handler)).toBe(
+        true,
+      );
+      expect(Reflect.getMetadata(ROLES_METADATA_KEY, handler)).toBeUndefined();
+    });
+
+    it('revokes every session of the user through the owning module', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+
+      await expect(
+        controller.revokeSessions(uuidOf(7), admin),
+      ).resolves.toBeNull();
+
+      expect(sessions.revokeAllSessionsAudited).toHaveBeenCalledWith(
+        uuidOf(7),
+        admin.id,
+      );
+    });
+
+    it('answers the same for a user with no session, so a repeat is harmless', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      sessions.revokeAllSessionsAudited.mockResolvedValue(undefined);
+
+      await controller.revokeSessions(uuidOf(7), admin);
+      await expect(
+        controller.revokeSessions(uuidOf(7), admin),
+      ).resolves.toBeNull();
+
+      expect(sessions.revokeAllSessionsAudited).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports a target that does not exist as not found', async () => {
+      userDirectory.findById.mockResolvedValue(null);
+
+      await expect(controller.revokeSessions(uuidOf(7), admin)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
+    });
+
+    it('refuses the caller signing themselves out this way', async () => {
+      await expect(controller.revokeSessions(admin.id, admin)).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
+    });
+
+    it.each([Role.Admin, Role.Superadmin])(
+      'refuses an admin acting on a %s',
+      async (role) => {
+        userDirectory.findById.mockResolvedValue(user({ role }));
+
+        await expect(
+          controller.revokeSessions(uuidOf(7), admin),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(sessions.revokeAllSessionsAudited).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lets a superadmin sign out an admin', async () => {
+      userDirectory.findById.mockResolvedValue(user({ role: Role.Admin }));
+
+      await controller.revokeSessions(uuidOf(7), superadmin);
+
+      expect(sessions.revokeAllSessionsAudited).toHaveBeenCalledWith(
+        uuidOf(7),
+        superadmin.id,
+      );
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('is a write reserved to superadmins', () => {
+      const handler = AdminUsersController.prototype.resetPassword;
+
+      expect(Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, handler)).toBe(
+        true,
+      );
+      expect(Reflect.getMetadata(ROLES_METADATA_KEY, handler)).toEqual([
+        Role.Superadmin,
+      ]);
+    });
+
+    it('answers with the generated password and nothing else', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      passwords.issueGeneratedPassword.mockResolvedValue('q8ZtR2mWk4Ya');
+
+      const result = await controller.resetPassword(uuidOf(7), superadmin);
+
+      expect(passwords.issueGeneratedPassword).toHaveBeenCalledWith(
+        uuidOf(7),
+        superadmin.id,
+      );
+      expect(result).toEqual({ password: 'q8ZtR2mWk4Ya' });
+    });
+
+    it('leaves the second factor alone', async () => {
+      userDirectory.findById.mockResolvedValue(user());
+      passwords.issueGeneratedPassword.mockResolvedValue('q8ZtR2mWk4Ya');
+
+      await controller.resetPassword(uuidOf(7), superadmin);
+
+      expect(userEnrolment.resetTwoFactor).not.toHaveBeenCalled();
+    });
+
+    it('reports a target that does not exist as not found', async () => {
+      userDirectory.findById.mockResolvedValue(null);
+
+      await expect(
+        controller.resetPassword(uuidOf(7), superadmin),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(passwords.issueGeneratedPassword).not.toHaveBeenCalled();
+    });
+
+    it('refuses a superadmin resetting their own password', async () => {
+      await expect(
+        controller.resetPassword(superadmin.id, superadmin),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(passwords.issueGeneratedPassword).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('issueLoginLink', () => {
+    const issued = {
+      code: 'a-high-entropy-code',
+      url: 'https://app.example.com/login-link?code=a-high-entropy-code',
+      expiresAt: new Date('2026-10-24T12:15:00Z'),
+    };
+
+    it('is a write reserved to superadmins', () => {
+      const handler = AdminUsersController.prototype.issueLoginLink;
+
+      expect(Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, handler)).toBe(
+        true,
+      );
+      expect(Reflect.getMetadata(ROLES_METADATA_KEY, handler)).toEqual([
+        Role.Superadmin,
+      ]);
+    });
+
+    it.each([
+      Role.Trader,
+      Role.LeadTrader,
+      Role.Merchant,
+      Role.MerchantSupport,
+      Role.MerchantAgent,
+      Role.Cascade,
+    ])('issues a link for a %s, naming the superadmin', async (role) => {
+      userDirectory.findById.mockResolvedValue(user({ role }));
+      loginLinks.issue.mockResolvedValue(issued);
+
+      await expect(
+        controller.issueLoginLink(uuidOf(7), superadmin),
+      ).resolves.toEqual(issued);
+
+      expect(loginLinks.issue).toHaveBeenCalledWith(uuidOf(7), superadmin.id);
+    });
+
+    it.each([Role.Admin, Role.Superadmin])(
+      'refuses a link for a %s, although a superadmin may otherwise act on one',
+      async (role) => {
+        userDirectory.findById.mockResolvedValue(user({ role }));
+
+        await expect(
+          controller.issueLoginLink(uuidOf(7), superadmin),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(loginLinks.issue).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([UserStatus.Blocked, UserStatus.PendingTwoFactor])(
+      'refuses a link for a %s account with a 409',
+      async (status) => {
+        userDirectory.findById.mockResolvedValue(user({ status }));
+
+        await expect(
+          controller.issueLoginLink(uuidOf(7), superadmin),
+        ).rejects.toThrow(ConflictException);
+
+        expect(loginLinks.issue).not.toHaveBeenCalled();
+      },
+    );
+
+    it('still issues a link for a suspended account, whose session is read-only', async () => {
+      userDirectory.findById.mockResolvedValue(
+        user({ status: UserStatus.Suspended }),
+      );
+      loginLinks.issue.mockResolvedValue(issued);
+
+      await expect(
+        controller.issueLoginLink(uuidOf(7), superadmin),
+      ).resolves.toEqual(issued);
+    });
+
+    it('refuses a link for the caller themselves', async () => {
+      await expect(
+        controller.issueLoginLink(superadmin.id, superadmin),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(userDirectory.findById).not.toHaveBeenCalled();
+      expect(loginLinks.issue).not.toHaveBeenCalled();
+    });
+
+    it('reports a target that does not exist as not found', async () => {
+      userDirectory.findById.mockResolvedValue(null);
+
+      await expect(
+        controller.issueLoginLink(uuidOf(7), superadmin),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(loginLinks.issue).not.toHaveBeenCalled();
     });
   });
 });

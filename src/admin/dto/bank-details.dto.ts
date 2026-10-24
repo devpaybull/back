@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { loginOf } from '../../common/utils/login-of';
+import { BankDetailsTurnover } from '../../transactions/types/bank-details-turnover';
 import { DeviceStatus } from '../../devices/types/device-status.enum';
 import { InviteAccountDto, toInviteAccountDto } from './invite-account.dto';
 
@@ -27,6 +29,14 @@ export class BankDetailsDeviceDto {
 
   @ApiPropertyOptional({ nullable: true })
   lastActivity: Date;
+}
+
+export class BankDetailsTraderDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  login: string;
 }
 
 export class BankDetailsDto {
@@ -134,11 +144,33 @@ export class BankDetailsDto {
 
   @ApiProperty()
   createdAt: Date;
+
+  @ApiPropertyOptional({ type: BankDetailsTraderDto, nullable: true })
+  trader: BankDetailsTraderDto;
+
+  @ApiProperty({
+    description:
+      'Fiat turnover of successful deals (success and success_changed) over all time',
+  })
+  turnoverTotal: number;
+
+  @ApiProperty({
+    description:
+      'Fiat turnover of deals that succeeded since the start of the current day in BUSINESS_TIMEZONE',
+  })
+  turnoverToday: number;
+
+  @ApiProperty({
+    description:
+      'Fiat turnover of deals that succeeded since the start of the current month in BUSINESS_TIMEZONE',
+  })
+  turnoverMonth: number;
 }
 
 export const toBankDetailsDto = (
   details: BankDetails,
   counterpartyMinAmount: number,
+  turnover: BankDetailsTurnover,
 ): BankDetailsDto => ({
   id: details.id,
   userId: details.userId,
@@ -190,4 +222,10 @@ export const toBankDetailsDto = (
   bannedAt: details.bannedAt ?? null,
   bannedBy: details.bannedBy ? toInviteAccountDto(details.bannedBy) : null,
   createdAt: details.createdAt,
+  trader: details.user
+    ? { id: details.user.id, login: loginOf(details.user) }
+    : null,
+  turnoverTotal: turnover.total,
+  turnoverToday: turnover.today,
+  turnoverMonth: turnover.month,
 });

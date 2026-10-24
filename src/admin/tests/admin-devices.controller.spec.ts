@@ -5,6 +5,8 @@ import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { AuthenticatedUser } from '../../common/types/token';
+import { UserStatus } from '../../users/types/user-status.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toPage } from '../../common/types/page';
 import { DevicesService } from '../../devices/devices.service';
@@ -15,6 +17,13 @@ import { AdminDevicesController } from '../controllers/admin-devices.controller'
 import { ListDevicesQueryDto } from '../dto/list-devices-query.dto';
 
 describe('AdminDevicesController', () => {
+  const admin: AuthenticatedUser = {
+    id: uuidOf(9),
+    login: 'admin@example.com',
+    role: Role.Admin,
+    status: UserStatus.Active,
+  };
+
   const owner = {
     id: uuidOf(1),
     email: 'trader@example.com',
@@ -113,20 +122,22 @@ describe('AdminDevicesController', () => {
   });
 
   it('deletes any account’s device, unbinding its requisites', async () => {
-    await controller.remove(100);
+    await controller.remove(100, admin);
 
-    expect(bankDetails.deleteDevice).toHaveBeenCalledWith(100);
+    expect(bankDetails.deleteDevice).toHaveBeenCalledWith(100, uuidOf(9));
   });
 
   it('answers 404 for an id nobody holds, and deletes nothing', async () => {
     devices.findById.mockResolvedValue(null);
 
-    await expect(controller.remove(404)).rejects.toThrow(NotFoundException);
+    await expect(controller.remove(404, admin)).rejects.toThrow(
+      NotFoundException,
+    );
     expect(bankDetails.deleteDevice).not.toHaveBeenCalled();
   });
 
   it('does not scope the delete to an owner, which is what makes it the admin path', async () => {
-    await controller.remove(100);
+    await controller.remove(100, admin);
 
     expect(devices.findById).toHaveBeenCalledWith(100);
   });

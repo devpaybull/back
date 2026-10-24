@@ -10,11 +10,8 @@ export class InviteDto {
   @ApiProperty()
   id: number;
 
-  @ApiPropertyOptional({ nullable: true })
-  email: string;
-
-  @ApiPropertyOptional({ nullable: true })
-  telegramUsername: string;
+  @ApiProperty({ nullable: true })
+  telegramUsername: string | null;
 
   @ApiProperty({ enum: Role })
   role: Role;
@@ -73,7 +70,6 @@ export class InviteDto {
 
 export const toInviteDto = (invite: Invite, terms: InviteTerms): InviteDto => ({
   id: invite.id,
-  email: invite.email,
   telegramUsername: invite.telegramUsername,
   role: invite.role,
   merchantId: invite.merchantId ?? null,

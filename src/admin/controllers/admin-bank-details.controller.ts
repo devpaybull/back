@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   ParseUUIDPipe,
@@ -14,6 +16,8 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
+import { BankDetails } from '../../bank-details/entities/bank-details.entity';
+import { BankDetailsSortField } from '../../bank-details/types/bank-details-sort-field';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -22,7 +26,9 @@ import { WriteAccess } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
-import { Page } from '../../common/types/page';
+import { Page, toPage } from '../../common/types/page';
+import { sortDirection } from '../../common/utils/sort-direction';
+import { BankDetailsTurnoverService } from '../../transactions/services/bank-details-turnover.service';
 import { AuthenticatedUser } from '../../common/types/token';
 import { BankDetailsDto, toBankDetailsDto } from '../dto/bank-details.dto';
 import { ListBankDetailsQueryDto } from '../dto/list-bank-details-query.dto';
@@ -34,7 +40,10 @@ import { SuperviseBankDetailsDto } from '../dto/supervise-bank-details.dto';
 @Roles(Role.Admin, Role.Superadmin)
 @Controller('admin/bank-details')
 export class AdminBankDetailsController {
-  constructor(private readonly bankDetails: BankDetailsService) {}
+  constructor(
+    private readonly bankDetails: BankDetailsService,
+    private readonly turnover: BankDetailsTurnoverService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Lists the bank details of every account' })
@@ -42,11 +51,12 @@ export class AdminBankDetailsController {
   async list(
     @Query() query: ListBankDetailsQueryDto,
   ): Promise<Page<BankDetailsDto>> {
-    const { counterpartyMinAmount } = this.bankDetails;
+    const page =
+      query.sortBy === BankDetailsSortField.TurnoverTotal
+        ? await this.listByTurnover(query)
+        : await this.bankDetails.list(query);
 
-    return (await this.bankDetails.list(query)).map((row) =>
-      toBankDetailsDto(row, counterpartyMinAmount),
-    );
+    return this.withTurnover(page);
   }
 
   @Get(':id')
@@ -59,10 +69,11 @@ export class AdminBankDetailsController {
 
     if (!found) throw new NotFoundException('Bank details not found');
 
-    return toBankDetailsDto(found, this.bankDetails.counterpartyMinAmount);
+    return this.withTurnoverOf(found);
   }
 
   @Post(':id/enable')
+  @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({ summary: 'Switches any account’s bank details on' })
   @ApiEnvelopeResponse(BankDetailsDto)
@@ -70,13 +81,13 @@ export class AdminBankDetailsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() admin: AuthenticatedUser,
   ): Promise<BankDetailsDto> {
-    return toBankDetailsDto(
+    return this.withTurnoverOf(
       await this.bankDetails.supervise(id, { active: true }, admin.id),
-      this.bankDetails.counterpartyMinAmount,
     );
   }
 
   @Post(':id/disable')
+  @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({ summary: 'Switches any account’s bank details off' })
   @ApiEnvelopeResponse(BankDetailsDto)
@@ -84,9 +95,8 @@ export class AdminBankDetailsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() admin: AuthenticatedUser,
   ): Promise<BankDetailsDto> {
-    return toBankDetailsDto(
+    return this.withTurnoverOf(
       await this.bankDetails.supervise(id, { active: false }, admin.id),
-      this.bankDetails.counterpartyMinAmount,
     );
   }
 
@@ -98,8 +108,11 @@ export class AdminBankDetailsController {
       'A soft delete: the row stays and stops being listed, so what an order pointed at is not erased.',
   })
   @ApiEnvelopeResponse()
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    await this.bankDetails.delete(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<void> {
+    await this.bankDetails.delete(id, admin.id);
   }
 
   @Patch(':id')
@@ -115,9 +128,52 @@ export class AdminBankDetailsController {
       throw new BadRequestException('No changes were given');
     }
 
-    return toBankDetailsDto(
+    return this.withTurnoverOf(
       await this.bankDetails.supervise(id, dto, admin.id),
+    );
+  }
+
+  private async listByTurnover(
+    query: ListBankDetailsQueryDto,
+  ): Promise<Page<BankDetails>> {
+    const ids = await this.bankDetails.listIds(query);
+    const pageIds = await this.turnover.pageOfBankDetailsByTurnover(
+      ids,
+      sortDirection(query.sortOrder),
+      (query.page - 1) * query.limit,
+      query.limit,
+    );
+
+    return toPage(
+      [await this.bankDetails.findByIdsInOrder(pageIds), ids.length],
+      query,
+    );
+  }
+
+  private async withTurnover(
+    page: Page<BankDetails>,
+  ): Promise<Page<BankDetailsDto>> {
+    const turnover = await this.turnover.turnoverOfBankDetails(
+      page.items.map((row) => row.id),
+      new Date(),
+    );
+    const { counterpartyMinAmount } = this.bankDetails;
+
+    return page.map((row) =>
+      toBankDetailsDto(row, counterpartyMinAmount, turnover.get(row.id)),
+    );
+  }
+
+  private async withTurnoverOf(details: BankDetails): Promise<BankDetailsDto> {
+    const turnover = await this.turnover.turnoverOfBankDetails(
+      [details.id],
+      new Date(),
+    );
+
+    return toBankDetailsDto(
+      details,
       this.bankDetails.counterpartyMinAmount,
+      turnover.get(details.id),
     );
   }
 }

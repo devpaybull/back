@@ -10,6 +10,8 @@ export class ExtendInviteDto {
   })
   @Type(() => Date)
   @IsDate()
-  @MinDate(() => new Date())
+  @MinDate(() => new Date(), {
+    message: '$property must be a moment in the future',
+  })
   expiresAt: Date;
 }

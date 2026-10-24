@@ -26,8 +26,11 @@ describe('AdminTraderSettingsController', () => {
 
   let settings: {
     ensure: jest.Mock;
+    findOrDefaults: jest.Mock;
     update: jest.Mock;
     insurancePayInMinOf: jest.Mock;
+    insurancePayOutMinOf: jest.Mock;
+    nightStopThresholdOf: jest.Mock;
   };
   let directory: { findById: jest.Mock };
   let controller: AdminTraderSettingsController;
@@ -35,8 +38,11 @@ describe('AdminTraderSettingsController', () => {
   beforeEach(() => {
     settings = {
       ensure: jest.fn(),
+      findOrDefaults: jest.fn(),
       update: jest.fn(),
       insurancePayInMinOf: jest.fn(() => 500),
+      insurancePayOutMinOf: jest.fn(() => 300),
+      nightStopThresholdOf: jest.fn(() => 2),
     };
     directory = { findById: jest.fn() };
     controller = new AdminTraderSettingsController(
@@ -69,19 +75,20 @@ describe('AdminTraderSettingsController', () => {
       );
     });
 
-    it('ensures and returns the settings', async () => {
+    it('reads the settings without creating a row', async () => {
       directory.findById.mockResolvedValue(target);
-      settings.ensure.mockResolvedValue(settingsRow);
+      settings.findOrDefaults.mockResolvedValue(settingsRow);
 
       const result = await controller.read(uuidOf(1));
 
-      expect(settings.ensure).toHaveBeenCalledWith(uuidOf(1));
+      expect(settings.findOrDefaults).toHaveBeenCalledWith(uuidOf(1));
+      expect(settings.ensure).not.toHaveBeenCalled();
       expect(result.userId).toBe(uuidOf(1));
     });
 
     it('reports the personal and the effective insurance minimum', async () => {
       directory.findById.mockResolvedValue(target);
-      settings.ensure.mockResolvedValue({
+      settings.findOrDefaults.mockResolvedValue({
         ...settingsRow,
         insurancePayInMin: null,
       });
@@ -90,6 +97,24 @@ describe('AdminTraderSettingsController', () => {
 
       expect(result.insurancePayInMin).toBeNull();
       expect(result.effectiveInsurancePayInMin).toBe(500);
+    });
+
+    it('reports the pay-out minimum and the night stop, personal and effective', async () => {
+      directory.findById.mockResolvedValue(target);
+      settings.findOrDefaults.mockResolvedValue({
+        ...settingsRow,
+        insurancePayOutMin: null,
+        nightStopEnabled: true,
+        nightStopThreshold: null,
+      });
+
+      const result = await controller.read(uuidOf(1));
+
+      expect(result.insurancePayOutMin).toBeNull();
+      expect(result.effectiveInsurancePayOutMin).toBe(300);
+      expect(result.nightStopEnabled).toBe(true);
+      expect(result.nightStopThreshold).toBeNull();
+      expect(result.effectiveNightStopThreshold).toBe(2);
     });
   });
 

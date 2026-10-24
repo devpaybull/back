@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -66,6 +67,35 @@ export class UpdateTraderSettingsDto {
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   insurancePayInMin?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    minimum: 0,
+    description:
+      'Personal minimum insurance pay-out deposit; null resets it to the global default',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  insurancePayOutMin?: number | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  nightStopEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    minimum: 1,
+    maximum: 10,
+    description:
+      'Personal night-stop threshold (open disputes); null resets it to the global default',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  nightStopThreshold?: number | null;
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()

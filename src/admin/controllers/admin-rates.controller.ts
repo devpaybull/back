@@ -22,19 +22,21 @@ import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { AuthenticatedUser } from '../../common/types/token';
 import { RateService } from '../../transactions/services/rate.service';
 import { RateScope } from '../../transactions/types/rate-scope.enum';
+import { TRANSACTION_METHODS } from '../../transactions/utils/transaction-methods';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { BaseRateSetDto, toBaseRateSetDto } from '../dto/base-rate-set.dto';
 import { RateSetDto, toRateSetDto } from '../dto/rate-set.dto';
+import {
+  toTransactionMethodDto,
+  TransactionMethodDto,
+} from '../dto/transaction-method.dto';
 import { canIssueRole } from '../utils/can-issue-role';
 
 const scopeOfUser = (user: User): RateScope => {
   if (user.role === Role.Trader) return RateScope.Trader;
-  if (user.role === Role.LeadTrader) return RateScope.Lead;
 
-  throw new BadRequestException(
-    'Individual rates apply only to traders and lead traders',
-  );
+  throw new BadRequestException('Individual rates apply only to traders');
 };
 
 @ApiTags('Admin · Rates')
@@ -47,6 +49,16 @@ export class AdminRatesController {
     private readonly rates: RateService,
     private readonly directory: UserDirectoryService,
   ) {}
+
+  @Get('admin/methods')
+  @ApiOperation({
+    summary:
+      'Lists the payment methods of the registry in code, with the currency and the rate kind of each',
+  })
+  @ApiEnvelopeResponse(TransactionMethodDto, { isArray: true })
+  listMethods(): TransactionMethodDto[] {
+    return TRANSACTION_METHODS.map(toTransactionMethodDto);
+  }
 
   @Get('admin/rates/base/:scope')
   @ApiOperation({ summary: 'Reads the base rates of a scope' })
@@ -110,7 +122,8 @@ export class AdminRatesController {
     const entries = dto.methods.map((method) => ({
       method: method.method,
       general: method.general ?? null,
-      bands: method.bands,
+      bands: method.bands ?? [],
+      banks: method.banks ?? [],
     }));
 
     return toRateSetDto(

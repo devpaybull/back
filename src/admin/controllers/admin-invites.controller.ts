@@ -21,7 +21,6 @@ import { WriteAccess } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
-import { AccountIdentifier } from '../../common/types/account-identifier';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { InvitesService } from '../../invites/invites.service';
@@ -97,7 +96,8 @@ export class AdminInvitesController {
   @Post()
   @WriteAccess()
   @ApiOperation({
-    summary: 'Issues an invite code for a role and sends it out',
+    summary:
+      'Issues an invite code for a role and a Telegram username; the admin hands the code over',
   })
   @ApiEnvelopeResponse(InviteDto, { status: HttpStatus.CREATED })
   async create(
@@ -108,16 +108,8 @@ export class AdminInvitesController {
       throw new ForbiddenException(`Cannot issue the role ${dto.role}`);
     }
 
-    const identifier: AccountIdentifier = {};
-
-    if (dto.email !== undefined) identifier.email = dto.email;
-
-    if (dto.telegramUsername !== undefined) {
-      identifier.telegramUsername = dto.telegramUsername;
-    }
-
     const created = await this.invites.create({
-      identifier,
+      telegramUsername: dto.telegramUsername,
       role: dto.role,
       createdByUserId: admin.id,
       expiresAt: dto.expiresAt,
