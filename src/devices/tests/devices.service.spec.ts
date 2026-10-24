@@ -1,10 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { AuditService } from '../../audit/services/audit.service';
+import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { DevicesService } from '../devices.service';
 import { Device } from '../entities/device.entity';
+import { DeviceModel } from '../types/device-model.enum';
 import { DeviceSortField } from '../types/device-sort-field';
 import { DeviceStatus } from '../types/device-status.enum';
 
@@ -15,7 +18,28 @@ describe('DevicesService', () => {
   let stored: Device[];
   let service: DevicesService;
 
+  const manager = {
+    getRepository: jest.fn(() => devices),
+    transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => {
+      const snapshot = stored.map((row) => ({ ...row }));
+
+      try {
+        return await work(manager);
+      } catch (error) {
+        stored = snapshot;
+        throw error;
+      }
+    }),
+  };
+
+  const audit = {
+    record: jest.fn<Promise<undefined>, [Record<string, unknown>, unknown?]>(
+      async () => undefined,
+    ),
+  };
+
   const devices = {
+    manager,
     findOne: jest.fn(
       async ({ where }: { where: Partial<Device> }) =>
         stored.find((row) =>
@@ -66,12 +90,14 @@ describe('DevicesService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    stored = [device()];
+    stored = [device({ model: DeviceModel.Android })];
+    audit.record.mockResolvedValue(undefined);
 
     const module = await Test.createTestingModule({
       providers: [
         DevicesService,
         { provide: getRepositoryToken(Device), useValue: devices },
+        { provide: AuditService, useValue: audit },
       ],
     }).compile();
 
@@ -114,6 +140,72 @@ describe('DevicesService', () => {
       expect(devices.create).toHaveBeenCalledWith(
         expect.objectContaining({ userId: stranger }),
       );
+    });
+  });
+
+  describe('the activity feed', () => {
+    it('writes a device_added row for the owner when a device is registered', async () => {
+      const created = await service.create({ userId: owner, name: 'Redmi' });
+
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: owner,
+          impersonatorUserId: null,
+          targetUserId: owner,
+          action: ActivityAction.DeviceAdded,
+          metadata: { id: created.id, name: 'Redmi', model: null },
+        },
+        manager,
+      );
+    });
+
+    it('names the superadmin of a login-link session beside the trader on create and delete', async () => {
+      await service.create({ userId: owner, name: 'Redmi' }, uuidOf(5));
+      await service.delete(100, owner, manager as never, uuidOf(5));
+
+      expect(
+        audit.record.mock.calls.map(([entry]) => [
+          entry.action,
+          entry.actorUserId,
+          entry.impersonatorUserId,
+        ]),
+      ).toEqual([
+        [ActivityAction.DeviceAdded, owner, uuidOf(5)],
+        [ActivityAction.DeviceDeleted, owner, uuidOf(5)],
+      ]);
+    });
+
+    it('rolls the device back when the audit row cannot be written', async () => {
+      audit.record.mockRejectedValue(new Error('audit down'));
+
+      await expect(
+        service.create({ userId: owner, name: 'Redmi' }),
+      ).rejects.toThrow('audit down');
+      expect(stored).toHaveLength(1);
+    });
+
+    it('writes a device_deleted row with the actor, the owner and the details', async () => {
+      await service.delete(100, stranger, manager as never);
+
+      expect(devices.softDelete).toHaveBeenCalledWith(100);
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: stranger,
+          impersonatorUserId: null,
+          targetUserId: owner,
+          action: ActivityAction.DeviceDeleted,
+          metadata: { id: 100, name: 'Pixel 7', model: DeviceModel.Android },
+        },
+        manager,
+      );
+    });
+
+    it('answers 404 and writes nothing for a device nobody holds', async () => {
+      await expect(
+        service.delete(404, owner, manager as never),
+      ).rejects.toThrow(NotFoundException);
+      expect(devices.softDelete).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

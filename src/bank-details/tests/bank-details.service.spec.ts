@@ -6,6 +6,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { AuditService } from '../../audit/services/audit.service';
+import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { BanksService } from '../../banks/banks.service';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { DevicesService } from '../../devices/devices.service';
@@ -23,7 +25,28 @@ describe('BankDetailsService', () => {
   let stored: BankDetails[];
   let service: BankDetailsService;
 
+  const manager = {
+    getRepository: jest.fn(() => bankDetails),
+    transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => {
+      const snapshot = stored.map((row) => ({ ...row }));
+
+      try {
+        return await work(manager);
+      } catch (error) {
+        stored = snapshot;
+        throw error;
+      }
+    }),
+  };
+
+  const audit = {
+    record: jest.fn<Promise<undefined>, [Record<string, unknown>, unknown?]>(
+      async () => undefined,
+    ),
+  };
+
   const bankDetails = {
+    manager,
     findOne: jest.fn(
       async ({ where }: { where: Partial<BankDetails> }) =>
         stored.find((row) =>
@@ -31,6 +54,11 @@ describe('BankDetailsService', () => {
         ) ?? null,
     ),
     findAndCount: jest.fn(async () => [stored, stored.length]),
+    find: jest.fn(async (options: { where: { id?: { value: string[] } } }) =>
+      options.where.id
+        ? stored.filter((row) => options.where.id.value.includes(row.id))
+        : stored,
+    ),
     create: jest.fn(
       (data: Partial<BankDetails>) => ({ ...data }) as BankDetails,
     ),
@@ -73,6 +101,9 @@ describe('BankDetailsService', () => {
     delete: jest.fn(async () => undefined),
   };
 
+  const activity = () =>
+    audit.record.mock.calls.map(([entry]) => entry as Record<string, unknown>);
+
   const card = (overrides: Partial<BankDetails> = {}): BankDetails =>
     ({
       id: uuidOf(100),
@@ -82,6 +113,7 @@ describe('BankDetailsService', () => {
       cardholderName: null,
       card: '4400430212345678',
       phone: null,
+      bank: { id: 1, name: 'Sber' },
       minAmountEnabled: false,
       minAmount: null,
       maxAmountEnabled: false,
@@ -112,6 +144,7 @@ describe('BankDetailsService', () => {
     banks.findById.mockResolvedValue({ id: 1 });
     devices.findOwn.mockResolvedValue({ id: 7 });
     stored = [card()];
+    audit.record.mockResolvedValue(undefined);
 
     const module = await Test.createTestingModule({
       providers: [
@@ -119,6 +152,7 @@ describe('BankDetailsService', () => {
         { provide: getRepositoryToken(BankDetails), useValue: bankDetails },
         { provide: BanksService, useValue: banks },
         { provide: DevicesService, useValue: devices },
+        { provide: AuditService, useValue: audit },
         { provide: ConfigService, useValue: config },
       ],
     }).compile();
@@ -127,6 +161,87 @@ describe('BankDetailsService', () => {
   });
 
   describe('create', () => {
+    it('writes a bank_details_added row for the owner, in the creating transaction', async () => {
+      const created = await service.create({
+        userId: owner,
+        bankId: 1,
+        type: TransactionType.Card,
+        card: '2204321033002239',
+        cardholderName: 'IVAN IVANOV',
+      });
+
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: owner,
+          impersonatorUserId: null,
+          targetUserId: owner,
+          action: ActivityAction.BankDetailsAdded,
+          metadata: {
+            id: created.id,
+            type: TransactionType.Card,
+            card: '2204321033002239',
+            phone: null,
+            cardholderName: 'IVAN IVANOV',
+            bankId: 1,
+            bankName: null,
+          },
+        },
+        manager,
+      );
+    });
+
+    it('names the superadmin of a login-link session beside the trader', async () => {
+      await service.create(
+        { userId: owner, bankId: 1, type: TransactionType.Card },
+        uuidOf(5),
+      );
+
+      expect(activity()[0]).toMatchObject({
+        actorUserId: owner,
+        impersonatorUserId: uuidOf(5),
+      });
+    });
+
+    it('keeps the phone in the row of an sbp requisite', async () => {
+      await service.create({
+        userId: owner,
+        bankId: 1,
+        type: TransactionType.Sbp,
+        phone: '+79991234567',
+      });
+
+      expect(activity()[0].metadata).toMatchObject({
+        phone: '+79991234567',
+        card: null,
+      });
+    });
+
+    it('rolls the requisite back when the audit row cannot be written', async () => {
+      audit.record.mockRejectedValue(new Error('audit down'));
+
+      await expect(
+        service.create({
+          userId: owner,
+          bankId: 1,
+          type: TransactionType.Card,
+        }),
+      ).rejects.toThrow('audit down');
+      expect(stored).toHaveLength(1);
+    });
+
+    it('writes no activity row when the bank does not exist', async () => {
+      banks.findById.mockResolvedValue(null);
+
+      await expect(
+        service.create({
+          userId: owner,
+          bankId: 9,
+          type: TransactionType.Card,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('stores the details against the owner it was told', async () => {
       await service.create({
         userId: stranger,
@@ -332,6 +447,69 @@ describe('BankDetailsService', () => {
       expect(stored[0].card).toBe('4400430212345678');
     });
 
+    it('writes a bank_details_deleted row, actor the owner, with the number and the bank', async () => {
+      await service.deleteOwn(uuidOf(100), owner);
+
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: owner,
+          impersonatorUserId: null,
+          targetUserId: owner,
+          action: ActivityAction.BankDetailsDeleted,
+          metadata: {
+            id: uuidOf(100),
+            type: TransactionType.Card,
+            card: '4400430212345678',
+            phone: null,
+            cardholderName: null,
+            bankId: 1,
+            bankName: 'Sber',
+          },
+        },
+        manager,
+      );
+    });
+
+    it('names the superadmin of a login-link session on a delete', async () => {
+      await service.deleteOwn(uuidOf(100), owner, uuidOf(5));
+
+      expect(activity()[0]).toMatchObject({
+        actorUserId: owner,
+        impersonatorUserId: uuidOf(5),
+      });
+    });
+
+    it('rolls the delete back when the audit row cannot be written', async () => {
+      audit.record.mockRejectedValue(new Error('audit down'));
+
+      await expect(service.deleteOwn(uuidOf(100), owner)).rejects.toThrow(
+        'audit down',
+      );
+      expect(stored[0].deletedAt).toBeUndefined();
+    });
+
+    it('records the administrator as the actor and the owner as the target', async () => {
+      await service.delete(uuidOf(100), admin);
+
+      expect(activity()).toEqual([
+        expect.objectContaining({
+          actorUserId: admin,
+          targetUserId: owner,
+          action: ActivityAction.BankDetailsDeleted,
+        }),
+      ]);
+    });
+
+    it('writes no row when the delete is refused', async () => {
+      await expect(service.deleteOwn(uuidOf(100), stranger)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.delete(uuidOf(404), admin)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('answers 404 when the row belongs to somebody else, and deletes nothing', async () => {
       await expect(service.deleteOwn(uuidOf(100), stranger)).rejects.toThrow(
         NotFoundException,
@@ -346,13 +524,13 @@ describe('BankDetailsService', () => {
     });
 
     it('lets an administrator delete any row, without an owner to match', async () => {
-      await service.delete(uuidOf(100));
+      await service.delete(uuidOf(100), admin);
 
       expect(bankDetails.softDelete).toHaveBeenCalledWith(uuidOf(100));
     });
 
     it('still answers 404 to an administrator for an id nobody holds', async () => {
-      await expect(service.delete(uuidOf(404))).rejects.toThrow(
+      await expect(service.delete(uuidOf(404), admin)).rejects.toThrow(
         NotFoundException,
       );
       expect(bankDetails.softDelete).not.toHaveBeenCalled();
@@ -363,13 +541,13 @@ describe('BankDetailsService', () => {
     it('unbinds every requisite first, then deletes the device', async () => {
       stored = [card({ deviceId: 7 })];
 
-      await service.deleteDevice(7);
+      await service.deleteDevice(7, admin);
 
       expect(bankDetails.update).toHaveBeenCalledWith(
         { deviceId: 7 },
         { deviceId: null },
       );
-      expect(devices.delete).toHaveBeenCalledWith(7);
+      expect(devices.delete).toHaveBeenCalledWith(7, admin, manager, null);
       expect(stored[0].deviceId).toBeNull();
       expect(stored[0].deletedAt).toBeUndefined();
     });
@@ -378,7 +556,23 @@ describe('BankDetailsService', () => {
       await service.deleteOwnDevice(7, owner);
 
       expect(devices.findOwn).toHaveBeenCalledWith(7, owner);
-      expect(devices.delete).toHaveBeenCalledWith(7);
+      expect(devices.delete).toHaveBeenCalledWith(7, owner, manager, null);
+    });
+
+    it('passes the superadmin of a login-link session on to the device delete', async () => {
+      await service.deleteOwnDevice(7, owner, uuidOf(5));
+
+      expect(devices.delete).toHaveBeenCalledWith(7, owner, manager, uuidOf(5));
+    });
+
+    it('unbinds inside the same transaction as the device delete, so a failure restores the binding', async () => {
+      stored = [card({ deviceId: 7 })];
+      devices.delete.mockRejectedValueOnce(new Error('device down'));
+
+      await expect(service.deleteDevice(7, admin)).rejects.toThrow(
+        'device down',
+      );
+      expect(stored[0].deviceId).toBe(7);
     });
 
     it('answers 404 when the device belongs to somebody else, and touches nothing', async () => {
@@ -533,6 +727,54 @@ describe('BankDetailsService', () => {
         skip: 10,
         take: 10,
       });
+    });
+  });
+
+  describe('listIds', () => {
+    it('asks for the ids alone, under the same filters, ordered by id', async () => {
+      stored = [card({ id: uuidOf(1) }), card({ id: uuidOf(2) })];
+
+      await expect(
+        service.listIds({
+          page: 3,
+          limit: 5,
+          sortBy: BankDetailsSortField.TurnoverTotal,
+          sortOrder: SortOrder.Asc,
+          userId: owner,
+        }),
+      ).resolves.toEqual([uuidOf(1), uuidOf(2)]);
+      expect(bankDetails.find).toHaveBeenCalledWith({
+        select: { id: true },
+        where: { userId: owner },
+        order: { id: 'ASC' },
+      });
+    });
+  });
+
+  describe('findByIdsInOrder', () => {
+    it('returns the rows in the order of the ids it was given', async () => {
+      stored = [
+        card({ id: uuidOf(1) }),
+        card({ id: uuidOf(2) }),
+        card({ id: uuidOf(3) }),
+      ];
+
+      const found = await service.findByIdsInOrder([
+        uuidOf(3),
+        uuidOf(1),
+        uuidOf(2),
+      ]);
+
+      expect(found.map((row) => row.id)).toEqual([
+        uuidOf(3),
+        uuidOf(1),
+        uuidOf(2),
+      ]);
+    });
+
+    it('does not query for no ids', async () => {
+      await expect(service.findByIdsInOrder([])).resolves.toEqual([]);
+      expect(bankDetails.find).not.toHaveBeenCalled();
     });
   });
 

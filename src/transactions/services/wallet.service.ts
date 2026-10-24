@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,9 +7,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Page, toPage } from '../../common/types/page';
+import { sortDirection } from '../../common/utils/sort-direction';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { Wallet } from '../entities/wallet.entity';
+import { BalanceOperationFilter } from '../types/balance-operation-filter';
+import { BalanceOperationListQuery } from '../types/balance-operation-list-query';
+import { balanceOperationWhere } from '../utils/balance-operation-where';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
 import { canWithdrawInsurance } from '../utils/can-withdraw-insurance';
@@ -34,6 +40,49 @@ export class WalletService {
     if (userIds.length === 0) return [];
 
     return this.wallets.find({ where: { userId: In(userIds) } });
+  }
+
+  async listOperations(
+    query: BalanceOperationListQuery,
+  ): Promise<Page<BalanceOperation>> {
+    const wallet = await this.findByUserId(query.userId);
+
+    if (!wallet) return toPage([[], 0], query);
+
+    const direction = sortDirection(query.sortOrder);
+
+    return toPage(
+      await this.dataSource.getRepository(BalanceOperation).findAndCount({
+        where: balanceOperationWhere(wallet.id, query),
+        order: { createdAt: direction, id: direction },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      query,
+    );
+  }
+
+  async exportOperations(
+    filter: BalanceOperationFilter,
+    maxRows: number,
+  ): Promise<BalanceOperation[]> {
+    const wallet = await this.findByUserId(filter.userId);
+
+    if (!wallet) return [];
+
+    const rows = await this.dataSource.getRepository(BalanceOperation).find({
+      where: balanceOperationWhere(wallet.id, filter),
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: maxRows + 1,
+    });
+
+    if (rows.length > maxRows) {
+      throw new BadRequestException(
+        `More than ${maxRows} operations match; narrow the period or the filters`,
+      );
+    }
+
+    return rows;
   }
 
   async ensureWallet(userId: string): Promise<Wallet> {
@@ -85,24 +134,43 @@ export class WalletService {
     );
   }
 
-  async reserveMainEscrow(userId: string, amount: number): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
-      const wallet = await this.lock(manager, userId);
-      if (this.getAvailableMain(wallet) < amount) {
-        throw new ConflictException('Insufficient available balance');
-      }
+  async reserveMainEscrowWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: number,
+  ): Promise<void> {
+    const wallet = await this.lock(manager, userId);
+    if (this.getAvailableMain(wallet) < amount) {
+      throw new ConflictException('Insufficient available balance');
+    }
 
-      wallet.mainReserved = roundMoney(wallet.mainReserved + amount);
-      await manager.save(wallet);
-    });
+    wallet.mainReserved = roundMoney(wallet.mainReserved + amount);
+    await manager.save(wallet);
   }
 
-  async releaseMainEscrow(userId: string, amount: number): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
-      const wallet = await this.lock(manager, userId);
-      wallet.mainReserved = roundMoney(wallet.mainReserved - amount);
-      await manager.save(wallet);
-    });
+  async lockWalletsWithin(
+    manager: EntityManager,
+    userIds: string[],
+    createMissingFor: string[],
+  ): Promise<Wallet[]> {
+    const missing = [...new Set(createMissingFor)].sort();
+
+    if (missing.length) {
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(Wallet)
+        .values(missing.map((userId) => ({ userId })))
+        .orIgnore()
+        .execute();
+    }
+
+    const locked: Wallet[] = [];
+    for (const userId of [...new Set(userIds)].sort()) {
+      locked.push(await this.lock(manager, userId));
+    }
+
+    return locked;
   }
 
   async debitMainWithin(
@@ -142,6 +210,56 @@ export class WalletService {
     );
     await manager.save(wallet);
     await manager.save(operation);
+  }
+
+  async creditLeadShareWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: number,
+    transactionId: string,
+  ): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(Wallet)
+      .values({ userId })
+      .orIgnore()
+      .execute();
+    await this.creditMainWithin(manager, userId, amount, transactionId);
+  }
+
+  async creditDebtWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: number,
+  ): Promise<BalanceOperation> {
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(Wallet)
+      .values({ userId })
+      .orIgnore()
+      .execute();
+
+    return this.moveMainWithin(
+      manager,
+      userId,
+      amount,
+      BalanceOperationType.DebtIssued,
+    );
+  }
+
+  debitDebtWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: number,
+  ): Promise<BalanceOperation> {
+    return this.moveMainWithin(
+      manager,
+      userId,
+      -amount,
+      BalanceOperationType.DebtWriteOff,
+    );
   }
 
   async releaseEscrowWithin(
@@ -207,9 +325,11 @@ export class WalletService {
       throw new ConflictException('Cannot transfer to the same wallet');
     }
 
-    const [firstId, secondId] = [fromUserId, toUserId].sort();
-    const first = await this.lock(manager, firstId);
-    const second = await this.lock(manager, secondId);
+    const [first, second] = await this.lockWalletsWithin(
+      manager,
+      [fromUserId, toUserId],
+      [],
+    );
     const from = first.userId === fromUserId ? first : second;
     const to = first.userId === fromUserId ? second : first;
 
@@ -236,6 +356,26 @@ export class WalletService {
 
     await manager.save([from, to]);
     await manager.save([debit, credit]);
+  }
+
+  private async moveMainWithin(
+    manager: EntityManager,
+    userId: string,
+    delta: number,
+    type: BalanceOperationType,
+  ): Promise<BalanceOperation> {
+    const wallet = await this.lock(manager, userId);
+    const operation = this.journalMove(
+      manager,
+      wallet,
+      BalanceKind.Main,
+      delta,
+      type,
+      null,
+    );
+    await manager.save(wallet);
+
+    return manager.save(operation);
   }
 
   private async requireWallet(userId: string): Promise<Wallet> {

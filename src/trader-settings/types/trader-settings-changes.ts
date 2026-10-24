@@ -9,6 +9,9 @@ export interface TraderSettingsChanges {
   userTransferAccess?: boolean;
   trustedUser?: boolean;
   insurancePayInMin?: number | null;
+  insurancePayOutMin?: number | null;
+  nightStopEnabled?: boolean;
+  nightStopThreshold?: number | null;
 }
 
 export interface TraderSettingsAudit {

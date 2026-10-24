@@ -91,10 +91,19 @@ export class AnalyticsService {
 
     const series = this.dayKeys().map((date) => {
       const day = rows.filter((row) => dayKey(row.createdAt) === date);
+      const successful = day.filter(isSuccess);
       return {
         date,
         payInCount: day.filter(isPayIn).length,
         payOutCount: day.filter(isPayOut).length,
+        payInAmount: sumOf(
+          successful.filter(isPayIn),
+          (row) => row.amountCrypto,
+        ),
+        payOutAmount: sumOf(
+          successful.filter(isPayOut),
+          (row) => row.amountCrypto,
+        ),
       };
     });
 
@@ -110,8 +119,8 @@ export class AnalyticsService {
       payOutCount: rows.filter(isPayOut).length,
       series,
       summary: {
-        cryptoSent: sumOf(successfulPayIn, (row) => row.traderAmount),
-        cryptoReceived: sumOf(successfulPayOut, (row) => row.traderAmount),
+        cryptoSent: sumOf(successfulPayIn, (row) => row.amountCrypto),
+        cryptoReceived: sumOf(successfulPayOut, (row) => row.amountCrypto),
         fiatReceived: sumOf(successfulPayIn, (row) => row.amountFiat),
         fiatSent: sumOf(successfulPayOut, (row) => row.amountFiat),
         profit: sumOf(rows.filter(isSuccess), (row) => row.traderCommission),

@@ -4,4 +4,5 @@ export enum BankDetailsSortField {
   MinAmount = 'minAmount',
   MaxAmount = 'maxAmount',
   DailyLimit = 'dailyLimit',
+  TurnoverTotal = 'turnoverTotal',
 }

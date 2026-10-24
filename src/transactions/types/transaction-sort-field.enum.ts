@@ -3,4 +3,6 @@ export enum TransactionSortField {
   CreatedAt = 'createdAt',
   ResolvedAt = 'resolvedAt',
   AmountCrypto = 'amountCrypto',
+  AmountFiat = 'amountFiat',
+  Merchant = 'merchant',
 }

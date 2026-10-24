@@ -12,5 +12,7 @@ export function isNightWindow(
     }).format(now),
   );
 
-  return hour >= startHour && hour < endHour;
+  return startHour < endHour
+    ? hour >= startHour && hour < endHour
+    : hour >= startHour || hour < endHour;
 }

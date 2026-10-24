@@ -30,6 +30,12 @@ describe('bankDetailsListOrder', () => {
     });
   });
 
+  it('leaves the turnover order to the transactions side, falling back to id', () => {
+    expect(
+      bankDetailsListOrder(query(BankDetailsSortField.TurnoverTotal)),
+    ).toEqual({ id: 'DESC' });
+  });
+
   it('orders the amounts by the numeric columns, not by card or phone', () => {
     const sortable = Object.values(BankDetailsSortField);
 

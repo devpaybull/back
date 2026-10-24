@@ -4,6 +4,7 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Role } from '../../common/enums/role.enum';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -126,6 +127,7 @@ describe('BankDetailsController', () => {
 
       expect(bankDetails.create).toHaveBeenCalledWith(
         expect.objectContaining({ userId: uuidOf(1) }),
+        null,
       );
     });
 
@@ -187,6 +189,33 @@ describe('BankDetailsController', () => {
       expect(bankDetails.deleteOwn).toHaveBeenCalledWith(
         uuidOf(100),
         uuidOf(1),
+        null,
+      );
+    });
+  });
+
+  describe('inside a login-link session', () => {
+    const impersonated = { ...trader, impersonatedBy: uuidOf(5) };
+
+    it('hands the superadmin who opened the session to create', async () => {
+      await controller.create(
+        { bankId: 1, type: TransactionType.Card, card: '4400430212345678' },
+        impersonated,
+      );
+
+      expect(bankDetails.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: uuidOf(1) }),
+        uuidOf(5),
+      );
+    });
+
+    it('hands the superadmin who opened the session to delete', async () => {
+      await controller.remove(uuidOf(100), impersonated);
+
+      expect(bankDetails.deleteOwn).toHaveBeenCalledWith(
+        uuidOf(100),
+        uuidOf(1),
+        uuidOf(5),
       );
     });
   });
@@ -239,4 +268,18 @@ describe('BankDetailsController', () => {
     expect(listed.meta).toEqual({ total: 1, page: 1, limit: 20, pages: 1 });
     expect(listed.items[0]).toMatchObject({ card: '4400430212345678' });
   });
+});
+
+describe('BankDetailsController switch status codes', () => {
+  it.each(['enable', 'disable'])(
+    'answers %s with 200, since a switch creates nothing',
+    (handler) => {
+      expect(
+        Reflect.getMetadata(
+          HTTP_CODE_METADATA,
+          BankDetailsController.prototype[handler],
+        ),
+      ).toBe(200);
+    },
+  );
 });

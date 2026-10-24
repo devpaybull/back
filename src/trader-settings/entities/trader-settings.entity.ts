@@ -54,6 +54,15 @@ export class TraderSettings {
   @Column(moneyColumn({ nullable: true }))
   insurancePayInMin: number | null;
 
+  @Column(moneyColumn({ nullable: true }))
+  insurancePayOutMin: number | null;
+
+  @Column({ default: true })
+  nightStopEnabled: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  nightStopThreshold: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

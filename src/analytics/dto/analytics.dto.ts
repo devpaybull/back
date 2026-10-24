@@ -65,6 +65,18 @@ export class VolumeAnalyticsPointDto {
 
   @ApiProperty()
   payOutCount: number;
+
+  @ApiProperty({
+    description:
+      'Sum of amountCrypto (USDT) of successful (success, success_changed) pay-in deals created that day; 0 for an empty day',
+  })
+  payInAmount: number;
+
+  @ApiProperty({
+    description:
+      'Sum of amountCrypto (USDT) of successful (success, success_changed) pay-out deals created that day; 0 for an empty day',
+  })
+  payOutAmount: number;
 }
 
 export class VolumeAnalyticsSummaryDto {

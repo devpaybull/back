@@ -29,6 +29,24 @@ export class MerchantsService {
     return this.merchants.find({ where: { id: In(ids) } });
   }
 
+  async rankByName(): Promise<Map<string, number>> {
+    const merchants = await this.merchants.find({
+      select: { id: true, name: true },
+      order: { name: 'ASC', id: 'ASC' },
+    });
+    const ranks = new Map<string, number>();
+    let rank = -1;
+    let previousName: string | undefined;
+
+    for (const merchant of merchants) {
+      if (merchant.name !== previousName) rank++;
+      previousName = merchant.name;
+      ranks.set(merchant.id, rank);
+    }
+
+    return ranks;
+  }
+
   create(name: string, manager?: EntityManager): Promise<Merchant> {
     const repository = manager
       ? manager.getRepository(Merchant)

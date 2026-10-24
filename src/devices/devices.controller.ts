@@ -55,7 +55,10 @@ export class DevicesController {
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<OwnDeviceDto> {
     return toOwnDeviceDto(
-      await this.devices.create({ ...dto, userId: trader.id }),
+      await this.devices.create(
+        { ...dto, userId: trader.id },
+        trader.impersonatedBy ?? null,
+      ),
     );
   }
 
@@ -97,7 +100,11 @@ export class DevicesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<void> {
-    await this.bankDetails.deleteOwnDevice(id, trader.id);
+    await this.bankDetails.deleteOwnDevice(
+      id,
+      trader.id,
+      trader.impersonatedBy ?? null,
+    );
   }
 
   @Patch(':id')

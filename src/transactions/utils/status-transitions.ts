@@ -69,6 +69,11 @@ export const FINAL_STATUSES: readonly TransactionStatus[] = [
   TransactionStatus.Canceled,
 ];
 
+export const TICKING_STATUSES: readonly TransactionStatus[] = [
+  TransactionStatus.Pending,
+  TransactionStatus.Active,
+];
+
 export function isFinalStatus(status: TransactionStatus): boolean {
   return FINAL_STATUSES.includes(status);
 }

@@ -20,5 +20,7 @@ export const bankDetailsListOrder = (
       return { maxAmount: direction, id: direction };
     case BankDetailsSortField.DailyLimit:
       return { dailyLimit: direction, id: direction };
+    case BankDetailsSortField.TurnoverTotal:
+      return { id: direction };
   }
 };

@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { Bank } from '../../banks/entities/bank.entity';
@@ -34,6 +35,8 @@ describe('the devices ↔ bank-details module graph', () => {
       .useValue(repository)
       .overrideProvider(getRepositoryToken(BankDetails))
       .useValue(repository)
+      .overrideProvider(getRepositoryToken(AuditLog))
+      .useValue(repository)
       .overrideProvider(getRepositoryToken(Bank))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Country))
@@ -41,7 +44,11 @@ describe('the devices ↔ bank-details module graph', () => {
       .overrideProvider(getRepositoryToken(Currency))
       .useValue(repository)
       .overrideProvider(ConfigService)
-      .useValue({ get: jest.fn(() => 5000) })
+      .useValue({
+        get: jest.fn((key: string) =>
+          key === 'VICTORIA_LOGS_URL' ? '' : 5000,
+        ),
+      })
       .compile();
 
   it('resolves despite the cycle the two forwardRefs describe', async () => {

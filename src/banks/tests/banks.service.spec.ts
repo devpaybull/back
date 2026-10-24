@@ -28,6 +28,7 @@ describe('BanksService', () => {
         ) ?? null,
     ),
     findAndCount: jest.fn(async () => [stored, stored.length]),
+    find: jest.fn(async () => stored),
     create: jest.fn((data: Partial<Bank>) => ({ ...data }) as Bank),
     merge: jest.fn((target: Bank, patch: Partial<Bank>) =>
       Object.assign(target, patch),
@@ -192,6 +193,25 @@ describe('BanksService', () => {
       });
 
       expect(page.meta).toEqual({ total: 1, page: 1, limit: 20, pages: 1 });
+    });
+  });
+
+  describe('findByIds', () => {
+    it('answers an empty id list without querying', async () => {
+      await expect(service.findByIds([])).resolves.toEqual([]);
+      expect(banks.find).not.toHaveBeenCalled();
+    });
+
+    it('asks for every id in one query', async () => {
+      await service.findByIds([1, 2]);
+
+      const [{ where }] = banks.find.mock.calls[0] as unknown as [
+        { where: { id: { type: string; value: unknown } } },
+      ];
+
+      expect(banks.find).toHaveBeenCalledTimes(1);
+      expect(where.id.type).toBe('in');
+      expect(where.id.value).toEqual([1, 2]);
     });
   });
 

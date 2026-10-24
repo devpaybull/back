@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   HttpStatus,
   NotFoundException,
   Param,
@@ -50,7 +51,10 @@ export class BankDetailsController {
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<OwnBankDetailsDto> {
     return toOwnBankDetailsDto(
-      await this.bankDetails.create({ ...dto, userId: trader.id }),
+      await this.bankDetails.create(
+        { ...dto, userId: trader.id },
+        trader.impersonatedBy ?? null,
+      ),
       this.bankDetails.counterpartyMinAmount,
     );
   }
@@ -86,6 +90,7 @@ export class BankDetailsController {
   }
 
   @Post(':id/enable')
+  @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({
     summary: 'Switches bank details the signed-in account owns on',
@@ -104,6 +109,7 @@ export class BankDetailsController {
   }
 
   @Post(':id/disable')
+  @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({
     summary: 'Switches bank details the signed-in account owns off',
@@ -131,7 +137,11 @@ export class BankDetailsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<void> {
-    await this.bankDetails.deleteOwn(id, trader.id);
+    await this.bankDetails.deleteOwn(
+      id,
+      trader.id,
+      trader.impersonatedBy ?? null,
+    );
   }
 
   @Patch(':id')

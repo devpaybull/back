@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Page, toPage } from '../common/types/page';
 import { sortDirection } from '../common/utils/sort-direction';
 import { Counterparty } from './entities/counterparty.entity';
@@ -18,6 +18,12 @@ export class CounterpartiesService {
 
   findById(id: number): Promise<Counterparty | null> {
     return this.counterparties.findOne({ where: { id } });
+  }
+
+  async findByIds(ids: number[]): Promise<Counterparty[]> {
+    if (ids.length === 0) return [];
+
+    return this.counterparties.find({ where: { id: In(ids) } });
   }
 
   async list(query: CounterpartyListQuery): Promise<Page<Counterparty>> {

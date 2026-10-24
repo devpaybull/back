@@ -13,10 +13,10 @@ import { Counterparty } from '../../counterparties/entities/counterparty.entity'
 import { Merchant } from '../../merchants/entities/merchant.entity';
 import { User } from '../../users/entities/user.entity';
 import { TransactionKind } from '../types/transaction-kind.enum';
-import { TransactionMethod } from '../types/transaction-method.enum';
+import { TransactionMethod } from '../types/transaction-method';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { moneyColumn } from '../../common/utils/money-column';
-import { percentColumn } from '../utils/percent-column';
+import { percentColumn } from '../../common/utils/percent-column';
 
 @Entity('transactions')
 export class Transaction {
@@ -30,7 +30,7 @@ export class Transaction {
   @Column({ type: 'enum', enum: TransactionStatus })
   status: TransactionStatus;
 
-  @Column({ type: 'enum', enum: TransactionMethod, nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   method: TransactionMethod;
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT' })
@@ -89,6 +89,9 @@ export class Transaction {
   traderPercent: number;
 
   @Column(percentColumn({ nullable: true }))
+  traderEffectivePercent: number;
+
+  @Column(percentColumn({ nullable: true }))
   leadPercent: number;
 
   @Column(moneyColumn({ nullable: true }))
@@ -114,6 +117,10 @@ export class Transaction {
 
   @Column({ type: 'timestamptz', nullable: true })
   resolvedAt: Date;
+
+  @Index()
+  @Column({ type: 'timestamptz', nullable: true })
+  expiresAt: Date | null;
 
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;

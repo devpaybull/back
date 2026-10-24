@@ -2,12 +2,34 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
-import { AuditService } from '../audit/audit.service';
+import { AuditService } from '../audit/services/audit.service';
+import { ActivityAction } from '../audit/types/activity-action.enum';
 import { TraderSettings } from './entities/trader-settings.entity';
 import {
   TraderSettingsAudit,
   TraderSettingsChanges,
 } from './types/trader-settings-changes';
+
+const UNIQUE_VIOLATION = '23505';
+
+const UNSAVED_DEFAULTS = {
+  tradingEnabled: false,
+  payoutTradingEnabled: false,
+  individualRatesEnabled: false,
+  autoBuybackEnabled: false,
+  autoBuybackConcurrent: null,
+  payInAntifraudEnabled: false,
+  qrBuybackAccess: false,
+  userTransferAccess: false,
+  trustedUser: false,
+  insurancePayInMin: null,
+  insurancePayOutMin: null,
+  nightStopEnabled: true,
+  nightStopThreshold: null,
+} as const;
+
+const isUniqueViolation = (error: unknown): boolean =>
+  (error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION;
 
 const FLAG_KEYS = [
   'tradingEnabled',
@@ -17,6 +39,7 @@ const FLAG_KEYS = [
   'qrBuybackAccess',
   'userTransferAccess',
   'trustedUser',
+  'nightStopEnabled',
 ] as const;
 
 @Injectable()
@@ -49,11 +72,43 @@ export class TraderSettingsService {
     );
   }
 
+  insurancePayOutMinOf(settings: TraderSettings | null | undefined): number {
+    return (
+      settings?.insurancePayOutMin ??
+      this.config.getOrThrow<number>('INSURANCE_PAY_OUT_MIN')
+    );
+  }
+
+  async effectiveInsurancePayOutMin(userId: string): Promise<number> {
+    return this.insurancePayOutMinOf(
+      await this.settings.findOne({ where: { userId } }),
+    );
+  }
+
+  nightStopThresholdOf(settings: TraderSettings | null | undefined): number {
+    return (
+      settings?.nightStopThreshold ??
+      this.config.getOrThrow<number>('NIGHT_STOP_THRESHOLD')
+    );
+  }
+
+  async findOrDefaults(userId: string): Promise<TraderSettings> {
+    const existing = await this.settings.findOne({ where: { userId } });
+
+    return existing ?? this.settings.create({ userId, ...UNSAVED_DEFAULTS });
+  }
+
   async ensure(userId: string): Promise<TraderSettings> {
     const existing = await this.settings.findOne({ where: { userId } });
     if (existing) return existing;
 
-    return this.settings.save(this.settings.create({ userId }));
+    try {
+      return await this.settings.save(this.settings.create({ userId }));
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+
+      return this.settings.findOneOrFail({ where: { userId } });
+    }
   }
 
   async update(
@@ -70,6 +125,7 @@ export class TraderSettingsService {
 
       const previousConcurrent = settings.autoBuybackConcurrent;
       const previousEnabled = settings.autoBuybackEnabled;
+      const previousTrading = settings.tradingEnabled;
 
       for (const key of FLAG_KEYS) {
         if (changes[key] !== undefined) settings[key] = changes[key];
@@ -77,6 +133,14 @@ export class TraderSettingsService {
 
       if (changes.insurancePayInMin !== undefined) {
         settings.insurancePayInMin = changes.insurancePayInMin;
+      }
+
+      if (changes.insurancePayOutMin !== undefined) {
+        settings.insurancePayOutMin = changes.insurancePayOutMin;
+      }
+
+      if (changes.nightStopThreshold !== undefined) {
+        settings.nightStopThreshold = changes.nightStopThreshold;
       }
 
       const enabled = changes.autoBuybackEnabled ?? previousEnabled;
@@ -100,19 +164,65 @@ export class TraderSettingsService {
         manager,
       );
 
+      if (settings.tradingEnabled !== previousTrading) {
+        await this.recordActivity(
+          manager,
+          audit.actorUserId,
+          userId,
+          settings.tradingEnabled
+            ? ActivityAction.TradingEnabled
+            : ActivityAction.TradingDisabled,
+        );
+      }
+
+      if (settings.autoBuybackEnabled !== previousEnabled) {
+        await this.recordActivity(
+          manager,
+          audit.actorUserId,
+          userId,
+          settings.autoBuybackEnabled
+            ? ActivityAction.AutoBuybackEnabled
+            : ActivityAction.AutoBuybackDisabled,
+        );
+      }
+
       return settings;
     });
+  }
+
+  private recordActivity(
+    manager: EntityManager,
+    actorUserId: string,
+    targetUserId: string,
+    action: ActivityAction,
+  ): Promise<unknown> {
+    return this.audit.record({ actorUserId, targetUserId, action }, manager);
   }
 
   private async ensureWithin(
     manager: EntityManager,
     userId: string,
   ): Promise<TraderSettings> {
-    const existing = await manager.findOne(TraderSettings, {
-      where: { userId },
-    });
+    const lockedRow = () =>
+      manager.findOne(TraderSettings, {
+        where: { userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+    const existing = await lockedRow();
     if (existing) return existing;
 
-    return manager.save(manager.create(TraderSettings, { userId }));
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(TraderSettings)
+      .values({ userId })
+      .orIgnore()
+      .execute();
+
+    const created = await lockedRow();
+    if (!created) throw new Error(`Trader settings for ${userId} vanished`);
+
+    return created;
   }
 }

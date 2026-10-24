@@ -1,4 +1,4 @@
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CounterpartiesService } from '../counterparties.service';
 import { Counterparty } from '../entities/counterparty.entity';
 
@@ -73,5 +73,25 @@ describe('CounterpartiesService', () => {
         payload: null,
       });
     });
+  });
+});
+
+describe('CounterpartiesService.findByIds', () => {
+  it('reads every asked-for counterparty in one query', async () => {
+    const rows = [{ id: 5 }, { id: 6 }] as Counterparty[];
+    const repository = { find: jest.fn(async () => rows) };
+    const service = new CounterpartiesService(repository as never);
+
+    await expect(service.findByIds([5, 6])).resolves.toBe(rows);
+    expect(repository.find).toHaveBeenCalledTimes(1);
+    expect(repository.find).toHaveBeenCalledWith({ where: { id: In([5, 6]) } });
+  });
+
+  it('answers an empty id list without querying', async () => {
+    const repository = { find: jest.fn() };
+    const service = new CounterpartiesService(repository as never);
+
+    await expect(service.findByIds([])).resolves.toEqual([]);
+    expect(repository.find).not.toHaveBeenCalled();
   });
 });

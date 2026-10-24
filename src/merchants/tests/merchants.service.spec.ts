@@ -88,3 +88,38 @@ describe('MerchantsService', () => {
     expect(merchants.find).not.toHaveBeenCalled();
   });
 });
+
+describe('MerchantsService.rankByName', () => {
+  it('ranks every merchant by name in one query, equal names sharing a rank', async () => {
+    const repository = {
+      find: jest.fn(async () => [
+        { id: 'a', name: 'Acme' },
+        { id: 'b', name: 'Acme' },
+        { id: 'c', name: 'Beta' },
+        { id: 'd', name: 'Zeta' },
+      ]),
+    };
+    const service = new MerchantsService(repository as never, {} as never);
+
+    const ranks = await service.rankByName();
+
+    expect(repository.find).toHaveBeenCalledTimes(1);
+    expect(repository.find).toHaveBeenCalledWith({
+      select: { id: true, name: true },
+      order: { name: 'ASC', id: 'ASC' },
+    });
+    expect([...ranks.entries()]).toEqual([
+      ['a', 0],
+      ['b', 0],
+      ['c', 1],
+      ['d', 2],
+    ]);
+  });
+
+  it('answers an empty ranking when there are no merchants', async () => {
+    const repository = { find: jest.fn(async () => []) };
+    const service = new MerchantsService(repository as never, {} as never);
+
+    await expect(service.rankByName()).resolves.toEqual(new Map());
+  });
+});

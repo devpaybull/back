@@ -109,6 +109,25 @@ describe('CurrenciesService', () => {
     });
   });
 
+  describe('findByIds', () => {
+    it('answers an empty id list without querying', async () => {
+      await expect(service.findByIds([])).resolves.toEqual([]);
+      expect(currencies.find).not.toHaveBeenCalled();
+    });
+
+    it('asks for every id in one query', async () => {
+      await service.findByIds([1, 2]);
+
+      const [{ where }] = currencies.find.mock.calls[0] as unknown as [
+        { where: { id: { type: string; value: unknown } } },
+      ];
+
+      expect(currencies.find).toHaveBeenCalledTimes(1);
+      expect(where.id.type).toBe('in');
+      expect(where.id.value).toEqual([1, 2]);
+    });
+  });
+
   describe('update', () => {
     it('answers 404 for an id nobody holds', async () => {
       await expect(service.update(404, { name: 'Nothing' })).rejects.toThrow(

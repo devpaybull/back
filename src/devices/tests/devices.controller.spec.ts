@@ -105,10 +105,10 @@ describe('DevicesController', () => {
     it('registers the device against the signed-in trader', async () => {
       await controller.create({ name: 'Pixel 7' }, trader);
 
-      expect(devices.create).toHaveBeenCalledWith({
-        name: 'Pixel 7',
-        userId: uuidOf(1),
-      });
+      expect(devices.create).toHaveBeenCalledWith(
+        { name: 'Pixel 7', userId: uuidOf(1) },
+        null,
+      );
     });
 
     it('scopes the list to the signed-in trader', async () => {
@@ -144,7 +144,34 @@ describe('DevicesController', () => {
     it('deletes one row only through the owner-scoped delete', async () => {
       await controller.remove(100, trader);
 
-      expect(bankDetails.deleteOwnDevice).toHaveBeenCalledWith(100, uuidOf(1));
+      expect(bankDetails.deleteOwnDevice).toHaveBeenCalledWith(
+        100,
+        uuidOf(1),
+        null,
+      );
+    });
+  });
+
+  describe('inside a login-link session', () => {
+    const impersonated = { ...trader, impersonatedBy: uuidOf(5) };
+
+    it('hands the superadmin who opened the session to create', async () => {
+      await controller.create({ name: 'Pixel 7' }, impersonated);
+
+      expect(devices.create).toHaveBeenCalledWith(
+        { name: 'Pixel 7', userId: uuidOf(1) },
+        uuidOf(5),
+      );
+    });
+
+    it('hands the superadmin who opened the session to delete', async () => {
+      await controller.remove(100, impersonated);
+
+      expect(bankDetails.deleteOwnDevice).toHaveBeenCalledWith(
+        100,
+        uuidOf(1),
+        uuidOf(5),
+      );
     });
   });
 

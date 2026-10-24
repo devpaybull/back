@@ -1,8 +1,14 @@
-import { TransactionMethod } from './transaction-method.enum';
+import { TransactionMethod } from './transaction-method';
 
 export interface RateBandEntry {
   fromAmount: number;
   toAmount: number;
+  payInPercent: number;
+  payOutPercent: number;
+}
+
+export interface RateBankEntry {
+  bankId: number;
   payInPercent: number;
   payOutPercent: number;
 }
@@ -22,8 +28,14 @@ export interface SubjectMethodRates {
   method: TransactionMethod;
   general: RateGeneral | null;
   bands: RateBandEntry[];
+  banks: RateBankEntry[];
 }
 
 export interface RateAudit {
   actorUserId: string;
+}
+
+export interface LeadRateAudit extends RateAudit {
+  traderUserId: string;
+  leadUserId: string;
 }

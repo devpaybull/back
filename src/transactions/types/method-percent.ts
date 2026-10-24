@@ -1,4 +1,4 @@
-import { TransactionMethod } from './transaction-method.enum';
+import { TransactionMethod } from './transaction-method';
 
 export interface MethodPercent {
   method: TransactionMethod;
