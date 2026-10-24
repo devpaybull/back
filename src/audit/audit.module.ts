@@ -1,11 +1,25 @@
-import { Module } from '@nestjs/common';
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AuditService } from './audit.service';
 import { AuditLog } from './entities/audit-log.entity';
+import { HttpAuditMiddleware } from './middleware/http-audit.middleware';
+import { AuditArchiveService } from './services/audit-archive.service';
+import { AuditService } from './services/audit.service';
+import { VictoriaLogsService } from './services/victoria-logs.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([AuditLog])],
-  providers: [AuditService],
+  providers: [AuditService, VictoriaLogsService, AuditArchiveService],
   exports: [AuditService],
 })
-export class AuditModule {}
+export class AuditModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer
+      .apply(HttpAuditMiddleware)
+      .forRoutes({ path: '{*path}', method: RequestMethod.ALL });
+  }
+}
