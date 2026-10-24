@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AuthenticatedUser } from '../../common/types/token';
+import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { User } from '../entities/user.entity';
 import { EmailVerificationService } from '../services/email-verification.service';
 import { UserDirectoryService } from '../services/user-directory.service';
@@ -23,6 +24,7 @@ describe('UsersController', () => {
   const directory = { findAuthenticatableById: jest.fn() };
   const profile = { editOwnIdentifiers: jest.fn() };
   const emailVerification = { confirm: jest.fn() };
+  const settings = { ensure: jest.fn() };
 
   const caller = (overrides: Partial<AuthenticatedUser> = {}) => ({
     id: uuidOf(7),
@@ -59,6 +61,7 @@ describe('UsersController', () => {
         { provide: UserDirectoryService, useValue: directory },
         { provide: UserProfileService, useValue: profile },
         { provide: EmailVerificationService, useValue: emailVerification },
+        { provide: TraderSettingsService, useValue: settings },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: () => '' } },
       ],

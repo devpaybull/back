@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MailModule } from '../mail/mail.module';
+import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { EmailVerification } from './entities/email-verification.entity';
 import { UserBackupCode } from './entities/user-backup-code.entity';
 import { User } from './entities/user.entity';
@@ -16,6 +17,7 @@ import { UsersController } from './users.controller';
   imports: [
     TypeOrmModule.forFeature([User, UserBackupCode, EmailVerification]),
     MailModule,
+    TraderSettingsModule,
   ],
   controllers: [UsersController],
   providers: [

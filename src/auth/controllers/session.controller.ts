@@ -19,7 +19,7 @@ import { SessionService } from '../services/session.service';
 import { readRefreshCookie } from '../utils/read-refresh-cookie';
 import { setRefreshCookie } from '../utils/set-refresh-cookie';
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Public()
 @Controller('auth')
 export class SessionController {

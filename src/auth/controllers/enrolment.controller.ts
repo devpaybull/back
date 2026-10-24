@@ -22,7 +22,7 @@ import { TwoFactorSetupDto } from '../dto/two-factor-setup.dto';
 import { EnrolmentService } from '../services/enrolment.service';
 import { setRefreshCookie } from '../utils/set-refresh-cookie';
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Public()
 @Controller('auth')
 export class EnrolmentController {

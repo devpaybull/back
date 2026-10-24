@@ -47,6 +47,9 @@ lerna-debug.log*
 .temp
 .tmp
 
+# planning docs (kept local, not versioned)
+/docs
+
 # Runtime data
 pids
 *.pid
@@ -57,3 +60,8 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 .omc
+CLAUDE.md
+
+/scripts/*.js
+/scripts/*.d.ts
+/scripts/*.js.map

@@ -31,7 +31,7 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { toUserDto, UserDto } from '../dto/user.dto';
 import { canIssueRole } from '../utils/can-issue-role';
 
-@ApiTags('admin')
+@ApiTags('Admin · Users')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Admin, Role.Superadmin)

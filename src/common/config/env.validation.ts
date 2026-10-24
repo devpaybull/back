@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsString,
   Max,
   Min,
@@ -32,6 +33,16 @@ const ToBoolean = () =>
     if (FALSE_VALUES.includes(normalized)) return false;
 
     return value;
+  });
+
+const ToRequiredInteger = () =>
+  Transform(({ value }) => {
+    if (typeof value === 'number') return value;
+    if (value === undefined || value === null || String(value).trim() === '') {
+      return undefined;
+    }
+
+    return Number(value);
   });
 
 export class EnvironmentVariables {
@@ -135,6 +146,60 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   INVITE_TTL_HOURS: number = 72;
+
+  @ToRequiredInteger()
+  @IsInt()
+  @Min(0)
+  COUNTERPARTY_MIN_AMOUNT: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  RATE_MARKUP: number = 0.01;
+
+  @IsString()
+  @IsNotEmpty()
+  RAPIRA_RATE_URL: string = 'https://api.rapira.net/open/market/rates';
+
+  @IsString()
+  @IsNotEmpty()
+  RAPIRA_RATE_SYMBOL: string = 'USDT/RUB';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  RAPIRA_RATE_TTL_SECONDS: number = 60;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  MAIN_BALANCE_MIN_THRESHOLD: number = 0;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  INSURANCE_PAY_IN_MIN: number = 500;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  INSURANCE_WITHDRAWAL_DELAY_DAYS: number = 14;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  INSURANCE_NIGHT_START_HOUR: number = 0;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  INSURANCE_NIGHT_END_HOUR: number = 10;
+
+  @IsString()
+  @IsNotEmpty()
+  INSURANCE_NIGHT_TIMEZONE: string = 'Europe/Moscow';
 
   @IsString()
   MAIL_HOST: string = '';

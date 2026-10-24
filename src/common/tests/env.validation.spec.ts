@@ -10,9 +10,44 @@ const baseEnv = (): Record<string, unknown> => ({
   JWT_ACCESS_SECRET: SECRET,
   JWT_REFRESH_SECRET: SECRET,
   JWT_REGISTRATION_SECRET: SECRET,
+  COUNTERPARTY_MIN_AMOUNT: '5000',
 });
 
 describe('validateEnv', () => {
+  describe('COUNTERPARTY_MIN_AMOUNT', () => {
+    it('parses the floor as a number', () => {
+      expect(validateEnv(baseEnv()).COUNTERPARTY_MIN_AMOUNT).toBe(5000);
+    });
+
+    it('refuses to boot without it, since there is no sane default floor', () => {
+      const { COUNTERPARTY_MIN_AMOUNT, ...withoutFloor } = baseEnv();
+
+      expect(COUNTERPARTY_MIN_AMOUNT).toBe('5000');
+      expect(() => validateEnv(withoutFloor)).toThrow(
+        /COUNTERPARTY_MIN_AMOUNT/,
+      );
+    });
+
+    it('refuses an empty value, which is what .env.example ships', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '' }),
+      ).toThrow(/COUNTERPARTY_MIN_AMOUNT/);
+    });
+
+    it('refuses a negative floor', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '-1' }),
+      ).toThrow(/COUNTERPARTY_MIN_AMOUNT/);
+    });
+
+    it('takes zero, which is a floor of nothing rather than an absent one', () => {
+      expect(
+        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '0' })
+          .COUNTERPARTY_MIN_AMOUNT,
+      ).toBe(0);
+    });
+  });
+
   it('boots with no mail configuration at all', () => {
     const env = validateEnv(baseEnv());
 

@@ -862,4 +862,125 @@ describe('InvitesService', () => {
       await expect(createEmailInvite()).resolves.toBeDefined();
     });
   });
+
+  describe('extend', () => {
+    const later = () => new Date(Date.now() + 10 * HOUR_IN_MS);
+    const expiredInvite = (overrides: Partial<Invite> = {}) =>
+      pendingInvite({
+        expiresAt: new Date(Date.now() - HOUR_IN_MS),
+        ...overrides,
+      });
+
+    it('moves the expiry of a pending invite without looking for another live one', async () => {
+      const invite = pendingInvite();
+      const expiresAt = later();
+      invites.findOne.mockResolvedValue(invite);
+
+      await service.extend(1, expiresAt);
+
+      expect(invite.expiresAt).toEqual(expiresAt);
+      expect(invites.save).toHaveBeenCalledWith(invite);
+      expect(userDirectory.isIdentifierTaken).toHaveBeenCalledTimes(1);
+      expect(invites.find).not.toHaveBeenCalled();
+    });
+
+    it('refuses to extend a pending invite once the account exists', async () => {
+      invites.findOne.mockResolvedValue(pendingInvite());
+      userDirectory.isIdentifierTaken.mockResolvedValue(true);
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(invites.find).not.toHaveBeenCalled();
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('reads the invite back with the accounts behind it', async () => {
+      invites.findOne.mockResolvedValue(pendingInvite());
+
+      await service.extend(1, later());
+
+      expect(invites.findOne).toHaveBeenLastCalledWith({
+        where: { id: 1 },
+        relations: { createdBy: true, usedBy: true, revokedBy: true },
+      });
+    });
+
+    it('revives an expired invite', async () => {
+      const invite = expiredInvite();
+      invites.findOne.mockResolvedValue(invite);
+      invites.find.mockResolvedValue([invite]);
+
+      await service.extend(1, later());
+
+      expect(inviteStatus(invite)).toBe(InviteStatus.Pending);
+      expect(invites.save).toHaveBeenCalledWith(invite);
+    });
+
+    it('answers not found for an invite that does not exist', async () => {
+      invites.findOne.mockResolvedValue(null);
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses an invite somebody already redeemed', async () => {
+      invites.findOne.mockResolvedValue(
+        pendingInvite({ usedAt: new Date(), usedByUserId: uuidOf(9) }),
+      );
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a revoked invite', async () => {
+      invites.findOne.mockResolvedValue(
+        pendingInvite({ revokedAt: new Date(), revokedByUserId: uuidOf(4) }),
+      );
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to revive an expired invite once the account exists', async () => {
+      invites.findOne.mockResolvedValue(expiredInvite());
+      userDirectory.isIdentifierTaken.mockResolvedValue(true);
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(userDirectory.isIdentifierTaken).toHaveBeenCalledWith({
+        email: 'user@example.com',
+      });
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to revive an expired invite while another one is live', async () => {
+      invites.findOne.mockResolvedValue(expiredInvite());
+      invites.find.mockResolvedValue([pendingInvite({ id: 2 })]);
+
+      await expect(service.extend(1, later())).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(invites.save).not.toHaveBeenCalled();
+    });
+
+    it('checks a telegram invite by its username', async () => {
+      invites.findOne.mockResolvedValue(
+        telegramInvite({ expiresAt: new Date(Date.now() - HOUR_IN_MS) }),
+      );
+
+      await service.extend(1, later());
+
+      expect(userDirectory.isIdentifierTaken).toHaveBeenCalledWith({
+        telegramUsername: 'someone',
+      });
+    });
+  });
 });

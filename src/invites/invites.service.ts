@@ -162,6 +162,49 @@ export class InvitesService {
     });
   }
 
+  async extend(id: number, expiresAt: Date): Promise<Invite> {
+    const invite = await this.findById(id);
+
+    if (!invite) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    const status = inviteStatus(invite);
+
+    if (status === InviteStatus.Used) {
+      throw new ConflictException('This invite has already been used');
+    }
+
+    if (status === InviteStatus.Revoked) {
+      throw new ConflictException('This invite has been revoked');
+    }
+
+    const identifier: AccountIdentifier = invite.email
+      ? { email: invite.email }
+      : { telegramUsername: invite.telegramUsername };
+
+    if (await this.directory.isIdentifierTaken(identifier)) {
+      throw new ConflictException('This account already exists');
+    }
+
+    if (status === InviteStatus.Expired) {
+      if (await this.findLiveInvite(identifier)) {
+        throw new ConflictException(
+          'A usable invite has already been issued for this account',
+        );
+      }
+    }
+
+    invite.expiresAt = expiresAt;
+
+    await this.invites.save(invite);
+
+    return this.invites.findOne({
+      where: { id },
+      relations: { createdBy: true, usedBy: true, revokedBy: true },
+    });
+  }
+
   private defaultExpiry(): Date {
     return new Date(
       Date.now() + this.config.get<number>('INVITE_TTL_HOURS') * HOUR_IN_MS,
