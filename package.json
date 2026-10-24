@@ -33,6 +33,7 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
+    "maxmind": "5.0.7",
     "nodemailer": "^9.0.3",
     "otplib": "^13.4.1",
     "pg": "^8.22.0",

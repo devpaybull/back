@@ -13,11 +13,13 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { CounterpartiesModule } from './counterparties/counterparties.module';
 import { CountriesModule } from './countries/countries.module';
 import { CurrenciesModule } from './currencies/currencies.module';
+import { DebtsModule } from './debts/debts.module';
 import { DevicesModule } from './devices/devices.module';
 import { InvitesModule } from './invites/invites.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { TraderSettingsModule } from './trader-settings/trader-settings.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { UserNotesModule } from './user-notes/user-notes.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -56,6 +58,8 @@ import { UsersModule } from './users/users.module';
     AuditModule,
     TraderSettingsModule,
     AnalyticsModule,
+    UserNotesModule,
+    DebtsModule,
     AdminModule,
   ],
   controllers: [],

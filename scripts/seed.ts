@@ -3,6 +3,7 @@ import { hash } from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import { DataSource, EntityManager } from 'typeorm';
+import { loginOf } from '../src/common/utils/login-of';
 import { sha256Hex } from '../src/common/utils/sha256-hex';
 import { Role } from '../src/common/enums/role.enum';
 import { TransactionType } from '../src/common/enums/transaction-type.enum';
@@ -24,9 +25,15 @@ import { Wallet } from '../src/transactions/entities/wallet.entity';
 import { BalanceOperation } from '../src/transactions/entities/balance-operation.entity';
 import { BalanceKind } from '../src/transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../src/transactions/types/balance-operation-type.enum';
+import { LeadRate } from '../src/transactions/entities/lead-rate.entity';
 import { MethodRate } from '../src/transactions/entities/method-rate.entity';
+import { TransactionLeadShare } from '../src/transactions/entities/transaction-lead-share.entity';
+import {
+  DealLeadPercent,
+  DealLeadShare,
+} from '../src/transactions/types/deal-computation';
 import { RateScope } from '../src/transactions/types/rate-scope.enum';
-import { TransactionMethod } from '../src/transactions/types/transaction-method.enum';
+import { TransactionMethod } from '../src/transactions/types/transaction-method';
 import { Transaction } from '../src/transactions/entities/transaction.entity';
 import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
 import { TransactionStatus } from '../src/transactions/types/transaction-status.enum';
@@ -36,10 +43,36 @@ import { computeDeal } from '../src/transactions/utils/compute-deal';
 import { roundMoney } from '../src/transactions/utils/round-money';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
+import { AuditSource } from '../src/audit/types/audit-source.enum';
+import { Debt } from '../src/debts/entities/debt.entity';
+import { DebtEvent } from '../src/debts/entities/debt-event.entity';
+import { DebtEventType } from '../src/debts/types/debt-event-type.enum';
 
 const SEED_PASSWORD = 'TestPass123!';
-const SEED_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+const SEED_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 const MARKER_EMAIL = 'superadmin@example.com';
+
+const platformMinPercent = (): number => {
+  const raw = process.env.PLATFORM_MIN_PERCENT ?? '';
+  const value = Number(raw);
+
+  if (raw.trim() === '' || !Number.isFinite(value) || value < 0) {
+    throw new Error('PLATFORM_MIN_PERCENT must be set to seed deals');
+  }
+
+  return value;
+};
+
+const dealTtlMinutes = (): number => {
+  const raw = process.env.DEAL_TTL_MINUTES ?? '';
+  const value = Number(raw);
+
+  if (raw.trim() === '' || !Number.isInteger(value) || value < 1) {
+    throw new Error('DEAL_TTL_MINUTES must be set to seed deals');
+  }
+
+  return value;
+};
 
 interface StatusStep {
   toStatus: TransactionStatus;
@@ -79,7 +112,7 @@ async function seedUser(
   passwordHash: string,
   input: {
     email?: string;
-    telegramUsername?: string;
+    telegramUsername: string;
     emailVerified?: boolean;
     role: Role;
     status: UserStatus;
@@ -92,7 +125,7 @@ async function seedUser(
     manager.create(User, {
       email: input.email ?? null,
       emailVerified: input.emailVerified ?? false,
-      telegramUsername: input.telegramUsername ?? null,
+      telegramUsername: input.telegramUsername,
       passwordHash,
       role: input.role,
       merchantId: input.merchantId ?? null,
@@ -116,7 +149,7 @@ async function recordBalanceMove(
   delta: number,
   type: BalanceOperationType,
   transactionId: string | null,
-): Promise<void> {
+): Promise<BalanceOperation> {
   const field =
     balanceKind === BalanceKind.Main
       ? 'mainBalance'
@@ -128,7 +161,7 @@ async function recordBalanceMove(
   const after = roundMoney(before + delta);
   wallet[field] = after;
 
-  await manager.save(
+  return manager.save(
     BalanceOperation,
     manager.create(BalanceOperation, {
       walletId: wallet.id,
@@ -178,19 +211,25 @@ async function createDeal(
     rate: number;
     merchantPercent: number;
     traderPercent: number;
+    leads?: DealLeadPercent[];
     comment?: string;
     steps: StatusStep[];
     finalStatus: TransactionStatus;
     resolved: boolean;
   },
-): Promise<Transaction> {
+): Promise<Transaction & { leadShares: DealLeadShare[] }> {
   const computation = computeDeal({
     kind: input.kind,
     amountFiat: input.amountFiat,
     rate: input.rate,
     merchantPercent: input.merchantPercent,
     traderPercent: input.traderPercent,
+    platformMinPercent: platformMinPercent(),
+    leads: input.leads ?? [],
   });
+
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + dealTtlMinutes() * 60_000);
 
   const transaction = await manager.save(
     Transaction,
@@ -207,18 +246,41 @@ async function createDeal(
       rate: input.rate,
       merchantPercent: input.merchantPercent,
       traderPercent: input.traderPercent,
+      traderEffectivePercent: computation.traderEffectivePercent,
+      leadPercent: computation.leadPercent,
       merchantCommission: computation.merchantCommission,
       traderCommission: computation.traderCommission,
+      leadCommission: computation.leadCommission,
       traderAmount: computation.traderAmount,
       merchantAmount: computation.merchantAmount,
       comment: input.comment ?? null,
+      createdAt,
+      expiresAt,
       resolvedAt: input.resolved ? new Date() : null,
     }),
   );
 
+  if (computation.leadShares.length) {
+    await manager.save(
+      TransactionLeadShare,
+      computation.leadShares.map((share) =>
+        manager.create(TransactionLeadShare, {
+          transactionId: transaction.id,
+          leadUserId: share.leadUserId,
+          percent: share.percent,
+          amount: share.amount,
+        }),
+      ),
+    );
+  }
+
   await writeStatusPath(manager, transaction.id, input.steps);
 
-  return { ...transaction, traderAmount: computation.traderAmount } as Transaction;
+  return {
+    ...transaction,
+    traderAmount: computation.traderAmount,
+    leadShares: computation.leadShares,
+  } as Transaction & { leadShares: DealLeadShare[] };
 }
 
 async function main(): Promise<void> {
@@ -294,6 +356,7 @@ async function main(): Promise<void> {
 
     const superadmin = await seedUser(manager, passwordHash, {
       email: MARKER_EMAIL,
+      telegramUsername: 'superadmin',
       emailVerified: true,
       role: Role.Superadmin,
       status: UserStatus.Active,
@@ -303,6 +366,7 @@ async function main(): Promise<void> {
 
     const admin = await seedUser(manager, passwordHash, {
       email: 'admin@example.com',
+      telegramUsername: 'admin_main',
       emailVerified: true,
       role: Role.Admin,
       status: UserStatus.Active,
@@ -312,6 +376,7 @@ async function main(): Promise<void> {
 
     const trader1 = await seedUser(manager, passwordHash, {
       email: 'trader1@example.com',
+      telegramUsername: 'trader_one',
       emailVerified: true,
       role: Role.Trader,
       status: UserStatus.Active,
@@ -321,6 +386,7 @@ async function main(): Promise<void> {
 
     const trader2 = await seedUser(manager, passwordHash, {
       email: 'trader2@example.com',
+      telegramUsername: 'trader_two',
       emailVerified: false,
       role: Role.Trader,
       status: UserStatus.Suspended,
@@ -338,6 +404,7 @@ async function main(): Promise<void> {
 
     const lead1 = await seedUser(manager, passwordHash, {
       email: 'lead1@example.com',
+      telegramUsername: 'lead_one',
       emailVerified: true,
       role: Role.LeadTrader,
       status: UserStatus.Active,
@@ -345,23 +412,28 @@ async function main(): Promise<void> {
     });
     credentials.push({ label: 'Lead trader', user: lead1 });
 
-    const merchantRoleLogin = 'merchant.role@example.com';
+    const merchantRoleEmail = 'merchant.role@example.com';
     const merchantRoleMerchant = await manager.save(
       Merchant,
-      manager.create(Merchant, { name: merchantRoleLogin, active: true }),
+      manager.create(Merchant, { name: 'merchant_role', active: true }),
     );
     const merchantRoleUser = await seedUser(manager, passwordHash, {
-      email: merchantRoleLogin,
+      email: merchantRoleEmail,
+      telegramUsername: 'merchant_role',
       emailVerified: true,
       role: Role.Merchant,
       status: UserStatus.Active,
       withBackupCodes: true,
       merchantId: merchantRoleMerchant.id,
     });
-    credentials.push({ label: 'Merchant-role account', user: merchantRoleUser });
+    credentials.push({
+      label: 'Merchant-role account',
+      user: merchantRoleUser,
+    });
 
     const merchantSupport = await seedUser(manager, passwordHash, {
       email: 'merchant.support@example.com',
+      telegramUsername: 'merchant_support',
       emailVerified: true,
       role: Role.MerchantSupport,
       status: UserStatus.Active,
@@ -377,27 +449,56 @@ async function main(): Promise<void> {
       withBackupCodes: true,
       merchantId: merchantRoleMerchant.id,
     });
-    credentials.push({ label: 'Merchant agent (telegram-only)', user: merchantAgent });
+    credentials.push({
+      label: 'Merchant agent (telegram-only)',
+      user: merchantAgent,
+    });
 
-    await manager.save(TraderLead, [
+    const [trader1Lead1] = await manager.save(TraderLead, [
       manager.create(TraderLead, {
         traderUserId: trader1.user.id,
         leadUserId: lead1.user.id,
+        currencyId: rub.id,
+        payInPercent: 0.5,
+        payOutPercent: 0.2,
       }),
       manager.create(TraderLead, {
         traderUserId: trader3.user.id,
         leadUserId: lead1.user.id,
+        currencyId: rub.id,
+        payInPercent: 0.4,
+        payOutPercent: 0.1,
+      }),
+    ]);
+    await manager.save(LeadRate, [
+      manager.create(LeadRate, {
+        traderLeadId: trader1Lead1.id,
+        method: 'sbp',
+        payInPercent: 0.4,
+        payOutPercent: 0.15,
+      }),
+      manager.create(LeadRate, {
+        traderLeadId: trader1Lead1.id,
+        method: 'sbp',
+        fromAmount: 1000,
+        toAmount: 5000,
+        payInPercent: 0.3,
+        payOutPercent: 0.1,
       }),
     ]);
 
     const blocked1 = await seedUser(manager, passwordHash, {
       email: 'blocked1@example.com',
+      telegramUsername: 'blocked_one',
       emailVerified: true,
       role: Role.Trader,
       status: UserStatus.Blocked,
       withBackupCodes: false,
     });
-    credentials.push({ label: 'Blocked trader (cannot log in)', user: blocked1 });
+    credentials.push({
+      label: 'Blocked trader (cannot log in)',
+      user: blocked1,
+    });
 
     const device1 = await manager.save(
       Device,
@@ -604,7 +705,7 @@ async function main(): Promise<void> {
 
     const d1 = await createDeal(manager, {
       kind: TransactionKind.PayIn,
-      method: TransactionMethod.Card,
+      method: 'card',
       traderUserId: trader1.user.id,
       bankDetailsId: bd1.id,
       merchantId: merchant1.id,
@@ -613,12 +714,19 @@ async function main(): Promise<void> {
       rate: 88.92,
       merchantPercent: 10.5,
       traderPercent: 9.0,
+      leads: [{ leadUserId: lead1.user.id, percent: 0.5 }],
       comment: 'Оплата картой',
       finalStatus: TransactionStatus.Success,
       resolved: true,
       steps: [
-        { toStatus: TransactionStatus.Active, source: StatusEventSource.System },
-        { toStatus: TransactionStatus.Success, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Active,
+          source: StatusEventSource.System,
+        },
+        {
+          toStatus: TransactionStatus.Success,
+          source: StatusEventSource.System,
+        },
       ],
     });
     await recordBalanceMove(
@@ -629,10 +737,20 @@ async function main(): Promise<void> {
       BalanceOperationType.Transaction,
       d1.id,
     );
+    for (const share of d1.leadShares) {
+      await recordBalanceMove(
+        manager,
+        lead1Wallet,
+        BalanceKind.Main,
+        share.amount,
+        BalanceOperationType.Transaction,
+        d1.id,
+      );
+    }
 
     const d2 = await createDeal(manager, {
       kind: TransactionKind.PayIn,
-      method: TransactionMethod.Sbp,
+      method: 'sbp',
       traderUserId: trader1.user.id,
       bankDetailsId: bd2.id,
       merchantId: merchant1.id,
@@ -641,10 +759,14 @@ async function main(): Promise<void> {
       rate: 89.5,
       merchantPercent: 10.5,
       traderPercent: 8.5,
+      leads: [{ leadUserId: lead1.user.id, percent: 0.4 }],
       finalStatus: TransactionStatus.Active,
       resolved: false,
       steps: [
-        { toStatus: TransactionStatus.Active, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Active,
+          source: StatusEventSource.System,
+        },
       ],
     });
     trader1Wallet.mainReserved = roundMoney(
@@ -653,7 +775,7 @@ async function main(): Promise<void> {
 
     const d3 = await createDeal(manager, {
       kind: TransactionKind.PayIn,
-      method: TransactionMethod.Card,
+      method: 'card',
       traderUserId: trader1.user.id,
       bankDetailsId: bd1.id,
       merchantId: merchant1.id,
@@ -665,14 +787,20 @@ async function main(): Promise<void> {
       finalStatus: TransactionStatus.ManualReview,
       resolved: false,
       steps: [
-        { toStatus: TransactionStatus.Active, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Active,
+          source: StatusEventSource.System,
+        },
         {
           toStatus: TransactionStatus.Dispute,
           source: StatusEventSource.Trader,
           actorUserId: trader1.user.id,
           reason: 'Клиент утверждает, что перевод не получен',
         },
-        { toStatus: TransactionStatus.ManualReview, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.ManualReview,
+          source: StatusEventSource.System,
+        },
       ],
     });
     trader1Wallet.mainReserved = roundMoney(
@@ -681,7 +809,7 @@ async function main(): Promise<void> {
 
     await createDeal(manager, {
       kind: TransactionKind.PayIn,
-      method: TransactionMethod.Sbp,
+      method: 'sbp',
       traderUserId: trader1.user.id,
       bankDetailsId: bd2.id,
       merchantId: merchant1.id,
@@ -692,7 +820,10 @@ async function main(): Promise<void> {
       finalStatus: TransactionStatus.Canceled,
       resolved: true,
       steps: [
-        { toStatus: TransactionStatus.Active, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Active,
+          source: StatusEventSource.System,
+        },
         {
           toStatus: TransactionStatus.Canceled,
           source: StatusEventSource.AutoTimer,
@@ -703,7 +834,7 @@ async function main(): Promise<void> {
 
     const d5 = await createDeal(manager, {
       kind: TransactionKind.PayOut,
-      method: TransactionMethod.Card,
+      method: 'card',
       traderUserId: trader1.user.id,
       bankDetailsId: bd1.id,
       merchantId: merchant1.id,
@@ -715,13 +846,19 @@ async function main(): Promise<void> {
       finalStatus: TransactionStatus.Success,
       resolved: true,
       steps: [
-        { toStatus: TransactionStatus.Pending, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Pending,
+          source: StatusEventSource.System,
+        },
         {
           toStatus: TransactionStatus.Active,
           source: StatusEventSource.Trader,
           actorUserId: trader1.user.id,
         },
-        { toStatus: TransactionStatus.Success, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Success,
+          source: StatusEventSource.System,
+        },
       ],
     });
     await recordBalanceMove(
@@ -735,7 +872,7 @@ async function main(): Promise<void> {
 
     await createDeal(manager, {
       kind: TransactionKind.PayOut,
-      method: TransactionMethod.Sbp,
+      method: 'sbp',
       traderUserId: trader1.user.id,
       bankDetailsId: bd2.id,
       merchantId: merchant1.id,
@@ -746,7 +883,10 @@ async function main(): Promise<void> {
       finalStatus: TransactionStatus.Pending,
       resolved: false,
       steps: [
-        { toStatus: TransactionStatus.Pending, source: StatusEventSource.System },
+        {
+          toStatus: TransactionStatus.Pending,
+          source: StatusEventSource.System,
+        },
       ],
     });
 
@@ -791,6 +931,78 @@ async function main(): Promise<void> {
       transfer.id,
     );
 
+    const debtIssued = await recordBalanceMove(
+      manager,
+      trader2Wallet,
+      BalanceKind.Main,
+      400,
+      BalanceOperationType.DebtIssued,
+      null,
+    );
+    const partialDebt = await manager.save(
+      Debt,
+      manager.create(Debt, {
+        userId: trader2.user.id,
+        issuedByUserId: superadmin.user.id,
+        amount: 400,
+        remaining: 300,
+        comment: 'Вернёт до конца месяца',
+      }),
+    );
+    const debtWithheld = await recordBalanceMove(
+      manager,
+      trader2Wallet,
+      BalanceKind.Main,
+      -100,
+      BalanceOperationType.DebtWriteOff,
+      null,
+    );
+    await manager.save(DebtEvent, [
+      manager.create(DebtEvent, {
+        debtId: partialDebt.id,
+        type: DebtEventType.Issued,
+        amount: 400,
+        actorUserId: superadmin.user.id,
+        balanceOperationId: debtIssued.id,
+      }),
+      manager.create(DebtEvent, {
+        debtId: partialDebt.id,
+        type: DebtEventType.ManualWriteOff,
+        amount: 100,
+        actorUserId: superadmin.user.id,
+        balanceOperationId: debtWithheld.id,
+      }),
+    ]);
+
+    const scheduledIssued = await recordBalanceMove(
+      manager,
+      trader3Wallet,
+      BalanceKind.Main,
+      250,
+      BalanceOperationType.DebtIssued,
+      null,
+    );
+    const scheduledDebt = await manager.save(
+      Debt,
+      manager.create(Debt, {
+        userId: trader3.user.id,
+        issuedByUserId: superadmin.user.id,
+        amount: 250,
+        remaining: 250,
+        autoWriteOffAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }),
+    );
+    await manager.save(
+      DebtEvent,
+      manager.create(DebtEvent, {
+        debtId: scheduledDebt.id,
+        type: DebtEventType.Issued,
+        amount: 250,
+        actorUserId: superadmin.user.id,
+        balanceOperationId: scheduledIssued.id,
+      }),
+    );
+
     await manager.save([
       trader1Wallet,
       lead1Wallet,
@@ -833,20 +1045,24 @@ async function main(): Promise<void> {
 
     const baseRates: {
       scope: RateScope;
-      rows: { method: TransactionMethod; payInPercent: number; payOutPercent: number }[];
+      rows: {
+        method: TransactionMethod;
+        payInPercent: number;
+        payOutPercent: number;
+      }[];
     }[] = [
       {
         scope: RateScope.Trader,
         rows: [
-          { method: TransactionMethod.Sbp, payInPercent: 8.5, payOutPercent: 1.5 },
-          { method: TransactionMethod.Card, payInPercent: 9.0, payOutPercent: 2.0 },
+          { method: 'sbp', payInPercent: 8.5, payOutPercent: 1.5 },
+          { method: 'card', payInPercent: 9.0, payOutPercent: 2.0 },
           {
-            method: TransactionMethod.Counterparty,
+            method: 'counterparty',
             payInPercent: 6.0,
             payOutPercent: 1.0,
           },
           {
-            method: TransactionMethod.MobileCommerce,
+            method: 'mobile_commerce',
             payInPercent: 10.0,
             payOutPercent: 3.0,
           },
@@ -855,34 +1071,17 @@ async function main(): Promise<void> {
       {
         scope: RateScope.Merchant,
         rows: [
-          { method: TransactionMethod.Sbp, payInPercent: 10.5, payOutPercent: 3.0 },
-          { method: TransactionMethod.Card, payInPercent: 11.0, payOutPercent: 3.5 },
+          { method: 'sbp', payInPercent: 10.5, payOutPercent: 3.0 },
+          { method: 'card', payInPercent: 11.0, payOutPercent: 3.5 },
           {
-            method: TransactionMethod.Counterparty,
+            method: 'counterparty',
             payInPercent: 8.0,
             payOutPercent: 2.0,
           },
           {
-            method: TransactionMethod.MobileCommerce,
+            method: 'mobile_commerce',
             payInPercent: 12.0,
             payOutPercent: 4.0,
-          },
-        ],
-      },
-      {
-        scope: RateScope.Lead,
-        rows: [
-          { method: TransactionMethod.Sbp, payInPercent: 2.0, payOutPercent: 0.5 },
-          { method: TransactionMethod.Card, payInPercent: 2.0, payOutPercent: 0.5 },
-          {
-            method: TransactionMethod.Counterparty,
-            payInPercent: 1.5,
-            payOutPercent: 0.3,
-          },
-          {
-            method: TransactionMethod.MobileCommerce,
-            payInPercent: 2.5,
-            payOutPercent: 0.7,
           },
         ],
       },
@@ -905,14 +1104,14 @@ async function main(): Promise<void> {
     await manager.save(MethodRate, [
       manager.create(MethodRate, {
         scope: RateScope.Trader,
-        method: TransactionMethod.Sbp,
+        method: 'sbp',
         subjectUserId: trader1.user.id,
         payInPercent: 8.0,
         payOutPercent: 1.2,
       }),
       manager.create(MethodRate, {
         scope: RateScope.Trader,
-        method: TransactionMethod.Sbp,
+        method: 'sbp',
         subjectUserId: trader1.user.id,
         fromAmount: 1000,
         toAmount: 5000,
@@ -921,7 +1120,7 @@ async function main(): Promise<void> {
       }),
       manager.create(MethodRate, {
         scope: RateScope.Trader,
-        method: TransactionMethod.Card,
+        method: 'card',
         subjectUserId: trader1.user.id,
         payInPercent: 8.5,
         payOutPercent: 1.8,
@@ -930,6 +1129,7 @@ async function main(): Promise<void> {
 
     await manager.save(AuditLog, [
       manager.create(AuditLog, {
+        source: AuditSource.Domain,
         actorUserId: admin.user.id,
         targetUserId: lead1.user.id,
         action: 'user.transfer',
@@ -941,6 +1141,7 @@ async function main(): Promise<void> {
         },
       }),
       manager.create(AuditLog, {
+        source: AuditSource.Domain,
         actorUserId: admin.user.id,
         targetUserId: trader1.user.id,
         action: 'trader_settings.auto_buyback_changed',
@@ -948,9 +1149,39 @@ async function main(): Promise<void> {
         metadata: { autoBuybackEnabled: true, autoBuybackConcurrent: 3 },
       }),
       manager.create(AuditLog, {
+        source: AuditSource.Domain,
         actorUserId: superadmin.user.id,
         action: 'rates.updated',
         metadata: { scope: RateScope.Trader },
+      }),
+      manager.create(AuditLog, {
+        source: AuditSource.Http,
+        actorUserId: null,
+        action: 'POST /auth/login',
+        method: 'POST',
+        path: '/auth/login',
+        statusCode: 401,
+        ip: '127.0.0.1',
+        userAgent: 'seed',
+        login: 'trader1@example.com',
+        body: {
+          login: 'trader1@example.com',
+          password: '[REDACTED]',
+          totp: '[REDACTED]',
+        },
+      }),
+      manager.create(AuditLog, {
+        source: AuditSource.Http,
+        actorUserId: admin.user.id,
+        targetUserId: trader1.user.id,
+        action: 'PATCH /admin/users/:id',
+        method: 'PATCH',
+        path: `/admin/users/${trader1.user.id}`,
+        params: { id: trader1.user.id },
+        statusCode: 200,
+        ip: '127.0.0.1',
+        userAgent: 'seed',
+        body: { status: 'active' },
       }),
     ]);
   });
@@ -962,7 +1193,7 @@ async function main(): Promise<void> {
   );
 
   for (const entry of credentials) {
-    const login = entry.user.user.email ?? entry.user.user.telegramUsername;
+    const login = loginOf(entry.user.user);
     console.log(`${entry.label}: ${login}`);
     if (entry.user.codes.length > 0) {
       console.log(`  backup codes: ${entry.user.codes.join(', ')}`);
