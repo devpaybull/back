@@ -264,6 +264,64 @@ describe('UserEnrolmentService', () => {
     });
   });
 
+  describe('the merchant an account works for', () => {
+    it('takes the merchant the invite carried', async () => {
+      const result = await service.startRegistration({
+        identifier: { email: 'support@example.com' },
+        role: Role.MerchantSupport,
+        password: 'password123',
+        merchantId: uuidOf(50),
+      });
+
+      expect(result.user.merchantId).toBe(uuidOf(50));
+    });
+
+    it('leaves the merchant empty when the invite carried none', async () => {
+      const result = await service.startRegistration({
+        identifier: { email: 'trader@example.com' },
+        role: Role.Trader,
+        password: 'password123',
+      });
+
+      expect(result.user.merchantId).toBeNull();
+    });
+
+    it('binds an existing account to a merchant', async () => {
+      stored.push({ id: uuidOf(1), role: Role.Merchant, merchantId: null });
+
+      const attached = await service.attachMerchant(uuidOf(1), uuidOf(50));
+
+      expect(attached.merchantId).toBe(uuidOf(50));
+      expect(stored[0].merchantId).toBe(uuidOf(50));
+    });
+
+    it('writes through the given transaction when one is passed', async () => {
+      stored.push({ id: uuidOf(1), role: Role.Merchant, merchantId: null });
+      const inTransaction = {
+        merge: jest.fn((user, changes) => ({ ...user, ...changes })),
+        save: jest.fn(async (user) => user),
+      };
+      const manager = { getRepository: jest.fn(() => inTransaction) };
+
+      const attached = await service.attachMerchant(
+        uuidOf(1),
+        uuidOf(50),
+        manager as never,
+      );
+
+      expect(attached.merchantId).toBe(uuidOf(50));
+      expect(inTransaction.save).toHaveBeenCalledTimes(1);
+      expect(users.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to bind an account that is not there', async () => {
+      await expect(
+        service.attachMerchant(uuidOf(404), uuidOf(50)),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(users.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resetTwoFactor', () => {
     const confirmedUser = (): Partial<User> => ({
       id: uuidOf(1),

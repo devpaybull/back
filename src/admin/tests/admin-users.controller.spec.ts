@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,10 +16,20 @@ import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page, toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
+import { MerchantsService } from '../../merchants/merchants.service';
+import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
+import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
+import { Wallet } from '../../transactions/entities/wallet.entity';
+import { RateService } from '../../transactions/services/rate.service';
+import { WalletService } from '../../transactions/services/wallet.service';
+import { RateScope } from '../../transactions/types/rate-scope.enum';
+import { RateSubject } from '../../transactions/types/rate-subject';
+import { TransactionMethod } from '../../transactions/types/transaction-method.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserAdministrationService } from '../../users/services/user-administration.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserEnrolmentService } from '../../users/services/user-enrolment.service';
+import { UserTeamService } from '../../users/services/user-team.service';
 import { UserSortField } from '../../users/types/user-sort-field.enum';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AdminUsersController } from '../controllers/admin-users.controller';
@@ -37,6 +48,33 @@ describe('AdminUsersController', () => {
   const sessions = {
     revokeAllSessions: jest.fn(),
   };
+
+  const team = {
+    addLead: jest.fn(),
+    removeLead: jest.fn(),
+    leadsOf: jest.fn(),
+    subordinatesOf: jest.fn(),
+  };
+
+  const wallets = { findByUserIds: jest.fn() };
+
+  const traderSettings = {
+    findByUserIds: jest.fn(),
+    insurancePayInMinOf: jest.fn(),
+  };
+
+  const rateService = { getEffectiveGeneralRates: jest.fn() };
+
+  const merchants = { findByIds: jest.fn() };
+
+  const GLOBAL_MIN = 500;
+
+  const traderBase = [
+    { method: TransactionMethod.Sbp, payInPercent: 8.5, payOutPercent: 1.5 },
+  ];
+  const leadBase = [
+    { method: TransactionMethod.Sbp, payInPercent: 2, payOutPercent: 0.5 },
+  ];
 
   const issuer = (role: Role, id = uuidOf(1)): AuthenticatedUser => ({
     id,
@@ -74,6 +112,25 @@ describe('AdminUsersController', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    team.leadsOf.mockResolvedValue(new Map());
+    team.subordinatesOf.mockResolvedValue(new Map());
+    wallets.findByUserIds.mockResolvedValue([]);
+    traderSettings.findByUserIds.mockResolvedValue([]);
+    traderSettings.insurancePayInMinOf.mockImplementation(
+      (settings?: TraderSettings | null) =>
+        settings?.insurancePayInMin ?? GLOBAL_MIN,
+    );
+    rateService.getEffectiveGeneralRates.mockImplementation(
+      async (scope: RateScope, subjects: RateSubject[]) => {
+        const base = scope === RateScope.Lead ? leadBase : traderBase;
+
+        return {
+          base,
+          bySubject: new Map(subjects.map(({ userId }) => [userId, base])),
+        };
+      },
+    );
+    merchants.findByIds.mockResolvedValue([]);
 
     const module = await Test.createTestingModule({
       controllers: [AdminUsersController],
@@ -82,6 +139,11 @@ describe('AdminUsersController', () => {
         { provide: UserAdministrationService, useValue: userAdministration },
         { provide: UserEnrolmentService, useValue: userEnrolment },
         { provide: SessionService, useValue: sessions },
+        { provide: UserTeamService, useValue: team },
+        { provide: WalletService, useValue: wallets },
+        { provide: TraderSettingsService, useValue: traderSettings },
+        { provide: RateService, useValue: rateService },
+        { provide: MerchantsService, useValue: merchants },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: () => '' } },
       ],
@@ -166,12 +228,18 @@ describe('AdminUsersController', () => {
       const [listed] = (await controller.list(query())).items;
 
       expect(Object.keys(listed).sort()).toEqual([
+        'balances',
         'createdAt',
         'email',
         'id',
+        'insurancePayInMin',
+        'leads',
         'login',
+        'merchant',
+        'rates',
         'role',
         'status',
+        'subordinates',
         'telegramUsername',
       ]);
     });
@@ -184,6 +252,353 @@ describe('AdminUsersController', () => {
       const [listed] = (await controller.list(query())).items;
 
       expect(listed.login).toBe('@durov');
+    });
+
+    describe('the details that depend on the role', () => {
+      const wallet = (overrides: Partial<Wallet> = {}): Wallet =>
+        ({
+          id: 1,
+          userId: uuidOf(7),
+          mainBalance: 1000,
+          mainReserved: 250,
+          insurancePayInBalance: 800,
+          insurancePayOutBalance: 300,
+          insurancePayInReserved: 10,
+          insurancePayOutReserved: 20,
+          lastAcceptedDealAt: null,
+          ...overrides,
+        }) as Wallet;
+
+      const settings = (overrides: Partial<TraderSettings> = {}) =>
+        ({
+          userId: uuidOf(7),
+          individualRatesEnabled: false,
+          insurancePayInMin: null,
+          ...overrides,
+        }) as TraderSettings;
+
+      const listed = async (rows: User[]) => {
+        userDirectory.list.mockResolvedValue(pageOf(rows));
+
+        return (await controller.list(query())).items;
+      };
+
+      it('gives a trader every wallet amount, its minimum, its rates and its leads', async () => {
+        wallets.findByUserIds.mockResolvedValue([wallet()]);
+        traderSettings.findByUserIds.mockResolvedValue([
+          settings({ insurancePayInMin: 1000 }),
+        ]);
+        team.leadsOf.mockResolvedValue(
+          new Map([
+            [uuidOf(7), [{ id: uuidOf(20), login: 'lead@example.com' }]],
+          ]),
+        );
+
+        const [row] = await listed([user()]);
+
+        expect(row.balances).toEqual({
+          mainBalance: 1000,
+          mainReserved: 250,
+          availableMain: 750,
+          insurancePayInBalance: 800,
+          insurancePayOutBalance: 300,
+          insurancePayInReserved: 10,
+          insurancePayOutReserved: 20,
+          lastAcceptedDealAt: null,
+        });
+        expect(row.insurancePayInMin).toBe(1000);
+        expect(row.rates).toEqual(traderBase);
+        expect(row.leads).toEqual([
+          { id: uuidOf(20), login: 'lead@example.com' },
+        ]);
+        expect(row.subordinates).toBeNull();
+        expect(row.merchant).toBeNull();
+      });
+
+      it('gives a trader with no lead an empty list, not null', async () => {
+        const [row] = await listed([user()]);
+
+        expect(row.leads).toEqual([]);
+      });
+
+      it('gives a lead trader the lead-scope rates and its subordinates', async () => {
+        team.subordinatesOf.mockResolvedValue(
+          new Map([[uuidOf(7), [{ id: uuidOf(30), login: 'trader3_tg' }]]]),
+        );
+
+        const [row] = await listed([user({ role: Role.LeadTrader })]);
+
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+          RateScope.Lead,
+          [{ userId: uuidOf(7), individualEnabled: false }],
+        );
+        expect(row.rates).toEqual(leadBase);
+        expect(row.insurancePayInMin).toBe(GLOBAL_MIN);
+        expect(row.subordinates).toEqual([
+          { id: uuidOf(30), login: 'trader3_tg' },
+        ]);
+        expect(row.leads).toBeNull();
+        expect(row.merchant).toBeNull();
+      });
+
+      it('honours the individual-rates flag of each account', async () => {
+        traderSettings.findByUserIds.mockResolvedValue([
+          settings({ individualRatesEnabled: true }),
+        ]);
+        const individual = [
+          {
+            method: TransactionMethod.Sbp,
+            payInPercent: 8,
+            payOutPercent: 1.2,
+          },
+        ];
+        rateService.getEffectiveGeneralRates.mockResolvedValue({
+          base: traderBase,
+          bySubject: new Map([[uuidOf(7), individual]]),
+        });
+
+        const [row] = await listed([user(), user({ id: uuidOf(8) })]);
+
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+          RateScope.Trader,
+          [
+            { userId: uuidOf(7), individualEnabled: true },
+            { userId: uuidOf(8), individualEnabled: false },
+          ],
+        );
+        expect(row.rates).toEqual(individual);
+      });
+
+      it('reports a trader with no wallet yet as having no balances', async () => {
+        const [row] = await listed([user()]);
+
+        expect(row.balances).toBeNull();
+        expect(row.insurancePayInMin).toBe(GLOBAL_MIN);
+      });
+
+      it.each([Role.Merchant, Role.MerchantSupport, Role.MerchantAgent])(
+        'gives a %s its merchant and nothing a trader has',
+        async (role) => {
+          merchants.findByIds.mockResolvedValue([
+            { id: uuidOf(50), name: 'Ohla Shop', active: true },
+          ]);
+
+          const [row] = await listed([user({ role, merchantId: uuidOf(50) })]);
+
+          expect(row.merchant).toEqual({ id: uuidOf(50), name: 'Ohla Shop' });
+          expect(row.balances).toBeNull();
+          expect(row.insurancePayInMin).toBeNull();
+          expect(row.rates).toBeNull();
+          expect(row.leads).toBeNull();
+          expect(row.subordinates).toBeNull();
+        },
+      );
+
+      it('reports a merchant account bound to no merchant as null', async () => {
+        const [row] = await listed([
+          user({ role: Role.Merchant, merchantId: null }),
+        ]);
+
+        expect(row.merchant).toBeNull();
+        expect(merchants.findByIds).toHaveBeenCalledWith([]);
+      });
+
+      it.each([Role.Cascade, Role.Admin, Role.Superadmin])(
+        'gives a %s null for every role-dependent field',
+        async (role) => {
+          wallets.findByUserIds.mockResolvedValue([wallet()]);
+
+          const [row] = await listed([user({ role, merchantId: uuidOf(50) })]);
+
+          expect(row.balances).toBeNull();
+          expect(row.insurancePayInMin).toBeNull();
+          expect(row.rates).toBeNull();
+          expect(row.leads).toBeNull();
+          expect(row.subordinates).toBeNull();
+          expect(row.merchant).toBeNull();
+        },
+      );
+
+      it('composes a whole page with one call per source, never one per row', async () => {
+        const rows = [
+          user({ id: uuidOf(1), role: Role.Trader }),
+          user({ id: uuidOf(2), role: Role.Trader }),
+          user({ id: uuidOf(3), role: Role.Trader }),
+          user({ id: uuidOf(4), role: Role.LeadTrader }),
+          user({ id: uuidOf(5), role: Role.LeadTrader }),
+          user({ id: uuidOf(6), role: Role.Merchant, merchantId: uuidOf(50) }),
+          user({
+            id: uuidOf(7),
+            role: Role.MerchantSupport,
+            merchantId: uuidOf(50),
+          }),
+          user({
+            id: uuidOf(8),
+            role: Role.MerchantAgent,
+            merchantId: uuidOf(51),
+          }),
+          user({ id: uuidOf(9), role: Role.Cascade }),
+          user({ id: uuidOf(10), role: Role.Admin }),
+        ];
+
+        await listed(rows);
+
+        const trading = [uuidOf(1), uuidOf(2), uuidOf(3), uuidOf(4), uuidOf(5)];
+
+        expect(wallets.findByUserIds).toHaveBeenCalledTimes(1);
+        expect(wallets.findByUserIds).toHaveBeenCalledWith(trading);
+        expect(traderSettings.findByUserIds).toHaveBeenCalledTimes(1);
+        expect(traderSettings.findByUserIds).toHaveBeenCalledWith(trading);
+        expect(team.leadsOf).toHaveBeenCalledTimes(1);
+        expect(team.leadsOf).toHaveBeenCalledWith([
+          uuidOf(1),
+          uuidOf(2),
+          uuidOf(3),
+        ]);
+        expect(team.subordinatesOf).toHaveBeenCalledTimes(1);
+        expect(team.subordinatesOf).toHaveBeenCalledWith([
+          uuidOf(4),
+          uuidOf(5),
+        ]);
+        expect(merchants.findByIds).toHaveBeenCalledTimes(1);
+        expect(merchants.findByIds).toHaveBeenCalledWith([
+          uuidOf(50),
+          uuidOf(51),
+        ]);
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(2);
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+          RateScope.Trader,
+          expect.any(Array),
+        );
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+          RateScope.Lead,
+          expect.any(Array),
+        );
+      });
+
+      it('asks for no rates at all when the page holds no trader or lead', async () => {
+        await listed([
+          user({ role: Role.Admin }),
+          user({ id: uuidOf(8), role: Role.Cascade }),
+        ]);
+
+        expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
+        expect(wallets.findByUserIds).toHaveBeenCalledWith([]);
+        expect(traderSettings.findByUserIds).toHaveBeenCalledWith([]);
+        expect(team.leadsOf).toHaveBeenCalledWith([]);
+        expect(team.subordinatesOf).toHaveBeenCalledWith([]);
+        expect(merchants.findByIds).toHaveBeenCalledWith([]);
+      });
+
+      it('asks for the lead scope only when a lead is on the page', async () => {
+        await listed([user()]);
+
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
+        expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+          RateScope.Trader,
+          [{ userId: uuidOf(7), individualEnabled: false }],
+        );
+      });
+    });
+  });
+
+  it.each(['addLead', 'removeLead'] as const)('marks %s as a write', (name) => {
+    expect(
+      Reflect.getMetadata(
+        WRITE_ACCESS_METADATA_KEY,
+        AdminUsersController.prototype[name],
+      ),
+    ).toBe(true);
+  });
+
+  describe('leads', () => {
+    const leads = [{ id: uuidOf(20), login: 'lead@example.com' }];
+
+    beforeEach(() => {
+      userDirectory.findById.mockResolvedValue(user());
+      team.leadsOf.mockResolvedValue(new Map([[uuidOf(7), leads]]));
+    });
+
+    const calls = {
+      addLead: (editor: AuthenticatedUser, id = uuidOf(7)) =>
+        controller.addLead(id, { leadUserId: uuidOf(20) }, editor),
+      removeLead: (editor: AuthenticatedUser, id = uuidOf(7)) =>
+        controller.removeLead(id, uuidOf(20), editor),
+    };
+
+    it('links the lead through the owning module and answers with the leads', async () => {
+      const result = await calls.addLead(admin);
+
+      expect(team.addLead).toHaveBeenCalledWith(
+        uuidOf(7),
+        uuidOf(20),
+        uuidOf(1),
+      );
+      expect(team.leadsOf).toHaveBeenCalledWith([uuidOf(7)]);
+      expect(result).toEqual(leads);
+    });
+
+    it('unlinks the lead through the owning module and answers with the rest', async () => {
+      team.leadsOf.mockResolvedValue(new Map());
+
+      const result = await calls.removeLead(admin);
+
+      expect(team.removeLead).toHaveBeenCalledWith(
+        uuidOf(7),
+        uuidOf(20),
+        uuidOf(1),
+      );
+      expect(result).toEqual([]);
+    });
+
+    it.each(Object.keys(calls) as (keyof typeof calls)[])(
+      '%s refuses an admin acting on their own account',
+      async (name) => {
+        await expect(calls[name](admin, admin.id)).rejects.toThrow(
+          ForbiddenException,
+        );
+
+        expect(userDirectory.findById).not.toHaveBeenCalled();
+        expect(team[name]).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(Object.keys(calls) as (keyof typeof calls)[])(
+      '%s reports a target that does not exist as not found',
+      async (name) => {
+        userDirectory.findById.mockResolvedValue(null);
+
+        await expect(calls[name](admin)).rejects.toThrow(NotFoundException);
+
+        expect(team[name]).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(
+      (Object.keys(calls) as (keyof typeof calls)[]).flatMap((name) =>
+        [Role.Admin, Role.Superadmin].map((role) => [name, role] as const),
+      ),
+    )('%s refuses an admin acting on a %s', async (name, role) => {
+      userDirectory.findById.mockResolvedValue(user({ role }));
+
+      await expect(calls[name](admin)).rejects.toThrow(ForbiddenException);
+
+      expect(team[name]).not.toHaveBeenCalled();
+    });
+
+    it('lets a superadmin act on any account the policy allows', async () => {
+      userDirectory.findById.mockResolvedValue(user({ role: Role.Admin }));
+
+      await calls.addLead(superadmin);
+
+      expect(team.addLead).toHaveBeenCalled();
+    });
+
+    it('passes a refusal from the owning module through untouched', async () => {
+      team.addLead.mockRejectedValue(new ConflictException('already linked'));
+
+      await expect(calls.addLead(admin)).rejects.toThrow(ConflictException);
     });
   });
 

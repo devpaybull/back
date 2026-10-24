@@ -25,6 +25,7 @@ import { AdminDevicesController } from './controllers/admin-devices.controller';
 import { AdminInvitesController } from './controllers/admin-invites.controller';
 import { AdminMerchantsController } from './controllers/admin-merchants.controller';
 import { AdminRatesController } from './controllers/admin-rates.controller';
+import { AdminRolesController } from './controllers/admin-roles.controller';
 import { AdminTraderSettingsController } from './controllers/admin-trader-settings.controller';
 import { AdminTransactionsController } from './controllers/admin-transactions.controller';
 import { AdminUsersController } from './controllers/admin-users.controller';
@@ -49,6 +50,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
   controllers: [
     AdminInvitesController,
     AdminUsersController,
+    AdminRolesController,
     AdminTransactionsController,
     AdminAuditController,
     AdminBalancesController,

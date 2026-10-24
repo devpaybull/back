@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { ILike, Repository } from 'typeorm';
+import { EntityManager, ILike, In, Repository } from 'typeorm';
 import { Page, toPage } from '../common/types/page';
 import { escapeLikePattern } from '../common/utils/escape-like-pattern';
 import { sortDirection } from '../common/utils/sort-direction';
@@ -23,8 +23,18 @@ export class MerchantsService {
     return this.merchants.findOne({ where: { id } });
   }
 
-  create(name: string): Promise<Merchant> {
-    return this.merchants.save(this.merchants.create({ name }));
+  async findByIds(ids: string[]): Promise<Merchant[]> {
+    if (ids.length === 0) return [];
+
+    return this.merchants.find({ where: { id: In(ids) } });
+  }
+
+  create(name: string, manager?: EntityManager): Promise<Merchant> {
+    const repository = manager
+      ? manager.getRepository(Merchant)
+      : this.merchants;
+
+    return repository.save(repository.create({ name }));
   }
 
   createKey(merchantId: string): Promise<MerchantApiKey> {

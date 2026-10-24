@@ -14,6 +14,7 @@ import { DeviceModel } from '../src/devices/types/device-model.enum';
 import { DeviceStatus } from '../src/devices/types/device-status.enum';
 import { BankDetails } from '../src/bank-details/entities/bank-details.entity';
 import { User } from '../src/users/entities/user.entity';
+import { TraderLead } from '../src/users/entities/trader-lead.entity';
 import { UserBackupCode } from '../src/users/entities/user-backup-code.entity';
 import { UserStatus } from '../src/users/types/user-status.enum';
 import { Merchant } from '../src/merchants/entities/merchant.entity';
@@ -83,6 +84,7 @@ async function seedUser(
     role: Role;
     status: UserStatus;
     withBackupCodes?: boolean;
+    merchantId?: string;
   },
 ): Promise<SeededUser> {
   const user = await manager.save(
@@ -93,6 +95,7 @@ async function seedUser(
       telegramUsername: input.telegramUsername ?? null,
       passwordHash,
       role: input.role,
+      merchantId: input.merchantId ?? null,
       status: input.status,
       totpSecret: SEED_TOTP_SECRET,
       twoFactorConfirmedAt: daysAgo(30),
@@ -342,14 +345,50 @@ async function main(): Promise<void> {
     });
     credentials.push({ label: 'Lead trader', user: lead1 });
 
+    const merchantRoleLogin = 'merchant.role@example.com';
+    const merchantRoleMerchant = await manager.save(
+      Merchant,
+      manager.create(Merchant, { name: merchantRoleLogin, active: true }),
+    );
     const merchantRoleUser = await seedUser(manager, passwordHash, {
-      email: 'merchant.role@example.com',
+      email: merchantRoleLogin,
       emailVerified: true,
       role: Role.Merchant,
       status: UserStatus.Active,
       withBackupCodes: true,
+      merchantId: merchantRoleMerchant.id,
     });
     credentials.push({ label: 'Merchant-role account', user: merchantRoleUser });
+
+    const merchantSupport = await seedUser(manager, passwordHash, {
+      email: 'merchant.support@example.com',
+      emailVerified: true,
+      role: Role.MerchantSupport,
+      status: UserStatus.Active,
+      withBackupCodes: true,
+      merchantId: merchantRoleMerchant.id,
+    });
+    credentials.push({ label: 'Merchant support', user: merchantSupport });
+
+    const merchantAgent = await seedUser(manager, passwordHash, {
+      telegramUsername: 'merchant_agent_tg',
+      role: Role.MerchantAgent,
+      status: UserStatus.Active,
+      withBackupCodes: true,
+      merchantId: merchantRoleMerchant.id,
+    });
+    credentials.push({ label: 'Merchant agent (telegram-only)', user: merchantAgent });
+
+    await manager.save(TraderLead, [
+      manager.create(TraderLead, {
+        traderUserId: trader1.user.id,
+        leadUserId: lead1.user.id,
+      }),
+      manager.create(TraderLead, {
+        traderUserId: trader3.user.id,
+        leadUserId: lead1.user.id,
+      }),
+    ]);
 
     const blocked1 = await seedUser(manager, passwordHash, {
       email: 'blocked1@example.com',

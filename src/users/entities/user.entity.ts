@@ -3,11 +3,14 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
+import { Merchant } from '../../merchants/entities/merchant.entity';
 import { UserStatus } from '../types/user-status.enum';
 import { UserBackupCode } from './user-backup-code.entity';
 
@@ -39,6 +42,14 @@ export class User {
     default: UserStatus.PendingTwoFactor,
   })
   status: UserStatus;
+
+  @ManyToOne(() => Merchant, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'merchantId' })
+  merchant: Merchant;
+
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  merchantId: string;
 
   @Column()
   totpSecret: string;

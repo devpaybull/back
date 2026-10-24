@@ -121,6 +121,7 @@ export class AdminInvitesController {
       role: dto.role,
       createdByUserId: admin.id,
       expiresAt: dto.expiresAt,
+      merchantId: dto.merchantId,
     });
 
     return (await this.withTerms([created]))[0];

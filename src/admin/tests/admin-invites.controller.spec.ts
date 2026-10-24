@@ -229,6 +229,33 @@ describe('AdminInvitesController', () => {
     });
   });
 
+  describe('the merchant handed to the service', () => {
+    it('passes the merchant through for the service to judge', async () => {
+      invites.create.mockResolvedValue(
+        invite({ role: Role.MerchantAgent, merchantId: uuidOf(50) }),
+      );
+
+      const created = await controller.create(
+        dto({ role: Role.MerchantAgent, merchantId: uuidOf(50) }),
+        admin,
+      );
+
+      expect(invites.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: Role.MerchantAgent,
+          merchantId: uuidOf(50),
+        }),
+      );
+      expect(created.merchantId).toBe(uuidOf(50));
+    });
+
+    it('reports an invite with no merchant as null', async () => {
+      const created = await controller.create(dto(), admin);
+
+      expect(created.merchantId).toBeNull();
+    });
+  });
+
   describe('the identifier handed to the service', () => {
     it('carries the email alone when only an email was given', async () => {
       await controller.create(

@@ -5,6 +5,7 @@ import {
   IsEmail,
   IsEnum,
   IsOptional,
+  IsUUID,
   Matches,
   MinDate,
   ValidateIf,
@@ -40,4 +41,13 @@ export class CreateInviteDto {
   @IsDate()
   @MinDate(() => new Date())
   expiresAt?: Date;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'The merchant the invited account works for; required for merchant_support and merchant_agent, refused for every other role',
+  })
+  @IsOptional()
+  @IsUUID()
+  merchantId?: string;
 }

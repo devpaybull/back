@@ -9,9 +9,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Role } from '../common/enums/role.enum';
 import { AccountIdentifier } from '../common/types/account-identifier';
 import { Page, toPage } from '../common/types/page';
 import { AccountMailService } from '../mail/services/account-mail.service';
+import { MerchantsService } from '../merchants/merchants.service';
 import { UserDirectoryService } from '../users/services/user-directory.service';
 import { Invite } from './entities/invite.entity';
 import { CreateInviteInput } from './types/create-invite-input';
@@ -24,6 +26,8 @@ import { normalizeSoleIdentifier } from './utils/normalize-sole-identifier';
 
 const HOUR_IN_MS = 60 * 60 * 1000;
 
+const MERCHANT_STAFF_ROLES: Role[] = [Role.MerchantSupport, Role.MerchantAgent];
+
 @Injectable()
 export class InvitesService {
   private readonly logger = new Logger(InvitesService.name);
@@ -33,6 +37,7 @@ export class InvitesService {
     private readonly invites: Repository<Invite>,
     private readonly directory: UserDirectoryService,
     private readonly mail: AccountMailService,
+    private readonly merchants: MerchantsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -42,6 +47,22 @@ export class InvitesService {
     if (!identifier) {
       throw new BadRequestException(
         'An invite is issued for exactly one of email or telegramUsername',
+      );
+    }
+
+    if (MERCHANT_STAFF_ROLES.includes(input.role)) {
+      if (!input.merchantId) {
+        throw new BadRequestException(
+          `A ${input.role} invite needs a merchantId`,
+        );
+      }
+
+      if (!(await this.merchants.findById(input.merchantId))) {
+        throw new BadRequestException('Merchant not found');
+      }
+    } else if (input.merchantId) {
+      throw new BadRequestException(
+        `A ${input.role} invite cannot carry a merchantId`,
       );
     }
 
@@ -60,6 +81,7 @@ export class InvitesService {
         email: identifier.email ?? null,
         telegramUsername: identifier.telegramUsername ?? null,
         role: input.role,
+        merchantId: input.merchantId ?? null,
         code: generateInviteCode(),
         expiresAt: input.expiresAt ?? this.defaultExpiry(),
         createdByUserId: input.createdByUserId,

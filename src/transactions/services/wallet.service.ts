@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { Wallet } from '../entities/wallet.entity';
@@ -28,6 +28,12 @@ export class WalletService {
 
   findByUserId(userId: string): Promise<Wallet | null> {
     return this.wallets.findOne({ where: { userId } });
+  }
+
+  async findByUserIds(userIds: string[]): Promise<Wallet[]> {
+    if (userIds.length === 0) return [];
+
+    return this.wallets.find({ where: { userId: In(userIds) } });
   }
 
   async ensureWallet(userId: string): Promise<Wallet> {

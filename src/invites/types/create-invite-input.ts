@@ -6,4 +6,5 @@ export interface CreateInviteInput {
   role: Role;
   createdByUserId: string;
   expiresAt?: Date;
+  merchantId?: string;
 }

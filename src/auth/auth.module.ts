@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InvitesModule } from '../invites/invites.module';
 import { MailModule } from '../mail/mail.module';
+import { MerchantsModule } from '../merchants/merchants.module';
 import { UsersModule } from '../users/users.module';
 import { EnrolmentController } from './controllers/enrolment.controller';
 import { PasswordController } from './controllers/password.controller';
@@ -20,6 +21,7 @@ import { SessionService } from './services/session.service';
     UsersModule,
     InvitesModule,
     MailModule,
+    MerchantsModule,
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],

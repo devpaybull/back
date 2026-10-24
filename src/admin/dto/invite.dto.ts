@@ -19,6 +19,14 @@ export class InviteDto {
   @ApiProperty({ enum: Role })
   role: Role;
 
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'The merchant a merchant_support or merchant_agent invite binds the account to',
+  })
+  merchantId: string | null;
+
   @ApiProperty()
   code: string;
 
@@ -68,6 +76,7 @@ export const toInviteDto = (invite: Invite, terms: InviteTerms): InviteDto => ({
   email: invite.email,
   telegramUsername: invite.telegramUsername,
   role: invite.role,
+  merchantId: invite.merchantId ?? null,
   code: invite.code,
   status: inviteStatus(invite),
   expiresAt: invite.expiresAt,

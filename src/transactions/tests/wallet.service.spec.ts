@@ -1,3 +1,4 @@
+import { In } from 'typeorm';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
@@ -76,5 +77,42 @@ describe('WalletService.hasMinInsurancePayIn', () => {
     await expect(build(0, 0).hasMinInsurancePayIn(uuidOf(1))).resolves.toBe(
       true,
     );
+  });
+});
+
+describe('WalletService.findByUserIds', () => {
+  const build = () => {
+    const wallets = {
+      find: jest.fn(async () => [{ userId: uuidOf(1) } as Wallet]),
+    };
+
+    return {
+      wallets,
+      service: new WalletService(
+        wallets as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      ),
+    };
+  };
+
+  it('reads every wallet of the given accounts in one query', async () => {
+    const { wallets, service } = build();
+
+    await expect(
+      service.findByUserIds([uuidOf(1), uuidOf(2)]),
+    ).resolves.toEqual([{ userId: uuidOf(1) }]);
+    expect(wallets.find).toHaveBeenCalledTimes(1);
+    expect(wallets.find).toHaveBeenCalledWith({
+      where: { userId: In([uuidOf(1), uuidOf(2)]) },
+    });
+  });
+
+  it('asks nothing for an empty list', async () => {
+    const { wallets, service } = build();
+
+    await expect(service.findByUserIds([])).resolves.toEqual([]);
+    expect(wallets.find).not.toHaveBeenCalled();
   });
 });

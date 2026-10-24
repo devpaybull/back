@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { Role } from '../../common/enums/role.enum';
+import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { CreateInviteDto } from '../dto/create-invite.dto';
 
 const failedProperties = (payload: Record<string, unknown>): string[] =>
@@ -124,5 +125,35 @@ describe('CreateInviteDto', () => {
     expect(failedProperties({ ...role, telegramUsername })).toEqual([
       'telegramUsername',
     ]);
+  });
+
+  describe('merchantId', () => {
+    const email = { email: 'user@example.com' };
+
+    it('is optional, leaving the role rules to the service', () => {
+      expect(
+        failedProperties({ role: Role.MerchantSupport, ...email }),
+      ).toEqual([]);
+    });
+
+    it('accepts a uuid', () => {
+      expect(
+        failedProperties({
+          role: Role.MerchantAgent,
+          ...email,
+          merchantId: uuidOf(50),
+        }),
+      ).toEqual([]);
+    });
+
+    it('refuses anything that is not a uuid', () => {
+      expect(
+        failedProperties({
+          role: Role.MerchantAgent,
+          ...email,
+          merchantId: '5',
+        }),
+      ).toEqual(['merchantId']);
+    });
   });
 });

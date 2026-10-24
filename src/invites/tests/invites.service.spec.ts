@@ -12,6 +12,7 @@ import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AccountMailService } from '../../mail/services/account-mail.service';
+import { MerchantsService } from '../../merchants/merchants.service';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { Invite } from '../entities/invite.entity';
@@ -124,6 +125,7 @@ describe('InvitesService', () => {
 
   const userDirectory = { isIdentifierTaken: jest.fn() };
   const mail = { sendInviteCode: jest.fn() };
+  const merchants = { findById: jest.fn() };
 
   const pendingInvite = (overrides: Partial<Invite> = {}): Invite =>
     ({
@@ -198,6 +200,9 @@ describe('InvitesService', () => {
     }));
     userDirectory.isIdentifierTaken.mockResolvedValue(false);
     mail.sendInviteCode.mockResolvedValue(true);
+    merchants.findById.mockImplementation(async (id: string) =>
+      id === uuidOf(50) ? { id, name: 'Ohla Shop' } : null,
+    );
 
     const module = await Test.createTestingModule({
       providers: [
@@ -205,6 +210,7 @@ describe('InvitesService', () => {
         { provide: getRepositoryToken(Invite), useValue: invites },
         { provide: UserDirectoryService, useValue: userDirectory },
         { provide: AccountMailService, useValue: mail },
+        { provide: MerchantsService, useValue: merchants },
         { provide: ConfigService, useValue: { get: () => 72 } },
       ],
     }).compile();
@@ -247,6 +253,76 @@ describe('InvitesService', () => {
       });
 
       expect(invite.role).toBe(Role.LeadTrader);
+    });
+
+    describe('the merchant an invite binds to', () => {
+      const MERCHANT_STAFF = [Role.MerchantSupport, Role.MerchantAgent];
+
+      it.each(MERCHANT_STAFF)(
+        'stores the merchant of a %s invite',
+        async (role) => {
+          const invite = await service.create({
+            identifier: { email: 'user@example.com' },
+            role,
+            createdByUserId: uuidOf(1),
+            merchantId: uuidOf(50),
+          });
+
+          expect(merchants.findById).toHaveBeenCalledWith(uuidOf(50));
+          expect(invite.merchantId).toBe(uuidOf(50));
+        },
+      );
+
+      it.each(MERCHANT_STAFF)(
+        'refuses a %s invite with no merchant',
+        async (role) => {
+          await expect(
+            service.create({
+              identifier: { email: 'user@example.com' },
+              role,
+              createdByUserId: uuidOf(1),
+            }),
+          ).rejects.toBeInstanceOf(BadRequestException);
+          expect(invites.save).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each(MERCHANT_STAFF)(
+        'refuses a %s invite naming an unknown merchant',
+        async (role) => {
+          await expect(
+            service.create({
+              identifier: { email: 'user@example.com' },
+              role,
+              createdByUserId: uuidOf(1),
+              merchantId: uuidOf(51),
+            }),
+          ).rejects.toBeInstanceOf(BadRequestException);
+          expect(invites.save).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each(
+        Object.values(Role).filter((role) => !MERCHANT_STAFF.includes(role)),
+      )('refuses a merchant on a %s invite', async (role) => {
+        await expect(
+          service.create({
+            identifier: { email: 'user@example.com' },
+            role,
+            createdByUserId: uuidOf(1),
+            merchantId: uuidOf(50),
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(merchants.findById).not.toHaveBeenCalled();
+        expect(invites.save).not.toHaveBeenCalled();
+      });
+
+      it('stores no merchant on an invite for any other role', async () => {
+        const invite = await createEmailInvite();
+
+        expect(invite.merchantId).toBeNull();
+        expect(merchants.findById).not.toHaveBeenCalled();
+      });
     });
 
     it('normalises an email invite and leaves telegram empty', async () => {

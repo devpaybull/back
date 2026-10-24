@@ -1,9 +1,11 @@
+import { In } from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { MerchantsService } from '../merchants.service';
 import { MerchantSortField } from '../types/merchant-sort-field.enum';
 
 describe('MerchantsService', () => {
   let merchants: {
+    find: jest.Mock;
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
@@ -14,6 +16,7 @@ describe('MerchantsService', () => {
 
   beforeEach(() => {
     merchants = {
+      find: jest.fn(async () => []),
       findOne: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ id: 'm1', ...data })),
@@ -31,6 +34,20 @@ describe('MerchantsService', () => {
 
     expect(merchants.create).toHaveBeenCalledWith({ name: 'Acme' });
     expect(result.id).toBe('m1');
+  });
+
+  it('creates through the given transaction when one is passed', async () => {
+    const inTransaction = {
+      create: jest.fn((data) => data),
+      save: jest.fn(async (data) => ({ id: 'm2', ...data })),
+    };
+    const manager = { getRepository: jest.fn(() => inTransaction) };
+
+    const result = await service.create('Acme', manager as never);
+
+    expect(inTransaction.save).toHaveBeenCalledWith({ name: 'Acme' });
+    expect(merchants.save).not.toHaveBeenCalled();
+    expect(result.id).toBe('m2');
   });
 
   it('issues a key with a uuid key and a long hex secret', async () => {
@@ -55,5 +72,19 @@ describe('MerchantsService', () => {
     expect(merchants.findAndCount).toHaveBeenCalledWith(
       expect.objectContaining({ order: { name: 'ASC', id: 'ASC' } }),
     );
+  });
+
+  it('reads every merchant of the given ids in one query', async () => {
+    await service.findByIds(['m1', 'm2']);
+
+    expect(merchants.find).toHaveBeenCalledTimes(1);
+    expect(merchants.find).toHaveBeenCalledWith({
+      where: { id: In(['m1', 'm2']) },
+    });
+  });
+
+  it('asks nothing for an empty list of ids', async () => {
+    await expect(service.findByIds([])).resolves.toEqual([]);
+    expect(merchants.find).not.toHaveBeenCalled();
   });
 });
