@@ -32,13 +32,17 @@ export class UserCredentialsService {
   }
 
   async verifyTotp(user: User, totp: string): Promise<boolean> {
-    const result = await verify({
-      secret: user.totpSecret,
-      token: normalizeCode(totp),
-      epochTolerance: TOTP_EPOCH_TOLERANCE_SECONDS,
-    });
+    try {
+      const result = await verify({
+        secret: user.totpSecret,
+        token: normalizeCode(totp),
+        epochTolerance: TOTP_EPOCH_TOLERANCE_SECONDS,
+      });
 
-    return result.valid;
+      return result.valid;
+    } catch {
+      return false;
+    }
   }
 
   async verifySecondFactor(user: User, factor: SecondFactor): Promise<boolean> {

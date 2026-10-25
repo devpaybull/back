@@ -1,4 +1,8 @@
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -75,6 +79,37 @@ describe('EmailVerificationService', () => {
   });
 
   describe('issuing a code', () => {
+    it('never prints the code to stdout or to the Nest logger', async () => {
+      const spies = [
+        jest.spyOn(console, 'log').mockImplementation(() => undefined),
+        jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'debug')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'verbose')
+          .mockImplementation(() => undefined),
+      ];
+      mail.sendEmailConfirmationCode.mockResolvedValue(false);
+
+      await service.issueFor(uuidOf(1), 'user@example.com');
+
+      const [{ code }] = mail.sendEmailConfirmationCode.mock.calls[0] as [
+        { code: string },
+      ];
+
+      for (const spy of spies) {
+        expect(JSON.stringify(spy.mock.calls)).not.toContain(code);
+        spy.mockRestore();
+      }
+    });
+
     it('mails a six-digit code that expires with the configured lifetime', async () => {
       const before = Date.now();
 

@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AuthenticatedUser } from '../../common/types/token';
+import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { User } from '../entities/user.entity';
 import { EmailVerificationService } from '../services/email-verification.service';
 import { UserDirectoryService } from '../services/user-directory.service';
@@ -23,6 +24,7 @@ describe('UsersController', () => {
   const directory = { findAuthenticatableById: jest.fn() };
   const profile = { editOwnIdentifiers: jest.fn() };
   const emailVerification = { confirm: jest.fn() };
+  const settings = { ensure: jest.fn() };
 
   const caller = (overrides: Partial<AuthenticatedUser> = {}) => ({
     id: uuidOf(7),
@@ -59,6 +61,7 @@ describe('UsersController', () => {
         { provide: UserDirectoryService, useValue: directory },
         { provide: UserProfileService, useValue: profile },
         { provide: EmailVerificationService, useValue: emailVerification },
+        { provide: TraderSettingsService, useValue: settings },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: () => '' } },
       ],
@@ -148,14 +151,14 @@ describe('UsersController', () => {
     expect(result.telegramUsername).toBe('durov');
   });
 
-  it('prefers the email as the login and still reports both identifiers', async () => {
+  it('prefers the telegram username as the login and still reports both identifiers', async () => {
     directory.findAuthenticatableById.mockResolvedValue(
       user({ email: 'user@example.com', telegramUsername: 'durov' }),
     );
 
     const result = await controller.me(caller());
 
-    expect(result.login).toBe('user@example.com');
+    expect(result.login).toBe('durov');
     expect(result.email).toBe('user@example.com');
     expect(result.telegramUsername).toBe('durov');
   });

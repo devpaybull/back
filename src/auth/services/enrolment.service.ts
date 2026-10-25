@@ -1,10 +1,14 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { Role } from '../../common/enums/role.enum';
 import { TokenType } from '../../common/types/token';
 import { renderQrCodeDataUrl } from '../../common/utils/render-qr-code-data-url';
 import { toAccountIdentifier } from '../../common/utils/to-account-identifier';
 import { InvitesService } from '../../invites/invites.service';
+import { MerchantsService } from '../../merchants/merchants.service';
 import { UserCredentialsService } from '../../users/services/user-credentials.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserEnrolmentService } from '../../users/services/user-enrolment.service';
@@ -22,7 +26,8 @@ import {
   RegistrationTokenPayload,
   TwoFactorSetupTokenPayload,
 } from '../types/token-payloads';
-import { loginOf } from '../utils/login-of';
+import { loginOf } from '../../common/utils/login-of';
+import { LoginContext } from '../types/login-context';
 import { SessionService } from './session.service';
 
 const TWO_FACTOR_SETUP_DENIED = 'Invalid login or password';
@@ -36,9 +41,12 @@ export class EnrolmentService {
     private readonly credentials: UserCredentialsService,
     private readonly userEnrolment: UserEnrolmentService,
     private readonly invites: InvitesService,
+    private readonly merchants: MerchantsService,
     private readonly sessions: SessionService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async register(dto: RegisterDto): Promise<StartedRegistrationResult> {
@@ -49,6 +57,7 @@ export class EnrolmentService {
         identifier,
         role: invite.role,
         password: dto.password,
+        merchantId: invite.merchantId,
       });
 
     const expiresIn = this.config.get<number>('JWT_REGISTRATION_TTL_SECONDS');
@@ -70,6 +79,7 @@ export class EnrolmentService {
 
   async confirmRegistration(
     dto: ConfirmRegistrationDto,
+    context?: LoginContext,
   ): Promise<IssuedSessionWithBackupCodes> {
     const payload = await this.verifyEnrolmentToken<RegistrationTokenPayload>(
       dto.registrationToken,
@@ -84,12 +94,22 @@ export class EnrolmentService {
       payload.sub,
       dto.totp,
     );
+    const user = await this.directory.findAuthenticatableById(payload.sub);
+
+    if (user.role === Role.Merchant && !user.merchantId) {
+      await this.dataSource.transaction(async (manager) => {
+        const merchant = await this.merchants.create(loginOf(user), manager);
+
+        await this.userEnrolment.attachMerchant(user.id, merchant.id, manager);
+      });
+    }
 
     await this.invites.consume(payload.inviteCode, identifier, payload.sub);
 
-    const user = await this.directory.findAuthenticatableById(payload.sub);
-
-    return { session: await this.sessions.issueSession(user), backupCodes };
+    return {
+      session: await this.sessions.issueSession(user, context),
+      backupCodes,
+    };
   }
 
   async startTwoFactorSetup(
@@ -126,6 +146,7 @@ export class EnrolmentService {
 
   async confirmTwoFactorSetup(
     dto: ConfirmTwoFactorSetupDto,
+    context?: LoginContext,
   ): Promise<IssuedSessionWithBackupCodes> {
     const payload = await this.verifyEnrolmentToken<TwoFactorSetupTokenPayload>(
       dto.setupToken,
@@ -140,7 +161,10 @@ export class EnrolmentService {
 
     const user = await this.directory.findAuthenticatableById(payload.sub);
 
-    return { session: await this.sessions.issueSession(user), backupCodes };
+    return {
+      session: await this.sessions.issueSession(user, context),
+      backupCodes,
+    };
   }
 
   private signEnrolmentToken(

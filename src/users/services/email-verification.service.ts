@@ -44,8 +44,6 @@ export class EmailVerificationService {
           SECOND_IN_MS,
     );
 
-    console.log('code', code);
-
     await this.verifications.save(
       this.verifications.create({
         userId,

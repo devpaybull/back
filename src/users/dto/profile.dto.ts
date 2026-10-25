@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '../../common/enums/role.enum';
+import { loginOf } from '../../common/utils/login-of';
 import { User } from '../entities/user.entity';
 import { UserStatus } from '../types/user-status.enum';
 
@@ -34,7 +35,7 @@ export class ProfileDto {
 
 export const toProfileDto = (user: User): ProfileDto => ({
   id: user.id,
-  login: user.email ?? user.telegramUsername,
+  login: loginOf(user),
   email: user.email,
   emailVerified: user.emailVerified,
   telegramUsername: user.telegramUsername,

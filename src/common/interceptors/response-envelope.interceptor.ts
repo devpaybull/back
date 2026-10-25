@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
+  StreamableFile,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -20,9 +21,11 @@ export type EnvelopedResponse<T> =
   ResponseEnvelope<T> | PagedResponseEnvelope<unknown>;
 
 const envelope = <T>(payload: T): EnvelopedResponse<T> =>
-  payload instanceof Page
-    ? { data: payload.items, meta: payload.meta }
-    : { data: payload ?? null };
+  payload instanceof StreamableFile
+    ? (payload as never)
+    : payload instanceof Page
+      ? { data: payload.items, meta: payload.meta }
+      : { data: payload ?? null };
 
 @Injectable()
 export class ResponseEnvelopeInterceptor<T> implements NestInterceptor<

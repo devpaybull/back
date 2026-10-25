@@ -16,6 +16,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { WriteAccess } from '../common/decorators/write-access.decorator';
 import { WriteAccessGuard } from '../common/guards/write-access.guard';
 import { AuthenticatedUser } from '../common/types/token';
+import {
+  TraderSettingsDto,
+  toTraderSettingsDto,
+} from '../trader-settings/dto/trader-settings.dto';
+import { TraderSettingsService } from '../trader-settings/trader-settings.service';
 import { ConfirmEmailDto } from './dto/confirm-email.dto';
 import { ProfileDto, toProfileDto } from './dto/profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -23,7 +28,7 @@ import { EmailVerificationService } from './services/email-verification.service'
 import { UserDirectoryService } from './services/user-directory.service';
 import { UserProfileService } from './services/user-profile.service';
 
-@ApiTags('users')
+@ApiTags('Profile')
 @ApiBearerAuth()
 @UseGuards(WriteAccessGuard)
 @Controller('users')
@@ -32,6 +37,7 @@ export class UsersController {
     private readonly directory: UserDirectoryService,
     private readonly profile: UserProfileService,
     private readonly emailVerification: EmailVerificationService,
+    private readonly settings: TraderSettingsService,
   ) {}
 
   @Get('me')
@@ -43,6 +49,23 @@ export class UsersController {
     if (!current) throw new UnauthorizedException();
 
     return toProfileDto(current);
+  }
+
+  @Get('me/settings')
+  @ApiOperation({
+    summary: 'Returns the trader settings of the signed-in user',
+  })
+  @ApiEnvelopeResponse(TraderSettingsDto)
+  async traderSettings(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<TraderSettingsDto> {
+    const row = await this.settings.ensure(user.id);
+
+    return toTraderSettingsDto(row, {
+      insurancePayInMin: this.settings.insurancePayInMinOf(row),
+      insurancePayOutMin: this.settings.insurancePayOutMinOf(row),
+      nightStopThreshold: this.settings.nightStopThresholdOf(row),
+    });
   }
 
   @Patch('me')

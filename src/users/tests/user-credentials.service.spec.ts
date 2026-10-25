@@ -53,6 +53,22 @@ describe('UserCredentialsService', () => {
     });
   });
 
+  describe('verifyTotp', () => {
+    it('treats a secret too short for the algorithm as a wrong code', async () => {
+      const shortUser = { id: uuidOf(1), totpSecret: 'AAAA' } as User;
+
+      await expect(service.verifyTotp(shortUser, '123456')).resolves.toBe(
+        false,
+      );
+    });
+
+    it('accepts a code generated from a valid secret', async () => {
+      await expect(
+        service.verifyTotp(user, await generate({ secret })),
+      ).resolves.toBe(true);
+    });
+  });
+
   describe('verifySecondFactor', () => {
     it('accepts a current one-time code', async () => {
       await expect(

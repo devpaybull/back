@@ -6,4 +6,6 @@ export interface UserChanges extends OwnIdentifierChanges {
   role?: Role;
   password?: string;
   status?: UserStatus;
+  telegramId?: string | null;
+  telegramGroups?: string | null;
 }

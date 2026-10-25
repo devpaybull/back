@@ -36,6 +36,80 @@ describe('UpdateUserDto', () => {
     ).toEqual([]);
   });
 
+  describe('null on a field that cannot be cleared', () => {
+    it.each([
+      'email',
+      'telegramUsername',
+      'role',
+      'password',
+      'status',
+      'resetTwoFactor',
+    ])('refuses null for %s', (field) => {
+      expect(failedProperties({ [field]: null })).toEqual([field]);
+    });
+  });
+
+  describe('telegramId', () => {
+    it.each(['1', '123456789', '123456789012345678'])('accepts %s', (value) => {
+      expect(failedProperties({ telegramId: value })).toEqual([]);
+    });
+
+    it('accepts null, which clears it', () => {
+      expect(failedProperties({ telegramId: null })).toEqual([]);
+    });
+
+    it.each([
+      '',
+      'abc',
+      '12a',
+      '-5',
+      '+5',
+      '0',
+      '012',
+      '1.5',
+      '1234567890123456789',
+    ])('refuses %p', (value) => {
+      expect(failedProperties({ telegramId: value })).toEqual(['telegramId']);
+    });
+
+    it('refuses a JSON number', () => {
+      expect(failedProperties({ telegramId: 123 })).toEqual(['telegramId']);
+    });
+  });
+
+  describe('telegramGroups', () => {
+    it('accepts free text', () => {
+      expect(
+        failedProperties({ telegramGroups: 'traders2026 / paybull_push' }),
+      ).toEqual([]);
+    });
+
+    it('accepts an empty string and null, which clear it', () => {
+      expect(failedProperties({ telegramGroups: '' })).toEqual([]);
+      expect(failedProperties({ telegramGroups: null })).toEqual([]);
+    });
+
+    it('trims it', () => {
+      expect(
+        plainToInstance(UpdateUserDto, { telegramGroups: '  a / b ' })
+          .telegramGroups,
+      ).toBe('a / b');
+    });
+
+    it('accepts 255 characters and refuses 256', () => {
+      expect(failedProperties({ telegramGroups: 'x'.repeat(255) })).toEqual([]);
+      expect(failedProperties({ telegramGroups: 'x'.repeat(256) })).toEqual([
+        'telegramGroups',
+      ]);
+    });
+
+    it('refuses a non-string', () => {
+      expect(failedProperties({ telegramGroups: ['a'] })).toEqual([
+        'telegramGroups',
+      ]);
+    });
+  });
+
   it('refuses a malformed email', () => {
     expect(failedProperties({ email: 'not-an-email' })).toEqual(['email']);
   });

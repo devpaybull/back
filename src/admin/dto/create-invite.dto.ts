@@ -2,12 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsDate,
-  IsEmail,
   IsEnum,
   IsOptional,
+  IsString,
+  IsUUID,
   Matches,
   MinDate,
-  ValidateIf,
 } from 'class-validator';
 import { Role } from '../../common/enums/role.enum';
 import { TELEGRAM_USERNAME_PATTERN } from '../../common/utils/telegram-username-pattern';
@@ -17,17 +17,10 @@ export class CreateInviteDto {
   @IsEnum(Role)
   role: Role;
 
-  @ApiPropertyOptional({ example: 'user@example.com' })
-  @IsOptional()
-  @ValidateIf((dto: CreateInviteDto) => !dto.telegramUsername)
-  @IsEmail()
-  email?: string;
-
-  @ApiPropertyOptional({ example: '@durov' })
-  @IsOptional()
-  @ValidateIf((dto: CreateInviteDto) => !dto.email)
+  @ApiProperty({ example: '@durov' })
+  @IsString()
   @Matches(TELEGRAM_USERNAME_PATTERN)
-  telegramUsername?: string;
+  telegramUsername: string;
 
   @ApiPropertyOptional({
     type: String,
@@ -38,6 +31,17 @@ export class CreateInviteDto {
   @IsOptional()
   @Type(() => Date)
   @IsDate()
-  @MinDate(() => new Date())
+  @MinDate(() => new Date(), {
+    message: '$property must be a moment in the future',
+  })
   expiresAt?: Date;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'The merchant the invited account works for; required for merchant_support and merchant_agent, refused for every other role',
+  })
+  @IsOptional()
+  @IsUUID()
+  merchantId?: string;
 }

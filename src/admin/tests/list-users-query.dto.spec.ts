@@ -33,8 +33,25 @@ describe('ListUsersQueryDto', () => {
       expect(failedProperties({ role })).toEqual([]);
     });
 
+    it('wraps a single role into a list', () => {
+      expect(parse({ role: Role.Trader }).role).toEqual([Role.Trader]);
+    });
+
+    it('accepts a repeated role parameter', () => {
+      const asked = { role: [Role.Trader, Role.LeadTrader] };
+
+      expect(failedProperties(asked)).toEqual([]);
+      expect(parse(asked).role).toEqual([Role.Trader, Role.LeadTrader]);
+    });
+
     it('refuses a role outside the enum', () => {
       expect(failedProperties({ role: 'president' })).toEqual(['role']);
+    });
+
+    it('refuses a list with one role outside the enum', () => {
+      expect(failedProperties({ role: [Role.Trader, 'president'] })).toEqual([
+        'role',
+      ]);
     });
 
     it.each(Object.values(UserStatus))('accepts the status %s', (status) => {

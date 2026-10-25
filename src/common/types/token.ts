@@ -21,4 +21,5 @@ export interface AuthenticatedUser {
   login: string;
   role: Role;
   status: UserStatus;
+  impersonatedBy?: string | null;
 }

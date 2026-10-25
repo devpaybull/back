@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   EmailConfirmationCodeMailInput,
-  InviteCodeMailInput,
   PasswordRecoveryCodeMailInput,
 } from '../types/mail-message';
 import { MailTransportService } from './mail-transport.service';
@@ -15,18 +14,6 @@ export class AccountMailService {
     private readonly transport: MailTransportService,
     private readonly config: ConfigService,
   ) {}
-
-  sendInviteCode(input: InviteCodeMailInput): Promise<boolean> {
-    return this.transport.send({
-      to: input.to,
-      subject: 'Your Paybull invitation code',
-      text: [
-        `Your invitation code: ${input.code}`,
-        `It is valid until ${input.expiresAt.toISOString()}.`,
-        'Use it on the registration page together with your email, password and authenticator app.',
-      ].join('\n'),
-    });
-  }
 
   sendEmailConfirmationCode(
     input: EmailConfirmationCodeMailInput,

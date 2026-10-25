@@ -6,7 +6,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { generateSecret, generateURI } from 'otplib';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
+import { loginOf } from '../../common/utils/login-of';
 import { User } from '../entities/user.entity';
 import { RegistrationInput } from '../types/registration-input';
 import { StartedRegistration } from '../types/started-registration';
@@ -44,10 +45,10 @@ export class UserEnrolmentService {
 
     const user = await this.users.save(
       this.users.merge(existing ?? this.users.create(), {
-        email: identifier.email ?? null,
-        emailVerified: Boolean(identifier.email),
+        emailVerified: false,
         telegramUsername: identifier.telegramUsername ?? null,
         role: input.role,
+        merchantId: input.merchantId ?? null,
         passwordHash: await this.credentials.hashPassword(input.password),
         totpSecret: secret,
         status: UserStatus.PendingTwoFactor,
@@ -62,7 +63,7 @@ export class UserEnrolmentService {
       secret,
       otpauthUrl: generateURI({
         issuer: this.config.get<string>('TOTP_ISSUER'),
-        label: identifier.email ?? identifier.telegramUsername,
+        label: loginOf(user),
         secret,
       }),
     };
@@ -88,6 +89,17 @@ export class UserEnrolmentService {
     await this.users.save(user);
 
     return this.credentials.issueBackupCodes(user.id);
+  }
+
+  async attachMerchant(
+    userId: string,
+    merchantId: string,
+    manager?: EntityManager,
+  ): Promise<User> {
+    const user = await this.directory.requireById(userId);
+    const repository = manager ? manager.getRepository(User) : this.users;
+
+    return repository.save(repository.merge(user, { merchantId }));
   }
 
   async resetTwoFactor(userId: string): Promise<User> {
@@ -121,7 +133,7 @@ export class UserEnrolmentService {
       secret,
       otpauthUrl: generateURI({
         issuer: this.config.get<string>('TOTP_ISSUER'),
-        label: saved.email ?? saved.telegramUsername,
+        label: loginOf(saved),
         secret,
       }),
     };

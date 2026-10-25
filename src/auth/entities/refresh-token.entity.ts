@@ -6,6 +6,7 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 
@@ -22,6 +23,14 @@ export class RefreshToken {
   @Column({ type: 'uuid' })
   userId: string;
 
+  @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'impersonatedByUserId' })
+  impersonatedBy: User | null;
+
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  impersonatedByUserId: string | null;
+
   @Index({ unique: true })
   @Column()
   tokenHash: string;
@@ -34,4 +43,7 @@ export class RefreshToken {
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt: Date;
 }

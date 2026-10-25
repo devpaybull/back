@@ -4,10 +4,11 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { ConfirmRegistrationDto } from '../dto/confirm-registration.dto';
@@ -20,9 +21,10 @@ import {
 } from '../dto/session.dto';
 import { TwoFactorSetupDto } from '../dto/two-factor-setup.dto';
 import { EnrolmentService } from '../services/enrolment.service';
+import { loginContextOf } from '../utils/login-context-of';
 import { setRefreshCookie } from '../utils/set-refresh-cookie';
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Public()
 @Controller('auth')
 export class EnrolmentController {
@@ -46,10 +48,13 @@ export class EnrolmentController {
   @ApiEnvelopeResponse(SessionWithBackupCodesDto)
   async confirmRegistration(
     @Body() dto: ConfirmRegistrationDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<SessionWithBackupCodesDto> {
-    const { session, backupCodes } =
-      await this.enrolment.confirmRegistration(dto);
+    const { session, backupCodes } = await this.enrolment.confirmRegistration(
+      dto,
+      loginContextOf(request, dto.fingerprint),
+    );
 
     setRefreshCookie(response, session);
 
@@ -81,10 +86,13 @@ export class EnrolmentController {
   @ApiEnvelopeResponse(SessionWithBackupCodesDto)
   async confirmTwoFactorSetup(
     @Body() dto: ConfirmTwoFactorSetupDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<SessionWithBackupCodesDto> {
-    const { session, backupCodes } =
-      await this.enrolment.confirmTwoFactorSetup(dto);
+    const { session, backupCodes } = await this.enrolment.confirmTwoFactorSetup(
+      dto,
+      loginContextOf(request, dto.fingerprint),
+    );
 
     setRefreshCookie(response, session);
 

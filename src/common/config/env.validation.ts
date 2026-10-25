@@ -1,15 +1,19 @@
+import { IsIanaTimeZone } from './is-iana-time-zone';
 import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsString,
+  IsUrl,
   Max,
   Min,
   MinLength,
   ValidateIf,
   validateSync,
+  ValidationError,
 } from 'class-validator';
 
 export enum NodeEnv {
@@ -19,6 +23,7 @@ export enum NodeEnv {
 }
 
 const MIN_SECRET_LENGTH = 32;
+const NIGHT_WINDOW_PREFIXES = ['NIGHT_STOP', 'INSURANCE_NIGHT'] as const;
 const TRUE_VALUES = ['true', '1', 'yes'];
 const FALSE_VALUES = ['false', '0', 'no'];
 
@@ -32,6 +37,16 @@ const ToBoolean = () =>
     if (FALSE_VALUES.includes(normalized)) return false;
 
     return value;
+  });
+
+const ToRequiredNumber = () =>
+  Transform(({ value }) => {
+    if (typeof value === 'number') return value;
+    if (value === undefined || value === null || String(value).trim() === '') {
+      return undefined;
+    }
+
+    return Number(value);
   });
 
 export class EnvironmentVariables {
@@ -124,8 +139,17 @@ export class EnvironmentVariables {
   @Min(1)
   PASSWORD_RESET_TTL_MINUTES: number = 15;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  LOGIN_LINK_TTL_MINUTES: number = 15;
+
   @IsString()
   APP_URL: string = '';
+
+  @IsString()
+  GEOIP_DB_PATH: string = '';
 
   @IsString()
   @IsNotEmpty()
@@ -135,6 +159,109 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   INVITE_TTL_HOURS: number = 72;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(0)
+  COUNTERPARTY_MIN_AMOUNT: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  RATE_MARKUP: number = 0.01;
+
+  @ToRequiredNumber()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  PLATFORM_MIN_PERCENT: number;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(1)
+  DEAL_TTL_MINUTES: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEAL_EXPIRY_INTERVAL_SECONDS: number = 30;
+
+  @IsString()
+  @IsNotEmpty()
+  RAPIRA_RATE_URL: string = 'https://api.rapira.net/open/market/rates';
+
+  @IsString()
+  @IsNotEmpty()
+  RAPIRA_RATE_SYMBOL: string = 'USDT/RUB';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  RAPIRA_RATE_TTL_SECONDS: number = 60;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  MAIN_BALANCE_MIN_THRESHOLD: number = 0;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  INSURANCE_PAY_IN_MIN: number = 500;
+
+  @ToRequiredNumber()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  INSURANCE_PAY_OUT_MIN: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  INSURANCE_WITHDRAWAL_DELAY_DAYS: number = 14;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  INSURANCE_NIGHT_START_HOUR: number = 0;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  INSURANCE_NIGHT_END_HOUR: number = 10;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIanaTimeZone()
+  INSURANCE_NIGHT_TIMEZONE: string = 'Europe/Moscow';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  NIGHT_STOP_THRESHOLD: number = 2;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  NIGHT_STOP_START_HOUR: number = 0;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  NIGHT_STOP_END_HOUR: number = 10;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIanaTimeZone()
+  NIGHT_STOP_TIMEZONE: string = 'Europe/Moscow';
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIanaTimeZone()
+  BUSINESS_TIMEZONE: string = 'Europe/Moscow';
 
   @IsString()
   MAIL_HOST: string = '';
@@ -159,6 +286,30 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty({ message: 'MAIL_FROM is required when MAIL_HOST is set' })
   MAIL_FROM: string = '';
+
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.VICTORIA_LOGS_URL))
+  @IsUrl({ require_tld: false, require_protocol: true })
+  VICTORIA_LOGS_URL: string = '';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  AUDIT_ARCHIVE_INTERVAL_SECONDS: number = 300;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  AUDIT_ARCHIVE_BATCH_SIZE: number = 1000;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  AUDIT_RETENTION_DAYS: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS: number = 60;
 }
 
 export function validateEnv(
@@ -169,6 +320,21 @@ export function validateEnv(
   });
 
   const errors = validateSync(validated, { skipMissingProperties: false });
+
+  for (const prefix of NIGHT_WINDOW_PREFIXES) {
+    const start = `${prefix}_START_HOUR` as const;
+    const end = `${prefix}_END_HOUR` as const;
+    if (validated[start] === validated[end]) {
+      errors.push(
+        Object.assign(new ValidationError(), {
+          property: start,
+          constraints: {
+            windowNotEmpty: `${start} and ${end} must differ`,
+          },
+        }),
+      );
+    }
+  }
 
   if (errors.length > 0) {
     const details = errors

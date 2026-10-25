@@ -1,0 +1,14 @@
+services:
+  victoria-logs:
+    image: victoriametrics/victoria-logs:v1.53.0
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=1y
+    ports:
+      - '9428:9428'
+    volumes:
+      - victoria-logs-data:/victoria-logs-data
+    restart: unless-stopped
+
+volumes:
+  victoria-logs-data:

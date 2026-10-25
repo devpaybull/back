@@ -14,11 +14,17 @@ import { Invite } from '../../invites/entities/invite.entity';
 import { InvitesService } from '../../invites/invites.service';
 import { InviteSortField } from '../../invites/types/invite-sort-field';
 import { InviteStatus } from '../../invites/types/invite-status';
+import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
+import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
+import { RateService } from '../../transactions/services/rate.service';
+import { MethodPercent } from '../../transactions/types/method-percent';
+import { RateScope } from '../../transactions/types/rate-scope.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AdminInvitesController } from '../controllers/admin-invites.controller';
 import { CreateInviteDto } from '../dto/create-invite.dto';
+import { ExtendInviteDto } from '../dto/extend-invite.dto';
 import { ListInvitesQueryDto } from '../dto/list-invites-query.dto';
 
 const HOUR_IN_MS = 60 * 60 * 1000;
@@ -29,7 +35,22 @@ describe('AdminInvitesController', () => {
     list: jest.fn(),
     findById: jest.fn(),
     revoke: jest.fn(),
+    extend: jest.fn(),
   };
+
+  const rateService = { getEffectiveGeneralRates: jest.fn() };
+  const traderSettings = {
+    findByUserIds: jest.fn(),
+    insurancePayInMinOf: jest.fn(),
+  };
+
+  const GLOBAL_MIN = 100;
+  const baseRates: MethodPercent[] = [
+    { method: 'card', payInPercent: 5, payOutPercent: 4 },
+  ];
+  const ownRates: MethodPercent[] = [
+    { method: 'card', payInPercent: 7, payOutPercent: 6 },
+  ];
 
   const issuer = (role: Role, id = uuidOf(1)): AuthenticatedUser => ({
     id,
@@ -44,7 +65,7 @@ describe('AdminInvitesController', () => {
   const dto = (overrides: Partial<CreateInviteDto> = {}): CreateInviteDto =>
     ({
       role: Role.Trader,
-      email: 'user@example.com',
+      telegramUsername: 'someone',
       ...overrides,
     }) as CreateInviteDto;
 
@@ -65,8 +86,7 @@ describe('AdminInvitesController', () => {
   const invite = (overrides: Partial<Invite> = {}): Invite =>
     ({
       id: 1,
-      email: 'user@example.com',
-      telegramUsername: null,
+      telegramUsername: 'someone',
       role: Role.Trader,
       code: 'ABCDEFGHJKLMNPQR',
       expiresAt: new Date(Date.now() + HOUR_IN_MS),
@@ -98,11 +118,22 @@ describe('AdminInvitesController', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     invites.create.mockResolvedValue(invite());
+    rateService.getEffectiveGeneralRates.mockResolvedValue({
+      base: baseRates,
+      bySubject: new Map(),
+    });
+    traderSettings.findByUserIds.mockResolvedValue([]);
+    traderSettings.insurancePayInMinOf.mockImplementation(
+      (settings?: TraderSettings | null) =>
+        settings?.insurancePayInMin ?? GLOBAL_MIN,
+    );
 
     const module = await Test.createTestingModule({
       controllers: [AdminInvitesController],
       providers: [
         { provide: InvitesService, useValue: invites },
+        { provide: RateService, useValue: rateService },
+        { provide: TraderSettingsService, useValue: traderSettings },
         { provide: UserDirectoryService, useValue: {} },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: () => '' } },
@@ -141,6 +172,15 @@ describe('AdminInvitesController', () => {
       Reflect.getMetadata(
         WRITE_ACCESS_METADATA_KEY,
         AdminInvitesController.prototype.revoke,
+      ),
+    ).toBe(true);
+  });
+
+  it('marks extending an invite as a write', () => {
+    expect(
+      Reflect.getMetadata(
+        WRITE_ACCESS_METADATA_KEY,
+        AdminInvitesController.prototype.extend,
       ),
     ).toBe(true);
   });
@@ -187,61 +227,50 @@ describe('AdminInvitesController', () => {
     });
   });
 
+  describe('the merchant handed to the service', () => {
+    it('passes the merchant through for the service to judge', async () => {
+      invites.create.mockResolvedValue(
+        invite({ role: Role.MerchantAgent, merchantId: uuidOf(50) }),
+      );
+
+      const created = await controller.create(
+        dto({ role: Role.MerchantAgent, merchantId: uuidOf(50) }),
+        admin,
+      );
+
+      expect(invites.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: Role.MerchantAgent,
+          merchantId: uuidOf(50),
+        }),
+      );
+      expect(created.merchantId).toBe(uuidOf(50));
+    });
+
+    it('reports an invite with no merchant as null', async () => {
+      const created = await controller.create(dto(), admin);
+
+      expect(created.merchantId).toBeNull();
+    });
+  });
+
   describe('the identifier handed to the service', () => {
-    it('carries the email alone when only an email was given', async () => {
-      await controller.create(
-        dto({ email: 'user@example.com', telegramUsername: undefined }),
-        admin,
-      );
+    it('carries the telegram username it was given', async () => {
+      await controller.create(dto({ telegramUsername: '@durov' }), admin);
 
       expect(invites.create).toHaveBeenCalledWith({
-        identifier: { email: 'user@example.com' },
+        telegramUsername: '@durov',
         role: Role.Trader,
         createdByUserId: uuidOf(1),
       });
     });
+  });
 
-    it('carries the telegram username alone when only that was given', async () => {
-      await controller.create(
-        dto({ email: undefined, telegramUsername: '@durov' }),
-        admin,
-      );
+  it('answers with no email field, since an invite has none', async () => {
+    const created = await controller.create(dto(), admin);
 
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: { telegramUsername: '@durov' },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
-
-    it('passes both through so the service can reject the pair', async () => {
-      await controller.create(
-        dto({ email: 'user@example.com', telegramUsername: '@durov' }),
-        admin,
-      );
-
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: {
-          email: 'user@example.com',
-          telegramUsername: '@durov',
-        },
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
-
-    it('passes neither through so the service can reject the absence', async () => {
-      await controller.create(
-        dto({ email: undefined, telegramUsername: undefined }),
-        admin,
-      );
-
-      expect(invites.create).toHaveBeenCalledWith({
-        identifier: {},
-        role: Role.Trader,
-        createdByUserId: uuidOf(1),
-      });
-    });
+    expect(created).not.toHaveProperty('email');
+    expect(created.telegramUsername).toBe('someone');
   });
 
   it('records which admin issued the invite', async () => {
@@ -299,7 +328,6 @@ describe('AdminInvitesController', () => {
       invite({
         id: 3,
         role: Role.Merchant,
-        email: null,
         telegramUsername: '@durov',
         expiresAt: new Date(Date.now() - HOUR_IN_MS),
       }),
@@ -354,12 +382,12 @@ describe('AdminInvitesController', () => {
       expect(listed.status).toBe(InviteStatus.Pending);
     });
 
-    it('falls back to the telegram username as the login', async () => {
+    it('takes the telegram username as the login over the email', async () => {
       const [listed] = await listedInvites([
         invite({
           createdBy: account({
             id: uuidOf(4),
-            email: null,
+            email: 'durov@example.com',
             telegramUsername: 'durov',
           }),
           createdByUserId: uuidOf(4),
@@ -367,6 +395,17 @@ describe('AdminInvitesController', () => {
       ]);
 
       expect(listed.createdBy.login).toBe('durov');
+    });
+
+    it('falls back to the email as the login when there is no telegram username', async () => {
+      const [listed] = await listedInvites([
+        invite({
+          createdBy: account({ id: uuidOf(4), email: 'boss@example.com' }),
+          createdByUserId: uuidOf(4),
+        }),
+      ]);
+
+      expect(listed.createdBy.login).toBe('boss@example.com');
     });
 
     it('carries nothing beyond the id, login and role', async () => {
@@ -485,5 +524,224 @@ describe('AdminInvitesController', () => {
         expect(invites.revoke).toHaveBeenCalledWith(1, uuidOf(2));
       },
     );
+  });
+
+  describe('extend', () => {
+    const expiresAt = new Date(Date.now() + 5 * HOUR_IN_MS);
+    const body = plainToInstance(ExtendInviteDto, { expiresAt });
+
+    it('hands the invite and the new expiry to the service', async () => {
+      invites.findById.mockResolvedValue(invite());
+      invites.extend.mockResolvedValue(invite({ expiresAt }));
+
+      const extended = await controller.extend(1, body, admin);
+
+      expect(invites.extend).toHaveBeenCalledWith(1, expiresAt);
+      expect(extended.expiresAt).toEqual(expiresAt);
+    });
+
+    it('answers not found before it asks the service to extend', async () => {
+      invites.findById.mockResolvedValue(null);
+
+      await expect(controller.extend(1, body, admin)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(invites.extend).not.toHaveBeenCalled();
+    });
+
+    it.each([Role.Admin, Role.Superadmin])(
+      'refuses an admin extending a %s invite',
+      async (role) => {
+        invites.findById.mockResolvedValue(invite({ role }));
+
+        await expect(controller.extend(1, body, admin)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        expect(invites.extend).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(Object.values(Role))(
+      'lets a superadmin extend a %s invite',
+      async (role) => {
+        invites.findById.mockResolvedValue(invite({ role }));
+        invites.extend.mockResolvedValue(invite({ role, expiresAt }));
+
+        await expect(
+          controller.extend(1, body, superadmin),
+        ).resolves.toBeDefined();
+        expect(invites.extend).toHaveBeenCalledWith(1, expiresAt);
+      },
+    );
+  });
+
+  describe('the terms an invite carries', () => {
+    const userId = uuidOf(7);
+    const usedTrader = (overrides: Partial<Invite> = {}): Invite =>
+      invite({
+        usedAt: new Date(),
+        usedBy: account({ id: userId, role: Role.Trader }),
+        usedByUserId: userId,
+        ...overrides,
+      });
+
+    it('gives a non-trader invite no terms and looks nothing up', async () => {
+      const [listed] = await listedInvites([invite({ role: Role.Merchant })]);
+
+      expect(listed.rates).toBeNull();
+      expect(listed.insurancePayInMin).toBeNull();
+      expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
+      expect(traderSettings.findByUserIds).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['pending', invite()],
+      ['expired', invite({ expiresAt: new Date(Date.now() - HOUR_IN_MS) })],
+      ['revoked', invite({ revokedAt: new Date(), revokedBy: account() })],
+    ])('gives a %s trader invite the defaults', async (_name, row) => {
+      const [listed] = await listedInvites([row]);
+
+      expect(listed.rates).toEqual(baseRates);
+      expect(listed.insurancePayInMin).toBe(GLOBAL_MIN);
+      expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+        RateScope.Trader,
+        [],
+      );
+    });
+
+    it('gives a used trader invite the redeeming account values', async () => {
+      traderSettings.findByUserIds.mockResolvedValue([
+        {
+          userId,
+          individualRatesEnabled: true,
+          insurancePayInMin: 250,
+        } as TraderSettings,
+      ]);
+      rateService.getEffectiveGeneralRates.mockResolvedValue({
+        base: baseRates,
+        bySubject: new Map([[userId, ownRates]]),
+      });
+
+      const [listed] = await listedInvites([usedTrader()]);
+
+      expect(listed.rates).toEqual(ownRates);
+      expect(listed.insurancePayInMin).toBe(250);
+      expect(traderSettings.findByUserIds).toHaveBeenCalledWith([userId]);
+      expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+        RateScope.Trader,
+        [{ userId, individualEnabled: true }],
+      );
+    });
+
+    it('treats a missing settings row as individual disabled and global minimum', async () => {
+      rateService.getEffectiveGeneralRates.mockResolvedValue({
+        base: baseRates,
+        bySubject: new Map([[userId, baseRates]]),
+      });
+
+      const [listed] = await listedInvites([usedTrader()]);
+
+      expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
+        RateScope.Trader,
+        [{ userId, individualEnabled: false }],
+      );
+      expect(listed.rates).toEqual(baseRates);
+      expect(listed.insurancePayInMin).toBe(GLOBAL_MIN);
+    });
+
+    it('gives a used non-trader invite no terms and looks nothing up', async () => {
+      const [listed] = await listedInvites([
+        usedTrader({
+          role: Role.Merchant,
+          usedBy: account({ id: userId, role: Role.Merchant }),
+        }),
+      ]);
+
+      expect(listed.rates).toBeNull();
+      expect(listed.insurancePayInMin).toBeNull();
+      expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
+      expect(traderSettings.findByUserIds).not.toHaveBeenCalled();
+    });
+
+    it('keeps the order of the rates the service returned for a redeemed invite', async () => {
+      const ordered: MethodPercent[] = [
+        { method: 'card', payInPercent: 7, payOutPercent: 6 },
+        { method: 'sbp', payInPercent: 3, payOutPercent: 2 },
+      ];
+      rateService.getEffectiveGeneralRates.mockResolvedValue({
+        base: baseRates,
+        bySubject: new Map([[userId, ordered]]),
+      });
+
+      const [listed] = await listedInvites([usedTrader()]);
+
+      expect(listed.rates).toEqual(ordered);
+    });
+
+    it('gives a used invite whose account is gone no terms', async () => {
+      const [listed] = await listedInvites([
+        usedTrader({ usedBy: null, usedByUserId: null }),
+      ]);
+
+      expect(listed.rates).toBeNull();
+      expect(listed.insurancePayInMin).toBeNull();
+      expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
+    });
+
+    it('resolves a whole page with one settings and one rates lookup', async () => {
+      invites.list.mockResolvedValue(
+        toPage(
+          [
+            [
+              invite(),
+              usedTrader({ id: 2 }),
+              usedTrader({
+                id: 3,
+                usedByUserId: uuidOf(8),
+                usedBy: account({ id: uuidOf(8) }),
+              }),
+              invite({ id: 4, role: Role.Merchant }),
+            ],
+            41,
+          ],
+          { page: 2, limit: 20 },
+        ),
+      );
+
+      const page = await controller.list(query({ page: 2 }));
+
+      expect(traderSettings.findByUserIds).toHaveBeenCalledTimes(1);
+      expect(traderSettings.findByUserIds).toHaveBeenCalledWith([
+        userId,
+        uuidOf(8),
+      ]);
+      expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledTimes(1);
+      expect(page.items).toHaveLength(4);
+      expect(page.items[3].rates).toBeNull();
+      expect(page.meta).toEqual({ total: 41, page: 2, limit: 20, pages: 3 });
+    });
+
+    it('carries the terms on create, revoke and extend too', async () => {
+      invites.findById.mockResolvedValue(invite());
+      invites.revoke.mockResolvedValue(
+        invite({ revokedAt: new Date(), revokedBy: account() }),
+      );
+      invites.extend.mockResolvedValue(invite());
+
+      const created = await controller.create(dto(), admin);
+      const revoked = await controller.revoke(1, admin);
+      const extended = await controller.extend(
+        1,
+        plainToInstance(ExtendInviteDto, {
+          expiresAt: new Date(Date.now() + 5 * HOUR_IN_MS),
+        }),
+        admin,
+      );
+
+      for (const result of [created, revoked, extended]) {
+        expect(result.rates).toEqual(baseRates);
+        expect(result.insurancePayInMin).toBe(GLOBAL_MIN);
+      }
+    });
   });
 });

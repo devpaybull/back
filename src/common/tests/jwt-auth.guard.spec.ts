@@ -18,7 +18,7 @@ const LIVE_SESSION = 42;
 describe('JwtAuthGuard', () => {
   const jwt = new JwtService({});
   const directory = { findAuthenticatableById: jest.fn() };
-  const sessions = { isSessionLive: jest.fn() };
+  const sessions = { findLiveSession: jest.fn() };
   const reflector = { getAllAndOverride: jest.fn() };
   const guard = new JwtAuthGuard(
     jwt,
@@ -59,7 +59,10 @@ describe('JwtAuthGuard', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    sessions.isSessionLive.mockResolvedValue(true);
+    sessions.findLiveSession.mockResolvedValue({
+      id: LIVE_SESSION,
+      impersonatedByUserId: null,
+    });
     reflector.getAllAndOverride.mockReturnValue(undefined);
   });
 
@@ -127,19 +130,19 @@ describe('JwtAuthGuard', () => {
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
-    expect(sessions.isSessionLive).not.toHaveBeenCalled();
+    expect(sessions.findLiveSession).not.toHaveBeenCalled();
     expect(directory.findAuthenticatableById).not.toHaveBeenCalled();
   });
 
   it('rejects a token whose session was revoked by a logout', async () => {
-    sessions.isSessionLive.mockResolvedValue(false);
+    sessions.findLiveSession.mockResolvedValue(null);
 
     const { context } = contextFor(`Bearer ${accessToken(claims())}`);
 
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
-    expect(sessions.isSessionLive).toHaveBeenCalledWith(LIVE_SESSION);
+    expect(sessions.findLiveSession).toHaveBeenCalledWith(LIVE_SESSION);
     expect(directory.findAuthenticatableById).not.toHaveBeenCalled();
   });
 
@@ -173,6 +176,7 @@ describe('JwtAuthGuard', () => {
       login: 'admin@example.com',
       role: Role.Admin,
       status: UserStatus.Active,
+      impersonatedBy: null,
     });
   });
 
@@ -187,6 +191,23 @@ describe('JwtAuthGuard', () => {
 
     const { context, request } = contextFor(
       `Bearer ${accessToken(claims({ sub: uuidOf(7), login: 'durov' }))}`,
+    );
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user.login).toBe('durov');
+  });
+
+  it('takes the telegram username as the login when the account holds both', async () => {
+    directory.findAuthenticatableById.mockResolvedValue({
+      id: uuidOf(7),
+      email: 'durov@example.com',
+      telegramUsername: 'durov',
+      role: Role.Trader,
+      status: UserStatus.Active,
+    } as User);
+
+    const { context, request } = contextFor(
+      `Bearer ${accessToken(claims({ sub: uuidOf(7), login: 'durov@example.com' }))}`,
     );
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
@@ -212,6 +233,28 @@ describe('JwtAuthGuard', () => {
       login: 'user@example.com',
       role: Role.Trader,
       status: UserStatus.Suspended,
+      impersonatedBy: null,
     });
+  });
+
+  it('names the superadmin a login-link session was opened by, from the one session read', async () => {
+    sessions.findLiveSession.mockResolvedValue({
+      id: LIVE_SESSION,
+      impersonatedByUserId: uuidOf(5),
+    });
+    directory.findAuthenticatableById.mockResolvedValue({
+      id: uuidOf(1),
+      email: 'user@example.com',
+      telegramUsername: null,
+      role: Role.Trader,
+      status: UserStatus.Active,
+    } as User);
+
+    const { context, request } = contextFor(`Bearer ${accessToken(claims())}`);
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(request.user.impersonatedBy).toBe(uuidOf(5));
+    expect(sessions.findLiveSession).toHaveBeenCalledTimes(1);
+    expect(directory.findAuthenticatableById).toHaveBeenCalledTimes(1);
   });
 });

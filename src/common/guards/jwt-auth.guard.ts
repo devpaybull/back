@@ -12,6 +12,7 @@ import { UserDirectoryService } from '../../users/services/user-directory.servic
 import { PUBLIC_METADATA_KEY } from '../decorators/public.decorator';
 import { AuthenticatedRequest } from '../types/authenticated-request';
 import { AccessTokenPayload, TokenType } from '../types/token';
+import { loginOf } from '../utils/login-of';
 
 const BEARER_PREFIX = 'Bearer ';
 const ACCESS_REJECTED = 'Access token is invalid or expired';
@@ -40,7 +41,9 @@ export class JwtAuthGuard implements CanActivate {
       header.slice(BEARER_PREFIX.length),
     );
 
-    if (!(await this.sessions.isSessionLive(payload.sid))) {
+    const session = await this.sessions.findLiveSession(payload.sid);
+
+    if (!session) {
       throw new UnauthorizedException(ACCESS_REJECTED);
     }
 
@@ -52,9 +55,10 @@ export class JwtAuthGuard implements CanActivate {
 
     request.user = {
       id: user.id,
-      login: user.email ?? user.telegramUsername,
+      login: loginOf(user),
       role: user.role,
       status: user.status,
+      impersonatedBy: session.impersonatedByUserId ?? null,
     };
 
     return true;

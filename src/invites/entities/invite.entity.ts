@@ -6,8 +6,10 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
+import { Merchant } from '../../merchants/entities/merchant.entity';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('invites')
@@ -17,14 +19,17 @@ export class Invite {
 
   @Index()
   @Column({ nullable: true })
-  email: string;
-
-  @Index()
-  @Column({ nullable: true })
   telegramUsername: string;
 
   @Column({ type: 'enum', enum: Role })
   role: Role;
+
+  @ManyToOne(() => Merchant, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'merchantId' })
+  merchant: Merchant;
+
+  @Column({ type: 'uuid', nullable: true })
+  merchantId: string;
 
   @Index({ unique: true })
   @Column()
@@ -62,4 +67,7 @@ export class Invite {
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt: Date;
 }

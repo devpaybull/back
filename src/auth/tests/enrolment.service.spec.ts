@@ -2,13 +2,14 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TokenType } from '../../common/types/token';
 import { renderQrCodeDataUrl } from '../../common/utils/render-qr-code-data-url';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { InvitesService } from '../../invites/invites.service';
+import { MerchantsService } from '../../merchants/merchants.service';
 import { User } from '../../users/entities/user.entity';
 import { UserCredentialsService } from '../../users/services/user-credentials.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -16,6 +17,8 @@ import { UserEnrolmentService } from '../../users/services/user-enrolment.servic
 import { UserStatus } from '../../users/types/user-status.enum';
 import { RefreshToken } from '../entities/refresh-token.entity';
 import { EnrolmentService } from '../services/enrolment.service';
+import { AuditService } from '../../audit/services/audit.service';
+import { LoginFootprintService } from '../services/login-footprint.service';
 import { SessionService } from '../services/session.service';
 
 const ACCESS_SECRET = 'access-secret-that-is-long-enough-here';
@@ -29,6 +32,14 @@ const ENV: Record<string, unknown> = {
   JWT_ACCESS_TTL_SECONDS: 900,
   JWT_REFRESH_TTL_SECONDS: 2592000,
   JWT_REGISTRATION_TTL_SECONDS: 900,
+};
+
+const footprints = { record: jest.fn() };
+
+const context = {
+  ip: '203.0.113.7',
+  userAgent: 'agent/1.0',
+  fingerprint: 'fp-1',
 };
 
 describe('EnrolmentService', () => {
@@ -70,6 +81,19 @@ describe('EnrolmentService', () => {
     startRegistration: jest.fn(),
     startTwoFactorSetup: jest.fn(),
     confirmTwoFactor: jest.fn(),
+    attachMerchant: jest.fn(),
+  };
+
+  const merchants = {
+    create: jest.fn(async (name: string) => ({ id: uuidOf(50), name })),
+  };
+
+  const transactionManager = { name: 'transaction manager' };
+
+  const dataSource = {
+    transaction: jest.fn(async (work: (manager: unknown) => unknown) =>
+      work(transactionManager),
+    ),
   };
 
   const invites = {
@@ -96,6 +120,10 @@ describe('EnrolmentService', () => {
         { provide: UserDirectoryService, useValue: userDirectory },
         { provide: UserEnrolmentService, useValue: userEnrolment },
         { provide: InvitesService, useValue: invites },
+        { provide: MerchantsService, useValue: merchants },
+        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: LoginFootprintService, useValue: footprints },
         { provide: JwtService, useValue: jwt },
         {
           provide: ConfigService,
@@ -185,6 +213,33 @@ describe('EnrolmentService', () => {
         identifier: { email: 'user@example.com' },
         role: Role.LeadTrader,
         password: 'password123',
+        merchantId: undefined,
+      });
+    });
+
+    it('takes the merchant from the invite', async () => {
+      invites.assertUsable.mockResolvedValue({
+        code: 'ABCDEFGHJKLMNPQR',
+        role: Role.MerchantSupport,
+        merchantId: uuidOf(50),
+      });
+      userEnrolment.startRegistration.mockResolvedValue({
+        user: activeUser,
+        secret: 'SECRET',
+        otpauthUrl: 'otpauth://totp/Paybull:user@example.com?secret=SECRET',
+      });
+
+      await service.register({
+        login: 'user@example.com',
+        password: 'password123',
+        inviteCode: 'ABCDEFGHJKLMNPQR',
+      });
+
+      expect(userEnrolment.startRegistration).toHaveBeenCalledWith({
+        identifier: { email: 'user@example.com' },
+        role: Role.MerchantSupport,
+        password: 'password123',
+        merchantId: uuidOf(50),
       });
     });
 
@@ -231,6 +286,19 @@ describe('EnrolmentService', () => {
         inviteCode: 'ABCDEFGHJKLMNPQR',
         type: TokenType.Registration,
       });
+
+    it('records the login footprint of the new account', async () => {
+      invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+      userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+      userDirectory.findAuthenticatableById.mockResolvedValue(activeUser);
+
+      await service.confirmRegistration(
+        { registrationToken: validToken(), totp: '123456' },
+        context,
+      );
+
+      expect(footprints.record).toHaveBeenCalledWith(activeUser.id, context);
+    });
 
     it('burns the invite, returns backup codes and opens a session', async () => {
       invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
@@ -280,6 +348,183 @@ describe('EnrolmentService', () => {
       expect(
         jwt.verify(result.session.accessToken, { secret: ACCESS_SECRET }),
       ).toMatchObject({ sub: uuidOf(2), login: 'durov', role: Role.Merchant });
+    });
+
+    describe('the merchant a merchant account is', () => {
+      const merchantUser = (overrides: Partial<User> = {}): User =>
+        ({
+          id: uuidOf(1),
+          email: 'shop@example.com',
+          telegramUsername: null,
+          role: Role.Merchant,
+          status: UserStatus.Active,
+          merchantId: null,
+          ...overrides,
+        }) as User;
+
+      it('creates a merchant named by the login and binds the account to it', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(merchantUser());
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop@example.com'),
+          totp: '123456',
+        });
+
+        expect(merchants.create).toHaveBeenCalledWith(
+          'shop@example.com',
+          transactionManager,
+        );
+        expect(userEnrolment.attachMerchant).toHaveBeenCalledWith(
+          uuidOf(1),
+          uuidOf(50),
+          transactionManager,
+        );
+      });
+
+      it('creates the merchant and binds the account in one transaction', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(merchantUser());
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop@example.com'),
+          totp: '123456',
+        });
+
+        expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('burns no invite when binding the merchant fails', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(merchantUser());
+        userEnrolment.attachMerchant.mockRejectedValueOnce(new Error('boom'));
+
+        await expect(
+          service.confirmRegistration({
+            registrationToken: validToken('shop@example.com'),
+            totp: '123456',
+          }),
+        ).rejects.toThrow('boom');
+        expect(invites.consume).not.toHaveBeenCalled();
+      });
+
+      it('names the merchant by the telegram username when there is no email', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(
+          merchantUser({ email: null, telegramUsername: 'shop' }),
+        );
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop'),
+          totp: '123456',
+        });
+
+        expect(merchants.create).toHaveBeenCalledWith(
+          'shop',
+          transactionManager,
+        );
+      });
+
+      it('names the merchant by the telegram username over the email', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(
+          merchantUser({ email: 'shop@example.com', telegramUsername: 'shop' }),
+        );
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop'),
+          totp: '123456',
+        });
+
+        expect(merchants.create).toHaveBeenCalledWith(
+          'shop',
+          transactionManager,
+        );
+      });
+
+      it('creates it after the second factor and before the invite is burned', async () => {
+        const order: string[] = [];
+
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockImplementation(async () => {
+          order.push('confirmTwoFactor');
+
+          return ['AAAAA-BBBBB'];
+        });
+        userDirectory.findAuthenticatableById.mockResolvedValue(merchantUser());
+        userEnrolment.attachMerchant.mockImplementation(async () => {
+          order.push('attachMerchant');
+        });
+        invites.consume.mockImplementation(async () => {
+          order.push('consume');
+        });
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop@example.com'),
+          totp: '123456',
+        });
+
+        expect(order).toEqual([
+          'confirmTwoFactor',
+          'attachMerchant',
+          'consume',
+        ]);
+      });
+
+      it('creates nothing when the one-time code is wrong', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockRejectedValue(
+          new UnauthorizedException(),
+        );
+
+        await expect(
+          service.confirmRegistration({
+            registrationToken: validToken('shop@example.com'),
+            totp: '000000',
+          }),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+        expect(merchants.create).not.toHaveBeenCalled();
+      });
+
+      it('leaves an account that already has a merchant alone', async () => {
+        invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+        userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+        userDirectory.findAuthenticatableById.mockResolvedValue(
+          merchantUser({ merchantId: uuidOf(60) }),
+        );
+
+        await service.confirmRegistration({
+          registrationToken: validToken('shop@example.com'),
+          totp: '123456',
+        });
+
+        expect(merchants.create).not.toHaveBeenCalled();
+        expect(userEnrolment.attachMerchant).not.toHaveBeenCalled();
+      });
+
+      it.each(Object.values(Role).filter((role) => role !== Role.Merchant))(
+        'creates no merchant for a %s',
+        async (role) => {
+          invites.assertUsable.mockResolvedValue({ code: 'ABCDEFGHJKLMNPQR' });
+          userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+          userDirectory.findAuthenticatableById.mockResolvedValue(
+            merchantUser({ role }),
+          );
+
+          await service.confirmRegistration({
+            registrationToken: validToken('shop@example.com'),
+            totp: '123456',
+          });
+
+          expect(merchants.create).not.toHaveBeenCalled();
+          expect(userEnrolment.attachMerchant).not.toHaveBeenCalled();
+        },
+      );
     });
 
     it('keeps the invite when the one-time code is wrong', async () => {
@@ -353,6 +598,30 @@ describe('EnrolmentService', () => {
         (error: Error) => error,
       );
 
+    it('records the login footprint of the re-enrolled account', async () => {
+      userDirectory.findByLogin.mockResolvedValue(pendingUser);
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userEnrolment.startTwoFactorSetup.mockResolvedValue({
+        user: pendingUser,
+        secret: 'NEWSECRET',
+        otpauthUrl: 'otpauth://totp/Paybull:reset@example.com?secret=NEWSECRET',
+      });
+      userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+      userDirectory.findAuthenticatableById.mockResolvedValue(reEnrolledUser);
+
+      const started = await service.startTwoFactorSetup(credentials);
+
+      await service.confirmTwoFactorSetup(
+        { setupToken: started.setupToken, totp: '123456' },
+        context,
+      );
+
+      expect(footprints.record).toHaveBeenCalledWith(
+        reEnrolledUser.id,
+        context,
+      );
+    });
+
     it('turns a proven password into an active session with backup codes', async () => {
       userDirectory.findByLogin.mockResolvedValue(pendingUser);
       userCredentials.verifyPassword.mockResolvedValue(true);
@@ -422,6 +691,27 @@ describe('EnrolmentService', () => {
 
       expect(invites.assertUsable).not.toHaveBeenCalled();
       expect(invites.consume).not.toHaveBeenCalled();
+    });
+
+    it('creates no merchant for a merchant account re-enrolling', async () => {
+      userDirectory.findByLogin.mockResolvedValue(pendingUser);
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userEnrolment.startTwoFactorSetup.mockResolvedValue({
+        user: pendingUser,
+        secret: 'NEWSECRET',
+        otpauthUrl: 'otpauth://totp/Paybull:reset@example.com?secret=NEWSECRET',
+      });
+      userEnrolment.confirmTwoFactor.mockResolvedValue(['AAAAA-BBBBB']);
+      userDirectory.findAuthenticatableById.mockResolvedValue(reEnrolledUser);
+
+      const started = await service.startTwoFactorSetup(credentials);
+      await service.confirmTwoFactorSetup({
+        setupToken: started.setupToken,
+        totp: '123456',
+      });
+
+      expect(merchants.create).not.toHaveBeenCalled();
+      expect(userEnrolment.attachMerchant).not.toHaveBeenCalled();
     });
 
     it('renders the QR code from the fresh otpauth URL it returns', async () => {

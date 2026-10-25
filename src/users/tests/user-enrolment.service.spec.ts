@@ -98,32 +98,33 @@ describe('UserEnrolmentService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('creates a pending user from an email invite', async () => {
+    it('leaves an email an admin added to a pending account alone', async () => {
+      stored.push({
+        id: uuidOf(1),
+        telegramUsername: 'durov',
+        email: 'added@example.com',
+        status: UserStatus.PendingTwoFactor,
+      });
+
       const result = await service.startRegistration({
-        identifier: { email: '  User@Example.com ' },
-        role: Role.Merchant,
+        identifier: { telegramUsername: 'durov' },
+        role: Role.Trader,
         password: 'password123',
       });
 
-      expect(result.user.email).toBe('user@example.com');
-      expect(result.user.telegramUsername).toBeNull();
-      expect(result.user.status).toBe(UserStatus.PendingTwoFactor);
-      expect(result.user.passwordHash).not.toBe('password123');
-      expect(result.otpauthUrl).toContain(`secret=${result.secret}`);
-      expect(result.otpauthUrl).toContain('issuer=Paybull');
-      expect(decodeURIComponent(result.otpauthUrl)).toContain(
-        'user@example.com',
-      );
+      expect(result.user.id).toBe(uuidOf(1));
+      expect(result.user.email).toBe('added@example.com');
+      expect(stored[0].email).toBe('added@example.com');
     });
 
-    it('trusts the address an email invite was redeemed at', async () => {
+    it('never starts an account with a verified email', async () => {
       const result = await service.startRegistration({
         identifier: { email: 'user@example.com' },
         role: Role.Merchant,
         password: 'password123',
       });
 
-      expect(result.user.emailVerified).toBe(true);
+      expect(result.user.emailVerified).toBe(false);
     });
 
     it('creates a pending user from a telegram invite', async () => {
@@ -134,7 +135,7 @@ describe('UserEnrolmentService', () => {
       });
 
       expect(result.user.telegramUsername).toBe('durov');
-      expect(result.user.email).toBeNull();
+      expect(result.user.email).toBeFalsy();
       expect(result.user.status).toBe(UserStatus.PendingTwoFactor);
       expect(decodeURIComponent(result.otpauthUrl)).toContain('durov');
     });
@@ -264,6 +265,64 @@ describe('UserEnrolmentService', () => {
     });
   });
 
+  describe('the merchant an account works for', () => {
+    it('takes the merchant the invite carried', async () => {
+      const result = await service.startRegistration({
+        identifier: { email: 'support@example.com' },
+        role: Role.MerchantSupport,
+        password: 'password123',
+        merchantId: uuidOf(50),
+      });
+
+      expect(result.user.merchantId).toBe(uuidOf(50));
+    });
+
+    it('leaves the merchant empty when the invite carried none', async () => {
+      const result = await service.startRegistration({
+        identifier: { email: 'trader@example.com' },
+        role: Role.Trader,
+        password: 'password123',
+      });
+
+      expect(result.user.merchantId).toBeNull();
+    });
+
+    it('binds an existing account to a merchant', async () => {
+      stored.push({ id: uuidOf(1), role: Role.Merchant, merchantId: null });
+
+      const attached = await service.attachMerchant(uuidOf(1), uuidOf(50));
+
+      expect(attached.merchantId).toBe(uuidOf(50));
+      expect(stored[0].merchantId).toBe(uuidOf(50));
+    });
+
+    it('writes through the given transaction when one is passed', async () => {
+      stored.push({ id: uuidOf(1), role: Role.Merchant, merchantId: null });
+      const inTransaction = {
+        merge: jest.fn((user, changes) => ({ ...user, ...changes })),
+        save: jest.fn(async (user) => user),
+      };
+      const manager = { getRepository: jest.fn(() => inTransaction) };
+
+      const attached = await service.attachMerchant(
+        uuidOf(1),
+        uuidOf(50),
+        manager as never,
+      );
+
+      expect(attached.merchantId).toBe(uuidOf(50));
+      expect(inTransaction.save).toHaveBeenCalledTimes(1);
+      expect(users.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to bind an account that is not there', async () => {
+      await expect(
+        service.attachMerchant(uuidOf(404), uuidOf(50)),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(users.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resetTwoFactor', () => {
     const confirmedUser = (): Partial<User> => ({
       id: uuidOf(1),
@@ -378,12 +437,13 @@ describe('UserEnrolmentService', () => {
       expect(decodeURIComponent(started.otpauthUrl)).toContain('durov');
     });
 
-    it('prefers the email when the user holds both identifiers', async () => {
+    it('labels the secret with the telegram username when the user holds both identifiers', async () => {
       stored.push(pendingUser({ telegramUsername: 'durov' }));
 
       const started = await service.startTwoFactorSetup(uuidOf(1));
 
-      expect(decodeURIComponent(started.otpauthUrl)).toContain(
+      expect(decodeURIComponent(started.otpauthUrl)).toContain('durov');
+      expect(decodeURIComponent(started.otpauthUrl)).not.toContain(
         'user@example.com',
       );
     });

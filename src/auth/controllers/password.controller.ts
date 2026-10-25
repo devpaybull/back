@@ -25,7 +25,7 @@ import { setRefreshCookie } from '../utils/set-refresh-cookie';
 
 const SUCCESS: MessageDto = { message: 'success' };
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Controller('auth')
 export class PasswordController {
   constructor(private readonly passwords: PasswordService) {}

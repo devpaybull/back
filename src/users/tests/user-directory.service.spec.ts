@@ -1,7 +1,11 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { In, Not } from 'typeorm';
+import { ILike, In, Not } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -66,6 +70,22 @@ describe('UserDirectoryService', () => {
       );
     });
 
+    it('reaches an account holding both identifiers through its email too', async () => {
+      const both = {
+        email: 'durov@example.com',
+        telegramUsername: 'durov',
+        status: UserStatus.Active,
+      };
+      stored.push(both);
+
+      await expect(
+        service.findAuthenticatableByLogin('durov@example.com'),
+      ).resolves.toBe(both);
+      await expect(service.findAuthenticatableByLogin('@Durov')).resolves.toBe(
+        both,
+      );
+    });
+
     it('does not reach a telegram user through an email login', async () => {
       stored.push({ telegramUsername: 'durov', status: UserStatus.Active });
 
@@ -107,6 +127,17 @@ describe('UserDirectoryService', () => {
   });
 
   describe('isIdentifierTaken', () => {
+    it('reports nothing taken for an empty identifier, whoever is stored', async () => {
+      stored.push({ telegramUsername: 'durov', status: UserStatus.Active });
+      const findOne = jest.spyOn(users, 'findOne');
+
+      await expect(service.isIdentifierTaken({})).resolves.toBe(false);
+      await expect(
+        service.isIdentifierTaken({ telegramUsername: null }),
+      ).resolves.toBe(false);
+      expect(findOne).not.toHaveBeenCalled();
+    });
+
     it('reports an email held by an active user', async () => {
       stored.push({ email: 'user@example.com', status: UserStatus.Active });
 
@@ -206,6 +237,24 @@ describe('UserDirectoryService', () => {
       await expect(
         service.findAuthenticatableById(uuidOf(1)),
       ).resolves.toBeNull();
+    });
+  });
+
+  describe('findByIds', () => {
+    it('loads every named account in one query, whatever its status', async () => {
+      const anna = { id: uuidOf(1), status: UserStatus.Active };
+      const boris = { id: uuidOf(2), status: UserStatus.Blocked };
+      stored.push(anna, boris, { id: uuidOf(3), status: UserStatus.Active });
+
+      await expect(
+        service.findByIds([uuidOf(1), uuidOf(2), uuidOf(404)]),
+      ).resolves.toEqual([anna, boris]);
+      expect(users.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers an empty list without querying', async () => {
+      await expect(service.findByIds([])).resolves.toEqual([]);
+      expect(users.find).not.toHaveBeenCalled();
     });
   });
 
@@ -484,8 +533,17 @@ describe('UserDirectoryService', () => {
     describe('filters', () => {
       it('narrows by role', async () => {
         await expect(
-          listedIds({ role: Role.Trader, sortBy: UserSortField.Id }),
+          listedIds({ role: [Role.Trader], sortBy: UserSortField.Id }),
         ).resolves.toEqual([5, 3, 1].map(uuidOf));
+      });
+
+      it('narrows by two roles at once', async () => {
+        await expect(
+          listedIds({
+            role: [Role.Trader, Role.Merchant],
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([6, 5, 3, 2, 1].map(uuidOf));
       });
 
       it('narrows by status', async () => {
@@ -497,7 +555,7 @@ describe('UserDirectoryService', () => {
       it('narrows by both at once', async () => {
         await expect(
           listedIds({
-            role: Role.Trader,
+            role: [Role.Trader],
             status: UserStatus.Active,
             sortBy: UserSortField.Id,
           }),
@@ -505,7 +563,7 @@ describe('UserDirectoryService', () => {
       });
 
       it('counts only what the filter left', async () => {
-        const page = await service.list(query({ role: Role.Trader }));
+        const page = await service.list(query({ role: [Role.Trader] }));
 
         expect(page.meta.total).toBe(3);
       });
@@ -543,7 +601,7 @@ describe('UserDirectoryService', () => {
         await expect(
           listedIds({
             search: 'anna',
-            role: Role.Trader,
+            role: [Role.Trader],
             status: UserStatus.Active,
             sortBy: UserSortField.Id,
           }),
@@ -619,10 +677,67 @@ describe('UserDirectoryService', () => {
           listedIds({
             sortBy: UserSortField.Email,
             sortOrder: SortOrder.Asc,
-            role: Role.Trader,
+            role: [Role.Trader],
           }),
         ).resolves.toEqual([5, 1, 3].map(uuidOf));
       });
     });
+  });
+});
+
+describe('UserDirectoryService.findIdsMatching', () => {
+  const build = (rows: Partial<User>[]) => {
+    const users = { find: jest.fn(async () => rows) };
+
+    return { users, service: new UserDirectoryService(users as never) };
+  };
+
+  it('matches the term against the email or the Telegram username and returns only ids', async () => {
+    const { users, service } = build([{ id: uuidOf(1) }, { id: uuidOf(2) }]);
+
+    await expect(service.findIdsMatching('durov')).resolves.toEqual([
+      uuidOf(1),
+      uuidOf(2),
+    ]);
+    expect(users.find).toHaveBeenCalledWith({
+      select: { id: true },
+      take: 1001,
+      where: [
+        { email: ILike('%durov%') },
+        { telegramUsername: ILike('%durov%') },
+      ],
+    });
+  });
+
+  it('escapes the wildcards of the term', async () => {
+    const { users, service } = build([]);
+
+    await service.findIdsMatching('a_b%');
+
+    expect(users.find).toHaveBeenCalledWith({
+      select: { id: true },
+      take: 1001,
+      where: [
+        { email: ILike('%a\\_b\\%%') },
+        { telegramUsername: ILike('%a\\_b\\%%') },
+      ],
+    });
+  });
+
+  const accounts = (count: number) =>
+    Array.from({ length: count }, (_, n) => ({ id: uuidOf(n + 1) }));
+
+  it('answers up to a thousand matching accounts', async () => {
+    const { service } = build(accounts(1000));
+
+    await expect(service.findIdsMatching('a')).resolves.toHaveLength(1000);
+  });
+
+  it('refuses a term that matches more than a thousand accounts rather than dropping some', async () => {
+    const { service } = build(accounts(1001));
+
+    await expect(service.findIdsMatching('a')).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

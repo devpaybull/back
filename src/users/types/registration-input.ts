@@ -5,4 +5,5 @@ export interface RegistrationInput {
   identifier: AccountIdentifier;
   role: Role;
   password: string;
+  merchantId?: string | null;
 }

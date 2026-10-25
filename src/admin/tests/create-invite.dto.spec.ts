@@ -1,23 +1,19 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { Role } from '../../common/enums/role.enum';
+import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { CreateInviteDto } from '../dto/create-invite.dto';
 
 const failedProperties = (payload: Record<string, unknown>): string[] =>
-  validateSync(plainToInstance(CreateInviteDto, payload)).map(
-    (error) => error.property,
-  );
+  validateSync(plainToInstance(CreateInviteDto, payload), {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  }).map((error) => error.property);
 
 describe('CreateInviteDto', () => {
   const role = { role: Role.Trader };
 
-  it('accepts an email alone', () => {
-    expect(failedProperties({ ...role, email: 'user@example.com' })).toEqual(
-      [],
-    );
-  });
-
-  it('accepts a telegram username alone', () => {
+  it('accepts a telegram username', () => {
     expect(failedProperties({ ...role, telegramUsername: '@durov' })).toEqual(
       [],
     );
@@ -29,48 +25,48 @@ describe('CreateInviteDto', () => {
     );
   });
 
-  it('lets both through, leaving the pair for the service to reject', () => {
+  it('requires a telegram username', () => {
+    expect(failedProperties(role)).toEqual(['telegramUsername']);
+  });
+
+  it('refuses an email, since an invite carries a telegram username only', () => {
     expect(
       failedProperties({
         ...role,
         email: 'user@example.com',
         telegramUsername: '@durov',
       }),
-    ).toEqual([]);
+    ).toEqual(['email']);
   });
 
-  it('lets neither through, leaving the absence for the service to reject', () => {
-    expect(failedProperties(role)).toEqual([]);
+  it('refuses an email given instead of a telegram username', () => {
+    expect(
+      failedProperties({ ...role, email: 'user@example.com' }).sort(),
+    ).toEqual(['email', 'telegramUsername']);
   });
 
   it('requires a role', () => {
-    expect(failedProperties({ email: 'user@example.com' })).toEqual(['role']);
+    expect(failedProperties({ telegramUsername: 'durov' })).toEqual(['role']);
   });
 
   it('refuses a role outside the enum', () => {
     expect(
-      failedProperties({ role: 'president', email: 'user@example.com' }),
+      failedProperties({ role: 'president', telegramUsername: 'durov' }),
     ).toEqual(['role']);
   });
 
-  it('refuses a malformed email when no telegram username is given', () => {
-    expect(failedProperties({ ...role, email: 'not-an-email' })).toEqual([
-      'email',
-    ]);
-  });
-
   describe('expiresAt', () => {
-    const email = { email: 'user@example.com' };
+    const nick = { telegramUsername: 'durov' };
 
     it('is optional', () => {
-      expect(failedProperties({ ...role, ...email })).toEqual([]);
+      expect(failedProperties({ ...role, ...nick })).toEqual([]);
     });
 
     it('accepts a moment in the future', () => {
       expect(
         failedProperties({
           ...role,
-          ...email,
+          ...nick,
           expiresAt: new Date(Date.now() + 3600_000).toISOString(),
         }),
       ).toEqual([]);
@@ -80,7 +76,7 @@ describe('CreateInviteDto', () => {
       expect(
         failedProperties({
           ...role,
-          ...email,
+          ...nick,
           expiresAt: new Date(Date.now() + 3650 * 86400_000).toISOString(),
         }),
       ).toEqual([]);
@@ -90,7 +86,7 @@ describe('CreateInviteDto', () => {
       expect(
         failedProperties({
           ...role,
-          ...email,
+          ...nick,
           expiresAt: new Date(Date.now() - 1000).toISOString(),
         }),
       ).toEqual(['expiresAt']);
@@ -98,14 +94,14 @@ describe('CreateInviteDto', () => {
 
     it('refuses something that is not a date at all', () => {
       expect(
-        failedProperties({ ...role, ...email, expiresAt: 'tomorrow' }),
+        failedProperties({ ...role, ...nick, expiresAt: 'tomorrow' }),
       ).toEqual(['expiresAt']);
     });
 
     it('arrives as a Date, not as the string that was sent', () => {
       const dto = plainToInstance(CreateInviteDto, {
         ...role,
-        ...email,
+        ...nick,
         expiresAt: '2030-01-01T00:00:00.000Z',
       });
 
@@ -124,5 +120,51 @@ describe('CreateInviteDto', () => {
     expect(failedProperties({ ...role, telegramUsername })).toEqual([
       'telegramUsername',
     ]);
+  });
+
+  describe('merchantId', () => {
+    const nick = { telegramUsername: 'durov' };
+
+    it('is optional, leaving the role rules to the service', () => {
+      expect(failedProperties({ role: Role.MerchantSupport, ...nick })).toEqual(
+        [],
+      );
+    });
+
+    it('accepts a uuid', () => {
+      expect(
+        failedProperties({
+          role: Role.MerchantAgent,
+          ...nick,
+          merchantId: uuidOf(50),
+        }),
+      ).toEqual([]);
+    });
+
+    it('refuses anything that is not a uuid', () => {
+      expect(
+        failedProperties({
+          role: Role.MerchantAgent,
+          ...nick,
+          merchantId: '5',
+        }),
+      ).toEqual(['merchantId']);
+    });
+  });
+});
+
+describe('CreateInviteDto message for a past expiresAt', () => {
+  it('says the moment must be in the future instead of printing the bound function', () => {
+    const errors = validateSync(
+      plainToInstance(CreateInviteDto, {
+        role: Role.Trader,
+        telegramUsername: 'durov',
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      }),
+    );
+
+    expect(
+      errors.flatMap((error) => Object.values(error.constraints ?? {})),
+    ).toEqual(['expiresAt must be a moment in the future']);
   });
 });

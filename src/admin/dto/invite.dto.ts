@@ -2,20 +2,27 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '../../common/enums/role.enum';
 import { Invite } from '../../invites/entities/invite.entity';
 import { InviteStatus, inviteStatus } from '../../invites/types/invite-status';
+import { InviteTerms } from '../types/invite-terms';
+import { BaseMethodRateDto } from './base-rate-set.dto';
 import { InviteAccountDto, toInviteAccountDto } from './invite-account.dto';
 
 export class InviteDto {
   @ApiProperty()
   id: number;
 
-  @ApiPropertyOptional({ nullable: true })
-  email: string;
-
-  @ApiPropertyOptional({ nullable: true })
-  telegramUsername: string;
+  @ApiProperty({ nullable: true })
+  telegramUsername: string | null;
 
   @ApiProperty({ enum: Role })
   role: Role;
+
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'The merchant a merchant_support or merchant_agent invite binds the account to',
+  })
+  merchantId: string | null;
 
   @ApiProperty()
   code: string;
@@ -43,13 +50,29 @@ export class InviteDto {
 
   @ApiProperty()
   createdAt: Date;
+
+  @ApiProperty({
+    type: BaseMethodRateDto,
+    isArray: true,
+    nullable: true,
+    description:
+      "General rate per payment method. Null for non-trader invites. Until the invite is redeemed these are the default trader rates; after redemption, the redeeming account's own effective rates.",
+  })
+  rates: BaseMethodRateDto[] | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      "Minimum insurance pay-in deposit. Null for non-trader invites. Until the invite is redeemed this is the global value; after redemption, the redeeming account's own value.",
+  })
+  insurancePayInMin: number | null;
 }
 
-export const toInviteDto = (invite: Invite): InviteDto => ({
+export const toInviteDto = (invite: Invite, terms: InviteTerms): InviteDto => ({
   id: invite.id,
-  email: invite.email,
   telegramUsername: invite.telegramUsername,
   role: invite.role,
+  merchantId: invite.merchantId ?? null,
   code: invite.code,
   status: inviteStatus(invite),
   expiresAt: invite.expiresAt,
@@ -59,4 +82,6 @@ export const toInviteDto = (invite: Invite): InviteDto => ({
   revokedBy: invite.revokedBy ? toInviteAccountDto(invite.revokedBy) : null,
   createdBy: toInviteAccountDto(invite.createdBy),
   createdAt: invite.createdAt,
+  rates: terms.rates,
+  insurancePayInMin: terms.insurancePayInMin,
 });

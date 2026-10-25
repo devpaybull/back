@@ -6,8 +6,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { FindOperator, IsNull } from 'typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { FindOperator, IsNull, LessThan, MoreThan } from 'typeorm';
+import { AuditService } from '../../audit/services/audit.service';
+import { LoginFootprintService } from '../services/login-footprint.service';
 import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TokenType } from '../../common/types/token';
@@ -42,10 +44,21 @@ const satisfies = (
   Object.entries(where).every(([field, expected]) => {
     const actual = record[field as keyof PasswordReset];
 
-    return expected instanceof FindOperator
-      ? expected.type === 'isNull' && (actual ?? null) === null
-      : actual === expected;
+    if (!(expected instanceof FindOperator)) return actual === expected;
+
+    switch (expected.type) {
+      case 'isNull':
+        return (actual ?? null) === null;
+      case 'lessThan':
+        return (actual as number | Date) < (expected.value as number | Date);
+      case 'moreThan':
+        return (actual as number | Date) > (expected.value as number | Date);
+      default:
+        throw new Error(`Unsupported operator ${expected.type}`);
+    }
   });
+
+const footprints = { record: jest.fn() };
 
 describe('PasswordService', () => {
   const activeUser = {
@@ -107,6 +120,30 @@ describe('PasswordService', () => {
         );
       },
     ),
+    update: jest.fn(
+      async (where: Record<string, unknown>, patch: Partial<PasswordReset>) => {
+        const matched = storedResets.filter((reset) => satisfies(reset, where));
+
+        matched.forEach((reset) => Object.assign(reset, patch));
+
+        return { affected: matched.length };
+      },
+    ),
+    increment: jest.fn(
+      async (
+        where: Record<string, unknown>,
+        field: 'failedAttempts',
+        by: number,
+      ) => {
+        const matched = storedResets.filter((reset) => satisfies(reset, where));
+
+        matched.forEach((reset) => {
+          reset[field] += by;
+        });
+
+        return { affected: matched.length };
+      },
+    ),
     delete: jest.fn(async (where: Record<string, unknown>) => {
       storedResets
         .filter((reset) => satisfies(reset, where))
@@ -121,6 +158,18 @@ describe('PasswordService', () => {
       Promise<boolean>,
       [PasswordRecoveryCodeMailInput]
     >(),
+  };
+
+  const audit = { record: jest.fn() };
+
+  const manager = {
+    getRepository: jest.fn(() => refreshTokens),
+  };
+
+  const dataSource = {
+    transaction: jest.fn(async (work: (m: typeof manager) => unknown) =>
+      work(manager),
+    ),
   };
 
   const jwt = new JwtService({});
@@ -143,6 +192,9 @@ describe('PasswordService', () => {
           provide: getRepositoryToken(PasswordReset),
           useValue: passwordResets,
         },
+        { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: AuditService, useValue: audit },
+        { provide: LoginFootprintService, useValue: footprints },
         { provide: UserAdministrationService, useValue: userAdministration },
         { provide: UserCredentialsService, useValue: userCredentials },
         { provide: UserDirectoryService, useValue: userDirectory },
@@ -193,9 +245,11 @@ describe('PasswordService', () => {
 
       const session = await service.changePassword(uuidOf(1), change);
 
-      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(1), {
-        password: 'newpassword123',
-      });
+      expect(userAdministration.update).toHaveBeenCalledWith(
+        uuidOf(1),
+        { password: 'newpassword123' },
+        manager,
+      );
       expect(refreshTokens.update).toHaveBeenCalledWith(
         { userId: uuidOf(1), revokedAt: IsNull() },
         { revokedAt: expect.any(Date) },
@@ -229,6 +283,212 @@ describe('PasswordService', () => {
       expect(refreshTokens.update.mock.invocationCallOrder[0]).toBeLessThan(
         refreshTokens.save.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  describe('issueGeneratedPassword', () => {
+    const GENERATED_PASSWORD = /^[a-zA-Z0-9]{12}$/;
+    const ACTOR_ID = uuidOf(99);
+
+    it('writes a 12-character letters-and-digits password through the hashing path', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      const password = await service.issueGeneratedPassword(
+        uuidOf(1),
+        ACTOR_ID,
+      );
+
+      expect(password).toMatch(GENERATED_PASSWORD);
+      expect(userAdministration.update).toHaveBeenCalledWith(
+        uuidOf(1),
+        { password },
+        manager,
+      );
+    });
+
+    it('revokes every session after the password is written', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      await service.issueGeneratedPassword(uuidOf(1), ACTOR_ID);
+
+      expect(refreshTokens.update).toHaveBeenCalledWith(
+        { userId: uuidOf(1), revokedAt: IsNull() },
+        { revokedAt: expect.any(Date) },
+      );
+      expect(
+        userAdministration.update.mock.invocationCallOrder[0],
+      ).toBeLessThan(refreshTokens.update.mock.invocationCallOrder[0]);
+    });
+
+    it('opens no session of its own', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      await service.issueGeneratedPassword(uuidOf(1), ACTOR_ID);
+
+      expect(refreshTokens.save).not.toHaveBeenCalled();
+    });
+
+    it('revokes nothing when the password could not be written', async () => {
+      userAdministration.update.mockRejectedValue(new Error('not found'));
+
+      await expect(
+        service.issueGeneratedPassword(uuidOf(1), ACTOR_ID),
+      ).rejects.toThrow('not found');
+      expect(refreshTokens.update).not.toHaveBeenCalled();
+    });
+
+    it('draws every character class and never repeats a password', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      const passwords = await Promise.all(
+        Array.from({ length: 200 }, () =>
+          service.issueGeneratedPassword(uuidOf(1), ACTOR_ID),
+        ),
+      );
+      const characters = passwords.join('');
+
+      expect(
+        passwords.every((password) => GENERATED_PASSWORD.test(password)),
+      ).toBe(true);
+      expect(new Set(passwords).size).toBe(passwords.length);
+      expect(characters).toMatch(/[a-z]/);
+      expect(characters).toMatch(/[A-Z]/);
+      expect(characters).toMatch(/[0-9]/);
+      expect(new Set(characters).size).toBe(62);
+    });
+
+    it('writes the password, the revocation and the audit row in one transaction', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      await service.issueGeneratedPassword(uuidOf(1), ACTOR_ID);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(manager.getRepository).toHaveBeenCalledWith(RefreshToken);
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: ACTOR_ID,
+          targetUserId: uuidOf(1),
+          action: 'user.password_generated',
+        },
+        manager,
+      );
+    });
+
+    it('keeps the generated password out of the audit row', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      const password = await service.issueGeneratedPassword(
+        uuidOf(1),
+        ACTOR_ID,
+      );
+
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(password);
+    });
+
+    it('fails as a whole when the audit row cannot be written', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+      audit.record.mockRejectedValueOnce(new Error('audit down'));
+
+      await expect(
+        service.issueGeneratedPassword(uuidOf(1), ACTOR_ID),
+      ).rejects.toThrow('audit down');
+    });
+
+    it('never logs the password', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+      const logged = [
+        jest.spyOn(console, 'log').mockImplementation(() => undefined),
+        jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined),
+      ];
+
+      const password = await service.issueGeneratedPassword(
+        uuidOf(1),
+        ACTOR_ID,
+      );
+
+      for (const spy of logged) {
+        expect(JSON.stringify(spy.mock.calls)).not.toContain(password);
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('setPassword', () => {
+    it('writes the changes, the revocation and the audit row in one transaction', async () => {
+      userAdministration.update.mockResolvedValue(activeUser);
+
+      await service.setPassword(
+        uuidOf(1),
+        { password: 'a brand new password', role: Role.Merchant },
+        uuidOf(99),
+      );
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(userAdministration.update).toHaveBeenCalledWith(
+        uuidOf(1),
+        { password: 'a brand new password', role: Role.Merchant },
+        manager,
+      );
+      expect(refreshTokens.update).toHaveBeenCalledWith(
+        { userId: uuidOf(1), revokedAt: IsNull() },
+        { revokedAt: expect.any(Date) },
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: uuidOf(99),
+          targetUserId: uuidOf(1),
+          action: 'user.password_set',
+        },
+        manager,
+      );
+      expect(JSON.stringify(audit.record.mock.calls)).not.toContain(
+        'a brand new password',
+      );
+    });
+  });
+
+  describe('no secret reaches a log', () => {
+    it('never prints a recovery code to stdout or to the Nest logger', async () => {
+      const recoverable = {
+        id: uuidOf(5),
+        email: 'lost@example.com',
+        telegramUsername: null,
+        emailVerified: true,
+        role: Role.Trader,
+        status: UserStatus.Active,
+      } as User;
+      userDirectory.findAuthenticatableByLogin.mockResolvedValue(recoverable);
+      const spies = [
+        jest.spyOn(console, 'log').mockImplementation(() => undefined),
+        jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'debug')
+          .mockImplementation(() => undefined),
+        jest
+          .spyOn(Logger.prototype, 'verbose')
+          .mockImplementation(() => undefined),
+      ];
+
+      await service.forgotPassword({ login: 'lost@example.com' });
+
+      const [{ code }] = mail.sendPasswordRecoveryCode.mock.calls[0];
+
+      for (const spy of spies) {
+        expect(JSON.stringify(spy.mock.calls)).not.toContain(code);
+        spy.mockRestore();
+      }
     });
   });
 
@@ -371,9 +631,11 @@ describe('PasswordService', () => {
 
       await reset(code);
 
-      expect(userAdministration.update).toHaveBeenCalledWith(uuidOf(5), {
-        password: 'newpassword123',
-      });
+      expect(userAdministration.update).toHaveBeenCalledWith(
+        uuidOf(5),
+        { password: 'newpassword123' },
+        manager,
+      );
       expect(storedResets[0].usedAt).toBeInstanceOf(Date);
     });
 
@@ -501,6 +763,94 @@ describe('PasswordService', () => {
       await expect(reset(code)).rejects.toBeInstanceOf(BadRequestException);
       expect(userAdministration.update).not.toHaveBeenCalled();
       expect(storedResets[0].failedAttempts).toBe(5);
+    });
+
+    const staleReadOf = () => {
+      const snapshot = { ...storedResets[0] };
+
+      passwordResets.findOne.mockImplementationOnce(async () => snapshot);
+    };
+
+    it('counts a wrong code with one conditional increment, never by saving a stale count', async () => {
+      const code = await requestRecovery();
+      passwordResets.save.mockClear();
+
+      await expect(reset(anyCodeBut(code))).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(passwordResets.increment).toHaveBeenCalledWith(
+        { id: storedResets[0].id, failedAttempts: LessThan(5) },
+        'failedAttempts',
+        1,
+      );
+      expect(passwordResets.save).not.toHaveBeenCalled();
+    });
+
+    it('counts both of two wrong guesses that read the same count', async () => {
+      const code = await requestRecovery();
+
+      storedResets[0].failedAttempts = 3;
+      staleReadOf();
+      staleReadOf();
+
+      await reset(anyCodeBut(code)).catch(() => undefined);
+      await reset(anyCodeBut(code)).catch(() => undefined);
+
+      expect(storedResets).toHaveLength(1);
+      expect(storedResets[0].failedAttempts).toBe(5);
+    });
+
+    it('never counts past five, whatever the read said', async () => {
+      const code = await requestRecovery();
+
+      staleReadOf();
+      storedResets[0].failedAttempts = 5;
+
+      await expect(reset(anyCodeBut(code))).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(storedResets[0].failedAttempts).toBe(5);
+    });
+
+    it('spends a code once when two right answers race', async () => {
+      const code = await requestRecovery();
+      staleReadOf();
+      staleReadOf();
+
+      await reset(code);
+      userAdministration.update.mockClear();
+
+      await expect(reset(code, 'anotherpassword123')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(userAdministration.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses the right code once a racing wrong guess spent the last attempt', async () => {
+      const code = await requestRecovery();
+      staleReadOf();
+      storedResets[0].failedAttempts = 5;
+
+      await expect(reset(code)).rejects.toBeInstanceOf(BadRequestException);
+      expect(userAdministration.update).not.toHaveBeenCalled();
+      expect(storedResets[0].usedAt).toBeUndefined();
+    });
+
+    it('spends the record with a conditional update', async () => {
+      const code = await requestRecovery();
+
+      await reset(code);
+
+      expect(passwordResets.update).toHaveBeenCalledWith(
+        {
+          id: storedResets[0].id,
+          usedAt: IsNull(),
+          failedAttempts: LessThan(5),
+          expiresAt: MoreThan(expect.any(Date)),
+        },
+        { usedAt: expect.any(Date) },
+      );
     });
 
     it('answers a spent record exactly like an unknown one', async () => {
