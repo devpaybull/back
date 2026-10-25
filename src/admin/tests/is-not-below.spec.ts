@@ -10,6 +10,13 @@ class NumberRange {
   to?: number;
 }
 
+class MoneyRange {
+  from?: string;
+
+  @IsNotBelow('from')
+  to?: string;
+}
+
 class DateRange {
   @Type(() => Date)
   from?: Date;
@@ -35,6 +42,21 @@ describe('IsNotBelow', () => {
     expect(error.constraints).toEqual({
       isNotBelow: 'to must not be below from',
     });
+  });
+
+  it('compares decimal strings exactly, where a float cannot tell them apart', () => {
+    expect(
+      errorsOf(MoneyRange, {
+        from: '999999999999.999999',
+        to: '999999999999.999998',
+      }).map((error) => error.property),
+    ).toEqual(['to']);
+    expect(
+      errorsOf(MoneyRange, {
+        from: '999999999999.999998',
+        to: '999999999999.999999',
+      }),
+    ).toEqual([]);
   });
 
   it('has nothing to compare when either bound is absent', () => {

@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { toFiat } from '../../common/utils/to-fiat';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -69,6 +70,10 @@ export class AdminTransactionsController {
     ]);
     const page = await this.transactions.list({
       ...query,
+      amountFrom:
+        query.amountFrom === undefined ? undefined : toFiat(query.amountFrom),
+      amountTo:
+        query.amountTo === undefined ? undefined : toFiat(query.amountTo),
       bankDetailsIds,
       merchantRanks,
     });

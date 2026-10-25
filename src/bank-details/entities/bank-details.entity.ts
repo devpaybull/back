@@ -11,6 +11,8 @@ import {
 } from 'typeorm';
 import { Bank } from '../../banks/entities/bank.entity';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { Fiat } from '../../common/types/fiat';
+import { fiatColumn } from '../../common/utils/fiat-column';
 import { Device } from '../../devices/entities/device.entity';
 import { User } from '../../users/entities/user.entity';
 
@@ -58,14 +60,14 @@ export class BankDetails {
   @Column({ default: false })
   minAmountEnabled: boolean;
 
-  @Column({ type: 'int', nullable: true })
-  minAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  minAmount: Fiat;
 
   @Column({ default: false })
   maxAmountEnabled: boolean;
 
-  @Column({ type: 'int', nullable: true })
-  maxAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  maxAmount: Fiat;
 
   @Column({ default: false })
   dailyLimitEnabled: boolean;
@@ -82,14 +84,14 @@ export class BankDetails {
   @Column({ default: false })
   dailyAmountLimitEnabled: boolean;
 
-  @Column({ type: 'int', nullable: true })
-  dailyAmountLimit: number;
+  @Column(fiatColumn({ nullable: true }))
+  dailyAmountLimit: Fiat;
 
   @Column({ default: false })
   monthlyAmountLimitEnabled: boolean;
 
-  @Column({ type: 'int', nullable: true })
-  monthlyAmountLimit: number;
+  @Column(fiatColumn({ nullable: true }))
+  monthlyAmountLimit: Fiat;
 
   @Column({ default: false })
   maxActiveTransactionsEnabled: boolean;

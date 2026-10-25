@@ -1,3 +1,5 @@
+import { IsCryptoAmount } from '../decorators/is-crypto-amount.decorator';
+import { IsFiatAmount } from '../decorators/is-fiat-amount.decorator';
 import { IsIanaTimeZone } from './is-iana-time-zone';
 import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
@@ -37,6 +39,15 @@ const ToBoolean = () =>
     if (FALSE_VALUES.includes(normalized)) return false;
 
     return value;
+  });
+
+const ToRequiredString = () =>
+  Transform(({ value }) => {
+    if (value === undefined || value === null) return undefined;
+
+    const trimmed = String(value).trim();
+
+    return trimmed === '' ? undefined : trimmed;
   });
 
 const ToRequiredNumber = () =>
@@ -160,10 +171,9 @@ export class EnvironmentVariables {
   @Min(1)
   INVITE_TTL_HOURS: number = 72;
 
-  @ToRequiredNumber()
-  @IsInt()
-  @Min(0)
-  COUNTERPARTY_MIN_AMOUNT: number;
+  @ToRequiredString()
+  @IsFiatAmount()
+  COUNTERPARTY_MIN_AMOUNT: string;
 
   @Type(() => Number)
   @IsNumber()
@@ -198,20 +208,17 @@ export class EnvironmentVariables {
   @Min(0)
   RAPIRA_RATE_TTL_SECONDS: number = 60;
 
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  MAIN_BALANCE_MIN_THRESHOLD: number = 0;
+  @ToRequiredString()
+  @IsCryptoAmount()
+  MAIN_BALANCE_MIN_THRESHOLD: string = '0';
 
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  INSURANCE_PAY_IN_MIN: number = 500;
+  @ToRequiredString()
+  @IsCryptoAmount()
+  INSURANCE_PAY_IN_MIN: string = '500';
 
-  @ToRequiredNumber()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @Min(0)
-  INSURANCE_PAY_OUT_MIN: number;
+  @ToRequiredString()
+  @IsCryptoAmount()
+  INSURANCE_PAY_OUT_MIN: string;
 
   @Type(() => Number)
   @IsInt()

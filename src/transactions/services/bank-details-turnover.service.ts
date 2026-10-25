@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { toFiat } from '../../common/utils/to-fiat';
 import { Transaction } from '../entities/transaction.entity';
 import { BankDetailsTurnover } from '../types/bank-details-turnover';
 import { TransactionStatus } from '../types/transaction-status.enum';
@@ -26,7 +27,10 @@ export class BankDetailsTurnoverService {
     now: Date,
   ): Promise<Map<string, BankDetailsTurnover>> {
     const turnover = new Map<string, BankDetailsTurnover>(
-      ids.map((id) => [id, { total: 0, today: 0, month: 0 }]),
+      ids.map((id) => [
+        id,
+        { total: toFiat(0), today: toFiat(0), month: toFiat(0) },
+      ]),
     );
 
     if (ids.length === 0) return turnover;
@@ -62,9 +66,9 @@ export class BankDetailsTurnoverService {
 
     rows.forEach((row) =>
       turnover.set(row.bankDetailsId, {
-        total: Number(row.total),
-        today: Number(row.today),
-        month: Number(row.month),
+        total: toFiat(row.total),
+        today: toFiat(row.today),
+        month: toFiat(row.month),
       }),
     );
 

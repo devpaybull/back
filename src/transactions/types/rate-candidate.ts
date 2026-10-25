@@ -1,9 +1,11 @@
+import { Fiat } from '../../common/types/fiat';
+
 export type RateDirection = 'payIn' | 'payOut';
 
 export interface RateCandidate {
   hasSubject: boolean;
-  fromAmount: number | null;
-  toAmount: number | null;
+  fromAmount: Fiat | null;
+  toAmount: Fiat | null;
   bankId: number | null;
   payInPercent: number;
   payOutPercent: number;

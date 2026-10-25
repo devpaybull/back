@@ -2,12 +2,13 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { toFiat } from '../../common/utils/to-fiat';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BankDetailsSortField } from '../../bank-details/types/bank-details-sort-field';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
-import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { Role } from '../../common/enums/role.enum';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -78,7 +79,7 @@ describe('AdminBankDetailsController', () => {
     delete: jest.fn(),
     listIds: jest.fn(),
     findByIdsInOrder: jest.fn(),
-    counterpartyMinAmount: 5000,
+    counterpartyMinAmount: toFiat(5000),
   };
 
   const turnover = {
@@ -102,7 +103,12 @@ describe('AdminBankDetailsController', () => {
     bankDetails.supervise.mockResolvedValue(details({ active: false }));
     turnover.turnoverOfBankDetails.mockImplementation(
       async (ids: string[]) =>
-        new Map(ids.map((id) => [id, { total: 1000, today: 200, month: 700 }])),
+        new Map(
+          ids.map((id) => [
+            id,
+            { total: toFiat(1000), today: toFiat(200), month: toFiat(700) },
+          ]),
+        ),
     );
 
     const module = await Test.createTestingModule({
@@ -171,18 +177,18 @@ describe('AdminBankDetailsController', () => {
       expect.any(Date),
     );
     expect(listed.items[0]).toMatchObject({
-      turnoverTotal: 1000,
-      turnoverToday: 200,
-      turnoverMonth: 700,
+      turnoverTotal: '1000.00',
+      turnoverToday: '200.00',
+      turnoverMonth: '700.00',
       trader: { id: uuidOf(1), login: 'trader@example.com' },
     });
   });
 
   it('carries the same fields on a single row', async () => {
     await expect(controller.findOne(uuidOf(100))).resolves.toMatchObject({
-      turnoverTotal: 1000,
-      turnoverToday: 200,
-      turnoverMonth: 700,
+      turnoverTotal: '1000.00',
+      turnoverToday: '200.00',
+      turnoverMonth: '700.00',
       trader: { id: uuidOf(1), login: 'trader@example.com' },
     });
   });

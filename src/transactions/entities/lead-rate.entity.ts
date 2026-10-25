@@ -9,7 +9,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Bank } from '../../banks/entities/bank.entity';
-import { moneyColumn } from '../../common/utils/money-column';
+import { Fiat } from '../../common/types/fiat';
+import { fiatColumn } from '../../common/utils/fiat-column';
 import { percentColumn } from '../../common/utils/percent-column';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { TransactionMethod } from '../types/transaction-method';
@@ -38,11 +39,11 @@ export class LeadRate {
   @Column({ type: 'int', nullable: true })
   bankId: number;
 
-  @Column(moneyColumn({ nullable: true }))
-  fromAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  fromAmount: Fiat;
 
-  @Column(moneyColumn({ nullable: true }))
-  toAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  toAmount: Fiat;
 
   @Column(percentColumn())
   payInPercent: number;

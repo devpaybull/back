@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { Fiat } from '../../common/types/fiat';
+import { formatFiat } from '../../common/utils/format-fiat';
 import { loginOf } from '../../common/utils/login-of';
 import { BankDetailsTurnover } from '../../transactions/types/bank-details-turnover';
 import { DeviceStatus } from '../../devices/types/device-status.enum';
@@ -79,17 +81,19 @@ export class BankDetailsDto {
   minAmountEnabled: boolean;
 
   @ApiPropertyOptional({
+    type: String,
+    example: '500.00',
     nullable: true,
     description:
       'While counterpartyOnly is set this is the configured floor, not a stored value',
   })
-  minAmount: number;
+  minAmount: string;
 
   @ApiProperty()
   maxAmountEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true })
-  maxAmount: number;
+  @ApiPropertyOptional({ type: String, example: '100000.00', nullable: true })
+  maxAmount: string;
 
   @ApiProperty()
   dailyLimitEnabled: boolean;
@@ -106,14 +110,24 @@ export class BankDetailsDto {
   @ApiProperty()
   dailyAmountLimitEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Turnover a day' })
-  dailyAmountLimit: number;
+  @ApiPropertyOptional({
+    type: String,
+    example: '300000.00',
+    nullable: true,
+    description: 'Turnover a day',
+  })
+  dailyAmountLimit: string;
 
   @ApiProperty()
   monthlyAmountLimitEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Turnover a month' })
-  monthlyAmountLimit: number;
+  @ApiPropertyOptional({
+    type: String,
+    example: '5000000.00',
+    nullable: true,
+    description: 'Turnover a month',
+  })
+  monthlyAmountLimit: string;
 
   @ApiProperty()
   maxActiveTransactionsEnabled: boolean;
@@ -149,27 +163,33 @@ export class BankDetailsDto {
   trader: BankDetailsTraderDto;
 
   @ApiProperty({
+    type: String,
+    example: '1000.00',
     description:
       'Fiat turnover of successful deals (success and success_changed) over all time',
   })
-  turnoverTotal: number;
+  turnoverTotal: string;
 
   @ApiProperty({
+    type: String,
+    example: '1000.00',
     description:
       'Fiat turnover of deals that succeeded since the start of the current day in BUSINESS_TIMEZONE',
   })
-  turnoverToday: number;
+  turnoverToday: string;
 
   @ApiProperty({
+    type: String,
+    example: '1000.00',
     description:
       'Fiat turnover of deals that succeeded since the start of the current month in BUSINESS_TIMEZONE',
   })
-  turnoverMonth: number;
+  turnoverMonth: string;
 }
 
 export const toBankDetailsDto = (
   details: BankDetails,
-  counterpartyMinAmount: number,
+  counterpartyMinAmount: Fiat,
   turnover: BankDetailsTurnover,
 ): BankDetailsDto => ({
   id: details.id,
@@ -199,19 +219,19 @@ export const toBankDetailsDto = (
   minAmountEnabled: details.counterpartyOnly
     ? true
     : Boolean(details.minAmountEnabled),
-  minAmount: details.counterpartyOnly
-    ? counterpartyMinAmount
-    : (details.minAmount ?? null),
+  minAmount: formatFiat(
+    details.counterpartyOnly ? counterpartyMinAmount : details.minAmount,
+  ),
   maxAmountEnabled: Boolean(details.maxAmountEnabled),
-  maxAmount: details.maxAmount ?? null,
+  maxAmount: formatFiat(details.maxAmount),
   dailyLimitEnabled: Boolean(details.dailyLimitEnabled),
   dailyLimit: details.dailyLimit ?? null,
   monthlyLimitEnabled: Boolean(details.monthlyLimitEnabled),
   monthlyLimit: details.monthlyLimit ?? null,
   dailyAmountLimitEnabled: Boolean(details.dailyAmountLimitEnabled),
-  dailyAmountLimit: details.dailyAmountLimit ?? null,
+  dailyAmountLimit: formatFiat(details.dailyAmountLimit),
   monthlyAmountLimitEnabled: Boolean(details.monthlyAmountLimitEnabled),
-  monthlyAmountLimit: details.monthlyAmountLimit ?? null,
+  monthlyAmountLimit: formatFiat(details.monthlyAmountLimit),
   maxActiveTransactionsEnabled: Boolean(details.maxActiveTransactionsEnabled),
   maxActiveTransactions: details.maxActiveTransactions ?? null,
   delayBetweenRequestsEnabled: Boolean(details.delayBetweenRequestsEnabled),
@@ -225,7 +245,7 @@ export const toBankDetailsDto = (
   trader: details.user
     ? { id: details.user.id, login: loginOf(details.user) }
     : null,
-  turnoverTotal: turnover.total,
-  turnoverToday: turnover.today,
-  turnoverMonth: turnover.month,
+  turnoverTotal: formatFiat(turnover.total),
+  turnoverToday: formatFiat(turnover.today),
+  turnoverMonth: formatFiat(turnover.month),
 });

@@ -1,5 +1,7 @@
+import { Fiat } from '../../common/types/fiat';
+
 export interface BankDetailsTurnover {
-  total: number;
-  today: number;
-  month: number;
+  total: Fiat;
+  today: Fiat;
+  month: Fiat;
 }

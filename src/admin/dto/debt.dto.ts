@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { Debt } from '../../debts/entities/debt.entity';
 import { DebtorDto, toDebtorDto } from './debtor.dto';
 import { InviteAccountDto, toInviteAccountDto } from './invite-account.dto';
@@ -13,11 +14,19 @@ export class DebtDto {
   @ApiProperty({ type: InviteAccountDto })
   issuedBy: InviteAccountDto;
 
-  @ApiProperty({ description: 'USDT issued' })
-  amount: number;
+  @ApiProperty({
+    type: String,
+    example: '100.000000',
+    description: 'USDT issued',
+  })
+  amount: string;
 
-  @ApiProperty({ description: 'USDT still owed' })
-  remaining: number;
+  @ApiProperty({
+    type: String,
+    example: '100.000000',
+    description: 'USDT still owed',
+  })
+  remaining: string;
 
   @ApiProperty({ description: 'true once nothing remains' })
   repaid: boolean;
@@ -39,9 +48,9 @@ export const toDebtDto = (debt: Debt): DebtDto => ({
   id: debt.id,
   user: toDebtorDto(debt.user),
   issuedBy: toInviteAccountDto(debt.issuedBy),
-  amount: debt.amount,
-  remaining: debt.remaining,
-  repaid: debt.remaining <= 0,
+  amount: formatCrypto(debt.amount),
+  remaining: formatCrypto(debt.remaining),
+  repaid: debt.remaining.lte(0),
   comment: debt.comment ?? null,
   autoWriteOffAt: debt.autoWriteOffAt ?? null,
   autoWriteOffPaused: debt.autoWriteOffPaused,

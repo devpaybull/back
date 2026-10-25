@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -86,8 +87,10 @@ export class AdminInvitesController {
 
       return toInviteDto(invite, {
         rates: (userId && effective.bySubject.get(userId)) || effective.base,
-        insurancePayInMin: this.traderSettings.insurancePayInMinOf(
-          userId ? settingsByUser.get(userId) : null,
+        insurancePayInMin: formatCrypto(
+          this.traderSettings.insurancePayInMinOf(
+            userId ? settingsByUser.get(userId) : null,
+          ),
         ),
       });
     });

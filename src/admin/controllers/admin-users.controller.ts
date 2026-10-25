@@ -17,6 +17,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { LoginLinkService } from '../../auth/services/login-link.service';
 import { LOGIN_LINK_PROTECTED_ROLES } from '../../auth/types/login-link-protected-roles';
 import { PasswordService } from '../../auth/services/password.service';
@@ -135,8 +136,10 @@ export class AdminUsersController {
         balances: wallet ? toBalancesDto(wallet) : null,
         insurancePayInMin:
           isTrader || isLead
-            ? this.traderSettings.insurancePayInMinOf(
-                settingsByUser.get(user.id),
+            ? formatCrypto(
+                this.traderSettings.insurancePayInMinOf(
+                  settingsByUser.get(user.id),
+                ),
               )
             : null,
         rates: rates ? (rates.bySubject.get(user.id) ?? rates.base) : null,

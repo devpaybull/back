@@ -1,15 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   IsDate,
   IsEnum,
   IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
   IsUUID,
   Min,
 } from 'class-validator';
+import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
 import { TransactionMethod } from '../../transactions/types/transaction-method';
@@ -17,9 +17,6 @@ import { TransactionSortField } from '../../transactions/types/transaction-sort-
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
 import { IsNotBelow } from '../utils/is-not-below';
-
-const toAmount = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' && value.trim() === '' ? Number.NaN : Number(value);
 
 export class ListTransactionsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ enum: TransactionKind })
@@ -80,24 +77,25 @@ export class ListTransactionsQueryDto extends PaginationQueryDto {
   bankId?: number;
 
   @ApiPropertyOptional({
-    description: 'amountFiat at least this much, inclusive',
+    type: String,
+    example: '1000.00',
+    description:
+      'amountFiat at least this much, inclusive; a decimal string with at most 2 decimals',
   })
   @IsOptional()
-  @Transform(toAmount)
-  @IsNumber()
-  @Min(0)
-  amountFrom?: number;
+  @IsFiatAmount()
+  amountFrom?: string;
 
   @ApiPropertyOptional({
+    type: String,
+    example: '5000.00',
     description:
-      'amountFiat at most this much, inclusive; below amountFrom is a 400',
+      'amountFiat at most this much, inclusive; a decimal string with at most 2 decimals; below amountFrom is a 400',
   })
   @IsOptional()
-  @Transform(toAmount)
-  @IsNumber()
-  @Min(0)
+  @IsFiatAmount()
   @IsNotBelow('amountFrom')
-  amountTo?: number;
+  amountTo?: string;
 
   @ApiPropertyOptional({
     enum: TransactionSortField,

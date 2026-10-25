@@ -1,3 +1,4 @@
+import { Fiat } from '../../common/types/fiat';
 import { RateCandidate, RateDirection } from '../types/rate-candidate';
 import { RateKind } from '../types/rate-kind.enum';
 
@@ -10,7 +11,7 @@ export class NoBaseRateError extends Error {
 
 export function resolveRate(params: {
   candidates: RateCandidate[];
-  amount: number;
+  amount: Fiat;
   bankId?: number | null;
   rateKind: RateKind;
   individualEnabled: boolean;
@@ -31,8 +32,8 @@ export function resolveRate(params: {
     !isRange(candidate) && !isBankRow(candidate);
 
   const contains = (candidate: RateCandidate) =>
-    amount >= (candidate.fromAmount as number) &&
-    amount <= (candidate.toAmount as number);
+    amount.gte(candidate.fromAmount as Fiat) &&
+    amount.lte(candidate.toAmount as Fiat);
 
   const matchesSpecific = (candidate: RateCandidate) =>
     rateKind === RateKind.ByBank

@@ -67,33 +67,37 @@ export class VolumeAnalyticsPointDto {
   payOutCount: number;
 
   @ApiProperty({
+    type: String,
+    example: '100.000000',
     description:
       'Sum of amountCrypto (USDT) of successful (success, success_changed) pay-in deals created that day; 0 for an empty day',
   })
-  payInAmount: number;
+  payInAmount: string;
 
   @ApiProperty({
+    type: String,
+    example: '100.000000',
     description:
       'Sum of amountCrypto (USDT) of successful (success, success_changed) pay-out deals created that day; 0 for an empty day',
   })
-  payOutAmount: number;
+  payOutAmount: string;
 }
 
 export class VolumeAnalyticsSummaryDto {
-  @ApiProperty()
-  cryptoSent: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  cryptoSent: string;
 
-  @ApiProperty()
-  cryptoReceived: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  cryptoReceived: string;
 
-  @ApiProperty()
-  fiatSent: number;
+  @ApiProperty({ type: String, example: '1000.00' })
+  fiatSent: string;
 
-  @ApiProperty()
-  fiatReceived: number;
+  @ApiProperty({ type: String, example: '1000.00' })
+  fiatReceived: string;
 
-  @ApiProperty()
-  profit: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  profit: string;
 }
 
 export class VolumeAnalyticsDto {

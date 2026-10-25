@@ -1,3 +1,4 @@
+import { toRate } from '../../common/utils/to-rate';
 import { ConfigService } from '@nestjs/config';
 import { RapiraRateProvider } from '../services/rapira-rate.provider';
 
@@ -32,7 +33,7 @@ describe('RapiraRateProvider', () => {
 
   it('reads the close price of the configured pair', async () => {
     const provider = new RapiraRateProvider(config);
-    await expect(provider.getFiatPerUsdt()).resolves.toBe(88.04);
+    await expect(provider.getFiatPerUsdt()).resolves.toEqual(toRate('88.04'));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -43,7 +44,7 @@ describe('RapiraRateProvider', () => {
     now += 30_000;
     const second = await provider.getFiatPerUsdt();
 
-    expect(second).toBe(88.04);
+    expect(second).toEqual(toRate('88.04'));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -75,7 +76,7 @@ describe('RapiraRateProvider', () => {
     now += 61_000;
     fetchMock.mockRejectedValueOnce(new Error('network down'));
 
-    await expect(provider.getFiatPerUsdt()).resolves.toBe(88.04);
+    await expect(provider.getFiatPerUsdt()).resolves.toEqual(toRate('88.04'));
   });
 
   it('throws only when the source is unreachable and no rate is known yet', async () => {

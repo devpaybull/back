@@ -9,13 +9,18 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
+import { Fiat } from '../../common/types/fiat';
+import { Rate } from '../../common/types/rate';
+import { fiatColumn } from '../../common/utils/fiat-column';
+import { rateColumn } from '../../common/utils/rate-column';
 import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Merchant } from '../../merchants/entities/merchant.entity';
 import { User } from '../../users/entities/user.entity';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethod } from '../types/transaction-method';
 import { TransactionStatus } from '../types/transaction-status.enum';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { percentColumn } from '../../common/utils/percent-column';
 
 @Entity('transactions')
@@ -73,14 +78,14 @@ export class Transaction {
   @Column({ type: 'uuid', nullable: true })
   merchantId: string;
 
-  @Column(moneyColumn({ nullable: true }))
-  amountFiat: number;
+  @Column(fiatColumn({ nullable: true }))
+  amountFiat: Fiat;
 
-  @Column(moneyColumn())
-  amountCrypto: number;
+  @Column(cryptoColumn())
+  amountCrypto: Crypto;
 
-  @Column(moneyColumn({ nullable: true }))
-  rate: number;
+  @Column(rateColumn({ nullable: true }))
+  rate: Rate;
 
   @Column(percentColumn({ nullable: true }))
   merchantPercent: number;
@@ -94,20 +99,20 @@ export class Transaction {
   @Column(percentColumn({ nullable: true }))
   leadPercent: number;
 
-  @Column(moneyColumn({ nullable: true }))
-  merchantCommission: number;
+  @Column(cryptoColumn({ nullable: true }))
+  merchantCommission: Crypto;
 
-  @Column(moneyColumn({ nullable: true }))
-  traderCommission: number;
+  @Column(cryptoColumn({ nullable: true }))
+  traderCommission: Crypto;
 
-  @Column(moneyColumn({ nullable: true }))
-  leadCommission: number;
+  @Column(cryptoColumn({ nullable: true }))
+  leadCommission: Crypto;
 
-  @Column(moneyColumn({ nullable: true }))
-  traderAmount: number;
+  @Column(cryptoColumn({ nullable: true }))
+  traderAmount: Crypto;
 
-  @Column(moneyColumn({ nullable: true }))
-  merchantAmount: number;
+  @Column(cryptoColumn({ nullable: true }))
+  merchantAmount: Crypto;
 
   @Column({ type: 'text', nullable: true })
   comment: string;

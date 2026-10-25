@@ -1,16 +1,18 @@
+import { Fiat } from '../../common/types/fiat';
+
 export interface BankDetailsLimits {
   minAmountEnabled: boolean;
-  minAmount: number;
+  minAmount: Fiat;
   maxAmountEnabled: boolean;
-  maxAmount: number;
+  maxAmount: Fiat;
   dailyLimitEnabled: boolean;
   dailyLimit: number;
   monthlyLimitEnabled: boolean;
   monthlyLimit: number;
   dailyAmountLimitEnabled: boolean;
-  dailyAmountLimit: number;
+  dailyAmountLimit: Fiat;
   monthlyAmountLimitEnabled: boolean;
-  monthlyAmountLimit: number;
+  monthlyAmountLimit: Fiat;
   maxActiveTransactionsEnabled: boolean;
   maxActiveTransactions: number;
   delayBetweenRequestsEnabled: boolean;

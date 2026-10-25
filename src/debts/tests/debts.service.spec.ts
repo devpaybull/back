@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In, LessThanOrEqual, MoreThan } from 'typeorm';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -46,8 +47,8 @@ const build = () => {
         rows<Partial<Wallet>>(Wallet).push({
           id: rows(Wallet).length + 1,
           userId: values.userId,
-          mainBalance: 0,
-          mainReserved: 0,
+          mainBalance: toCrypto(0),
+          mainReserved: toCrypto(0),
         });
       }
       return insert;
@@ -64,7 +65,7 @@ const build = () => {
         debt.autoWriteOffAt !== null &&
         debt.autoWriteOffAt <= now &&
         !debt.autoWriteOffPaused &&
-        debt.remaining > 0,
+        debt.remaining.gt(0),
     ) ?? null;
 
   const queryBuilder = () => {
@@ -207,16 +208,16 @@ describe('DebtsService', () => {
     it('credits the main balance, opens a debt and logs it, all in one transaction', async () => {
       const t = build();
 
-      const debt = await t.service.issue(DEBTOR, 400, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(400), ISSUER);
 
       expect(t.dataSource.transaction).toHaveBeenCalledTimes(1);
-      expect(t.wallet().mainBalance).toBe(400);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(400));
       expect(t.rows<BalanceOperation>(BalanceOperation)).toEqual([
         expect.objectContaining({
           type: BalanceOperationType.DebtIssued,
-          amount: 400,
-          balanceBefore: 0,
-          balanceAfter: 400,
+          amount: toCrypto(400),
+          balanceBefore: toCrypto(0),
+          balanceAfter: toCrypto(400),
           transactionId: null,
         }),
       ]);
@@ -224,8 +225,8 @@ describe('DebtsService', () => {
         expect.objectContaining({
           userId: DEBTOR,
           issuedByUserId: ISSUER,
-          amount: 400,
-          remaining: 400,
+          amount: toCrypto(400),
+          remaining: toCrypto(400),
           comment: null,
           autoWriteOffAt: null,
           autoWriteOffPaused: false,
@@ -235,7 +236,7 @@ describe('DebtsService', () => {
         expect.objectContaining({
           debtId: debt.id,
           type: DebtEventType.Issued,
-          amount: 400,
+          amount: toCrypto(400),
           actorUserId: ISSUER,
           balanceOperationId: 1,
         }),
@@ -245,7 +246,11 @@ describe('DebtsService', () => {
           actorUserId: ISSUER,
           targetUserId: DEBTOR,
           action: 'debt.issued',
-          metadata: { debtId: debt.id, amount: 400, balanceOperationId: 1 },
+          metadata: {
+            debtId: debt.id,
+            amount: '400.000000',
+            balanceOperationId: 1,
+          },
         },
         t.manager,
       );
@@ -254,11 +259,11 @@ describe('DebtsService', () => {
     it('opens a separate debt for every issuance', async () => {
       const t = build();
 
-      await t.service.issue(DEBTOR, 100, ISSUER);
-      await t.service.issue(DEBTOR, 50, ISSUER);
+      await t.service.issue(DEBTOR, toCrypto(100), ISSUER);
+      await t.service.issue(DEBTOR, toCrypto(50), ISSUER);
 
       expect(t.rows<Debt>(Debt)).toHaveLength(2);
-      expect(t.wallet().mainBalance).toBe(150);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(150));
     });
 
     it('lends to a lead trader too', async () => {
@@ -268,7 +273,7 @@ describe('DebtsService', () => {
         role: Role.LeadTrader,
       });
 
-      await t.service.issue(DEBTOR, 100, ISSUER);
+      await t.service.issue(DEBTOR, toCrypto(100), ISSUER);
 
       expect(t.rows(Debt)).toHaveLength(1);
     });
@@ -281,9 +286,9 @@ describe('DebtsService', () => {
       const t = build();
       t.directory.findById.mockResolvedValue({ id: DEBTOR, role });
 
-      await expect(t.service.issue(DEBTOR, 100, ISSUER)).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        t.service.issue(DEBTOR, toCrypto(100), ISSUER),
+      ).rejects.toBeInstanceOf(BadRequestException);
       expect(t.dataSource.transaction).not.toHaveBeenCalled();
       expect(t.wallet()).toBeUndefined();
       expect(t.rows(Debt)).toHaveLength(0);
@@ -295,9 +300,9 @@ describe('DebtsService', () => {
       const t = build();
       t.directory.findById.mockResolvedValue(null as never);
 
-      await expect(t.service.issue(DEBTOR, 100, ISSUER)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        t.service.issue(DEBTOR, toCrypto(100), ISSUER),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(t.dataSource.transaction).not.toHaveBeenCalled();
     });
 
@@ -305,9 +310,9 @@ describe('DebtsService', () => {
       const t = build();
       t.audit.record.mockRejectedValueOnce(new Error('db down'));
 
-      await expect(t.service.issue(DEBTOR, 100, ISSUER)).rejects.toThrow(
-        'db down',
-      );
+      await expect(
+        t.service.issue(DEBTOR, toCrypto(100), ISSUER),
+      ).rejects.toThrow('db down');
       expect(t.rows(Debt)).toHaveLength(0);
       expect(t.rows(DebtEvent)).toHaveLength(0);
     });
@@ -316,7 +321,7 @@ describe('DebtsService', () => {
   describe('writeOff', () => {
     const issued = async (amount = 400) => {
       const t = build();
-      const debt = await t.service.issue(DEBTOR, amount, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(amount), ISSUER);
       t.audit.record.mockClear();
       return { ...t, debt };
     };
@@ -324,26 +329,26 @@ describe('DebtsService', () => {
     it('withholds part of the debt from the main balance under a lock on the debt', async () => {
       const t = await issued();
 
-      const debt = await t.service.writeOff(t.debt.id, 150.5, ISSUER);
+      const debt = await t.service.writeOff(t.debt.id, toCrypto(150.5), ISSUER);
 
       expect(t.manager.findOne).toHaveBeenCalledWith(Debt, {
         where: { id: t.debt.id },
         lock: { mode: 'pessimistic_write' },
       });
-      expect(debt.remaining).toBe(249.5);
-      expect(t.wallet().mainBalance).toBe(249.5);
+      expect(debt.remaining).toEqual(toCrypto(249.5));
+      expect(t.wallet().mainBalance).toEqual(toCrypto(249.5));
       expect(t.rows<BalanceOperation>(BalanceOperation)[1]).toEqual(
         expect.objectContaining({
           type: BalanceOperationType.DebtWriteOff,
-          amount: -150.5,
-          balanceBefore: 400,
-          balanceAfter: 249.5,
+          amount: toCrypto(-150.5),
+          balanceBefore: toCrypto(400),
+          balanceAfter: toCrypto(249.5),
         }),
       );
       expect(t.rows<DebtEvent>(DebtEvent)[1]).toEqual(
         expect.objectContaining({
           type: DebtEventType.ManualWriteOff,
-          amount: 150.5,
+          amount: toCrypto(150.5),
           actorUserId: ISSUER,
           balanceOperationId: 2,
         }),
@@ -355,8 +360,8 @@ describe('DebtsService', () => {
           action: 'debt.written_off',
           metadata: {
             debtId: t.debt.id,
-            amount: 150.5,
-            remaining: 249.5,
+            amount: '150.500000',
+            remaining: '249.500000',
             balanceOperationId: 2,
           },
         },
@@ -366,31 +371,31 @@ describe('DebtsService', () => {
 
     it('withholds the whole remaining debt when no amount is given', async () => {
       const t = await issued();
-      await t.service.writeOff(t.debt.id, 100, ISSUER);
+      await t.service.writeOff(t.debt.id, toCrypto(100), ISSUER);
 
       const debt = await t.service.writeOff(t.debt.id, undefined, ISSUER);
 
-      expect(debt.remaining).toBe(0);
-      expect(t.rows<DebtEvent>(DebtEvent)[2].amount).toBe(300);
-      expect(t.wallet().mainBalance).toBe(0);
+      expect(debt.remaining).toEqual(toCrypto(0));
+      expect(t.rows<DebtEvent>(DebtEvent)[2].amount).toEqual(toCrypto(300));
+      expect(t.wallet().mainBalance).toEqual(toCrypto(0));
     });
 
     it('lets the main balance go negative', async () => {
       const t = await issued();
-      t.wallet().mainBalance = 30;
+      t.wallet().mainBalance = toCrypto(30);
 
       await t.service.writeOff(t.debt.id, undefined, ISSUER);
 
-      expect(t.wallet().mainBalance).toBe(-370);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(-370));
     });
 
     it('refuses more than remains with a 400 and moves nothing', async () => {
       const t = await issued();
 
       await expect(
-        t.service.writeOff(t.debt.id, 400.001, ISSUER),
+        t.service.writeOff(t.debt.id, toCrypto(400.001), ISSUER),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(t.wallet().mainBalance).toBe(400);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(400));
       expect(t.rows(DebtEvent)).toHaveLength(1);
       expect(t.audit.record).not.toHaveBeenCalled();
     });
@@ -403,7 +408,7 @@ describe('DebtsService', () => {
         t.service.writeOff(t.debt.id, undefined, ISSUER),
       ).rejects.toBeInstanceOf(ConflictException);
       await expect(
-        t.service.writeOff(t.debt.id, 1, ISSUER),
+        t.service.writeOff(t.debt.id, toCrypto(1), ISSUER),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -419,7 +424,7 @@ describe('DebtsService', () => {
   describe('auto write-off', () => {
     const scheduled = async (overrides: Partial<Debt> = {}) => {
       const t = build();
-      const debt = await t.service.issue(DEBTOR, 400, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(400), ISSUER);
       Object.assign(t.rows<Debt>(Debt)[0], {
         autoWriteOffAt: new Date('2026-10-24T21:00:00Z'),
         ...overrides,
@@ -438,7 +443,7 @@ describe('DebtsService', () => {
         where: {
           autoWriteOffAt: LessThanOrEqual(NOW),
           autoWriteOffPaused: false,
-          remaining: MoreThan(0),
+          remaining: MoreThan(toCrypto(0)),
         },
         order: { autoWriteOffAt: 'ASC', id: 'ASC' },
         take: 100,
@@ -447,18 +452,18 @@ describe('DebtsService', () => {
 
     it('withholds the whole remaining debt with no actor, going negative, and clears the moment', async () => {
       const t = await scheduled();
-      t.wallet().mainBalance = 100;
+      t.wallet().mainBalance = toCrypto(100);
 
       await expect(t.service.autoWriteOff(t.debt.id, NOW)).resolves.toBe(true);
 
       const debt = t.rows<Debt>(Debt)[0];
-      expect(debt.remaining).toBe(0);
+      expect(debt.remaining).toEqual(toCrypto(0));
       expect(debt.autoWriteOffAt).toBeNull();
-      expect(t.wallet().mainBalance).toBe(-300);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(-300));
       expect(t.rows<DebtEvent>(DebtEvent)[1]).toEqual(
         expect.objectContaining({
           type: DebtEventType.AutoWriteOff,
-          amount: 400,
+          amount: toCrypto(400),
           actorUserId: null,
           balanceOperationId: 2,
         }),
@@ -499,12 +504,12 @@ describe('DebtsService', () => {
       ['not yet due', { autoWriteOffAt: new Date('2026-10-26T00:00:00Z') }],
       ['paused', { autoWriteOffPaused: true }],
       ['without a moment', { autoWriteOffAt: null }],
-      ['already repaid', { remaining: 0 }],
+      ['already repaid', { remaining: toCrypto(0) }],
     ])('moves nothing for a debt %s', async (_label, overrides) => {
       const t = await scheduled(overrides);
 
       await expect(t.service.autoWriteOff(t.debt.id, NOW)).resolves.toBe(false);
-      expect(t.wallet().mainBalance).toBe(400);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(400));
       expect(t.rows(DebtEvent)).toHaveLength(1);
       expect(t.audit.record).not.toHaveBeenCalled();
     });
@@ -514,7 +519,7 @@ describe('DebtsService', () => {
       t.locked.add(t.debt.id);
 
       await expect(t.service.autoWriteOff(t.debt.id, NOW)).resolves.toBe(false);
-      expect(t.wallet().mainBalance).toBe(400);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(400));
     });
 
     it('writes a debt off once when two runs reach it one after the other', async () => {
@@ -526,7 +531,7 @@ describe('DebtsService', () => {
       ];
 
       expect(results).toEqual([true, false]);
-      expect(t.wallet().mainBalance).toBe(0);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(0));
       expect(
         t
           .rows<DebtEvent>(DebtEvent)
@@ -538,7 +543,7 @@ describe('DebtsService', () => {
   describe('update', () => {
     const existing = async () => {
       const t = build();
-      const debt = await t.service.issue(DEBTOR, 400, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(400), ISSUER);
       t.rows<Debt>(Debt)[0].comment = 'old';
       t.rows<Debt>(Debt)[0].autoWriteOffAt = new Date('2026-11-01T00:00:00Z');
       t.audit.record.mockClear();
@@ -582,7 +587,7 @@ describe('DebtsService', () => {
 
       await t.service.update(t.debt.id, { comment: 'new' }, ISSUER);
 
-      expect(t.wallet().mainBalance).toBe(400);
+      expect(t.wallet().mainBalance).toEqual(toCrypto(400));
       expect(t.rows(BalanceOperation)).toHaveLength(1);
     });
 
@@ -620,7 +625,7 @@ describe('DebtsService', () => {
         expect(t.rows<Debt>(Debt)[0].autoWriteOffPaused).toBe(true);
         expect(t.rows<Debt>(Debt)[0].autoWriteOffAt).toEqual(PAST);
         expect(t.audit.record).not.toHaveBeenCalled();
-        expect(t.wallet().mainBalance).toBe(400);
+        expect(t.wallet().mainBalance).toEqual(toCrypto(400));
       });
 
       it('unpauses when a new future moment comes with it', async () => {
@@ -705,7 +710,7 @@ describe('DebtsService', () => {
       const live = t.rows<Debt>(Debt)[0];
       t.manager.findOne.mockImplementationOnce(async () => {
         const stale = { ...live };
-        live.remaining = 0;
+        live.remaining = toCrypto(0);
         live.autoWriteOffAt = null;
         return stale;
       });
@@ -713,7 +718,7 @@ describe('DebtsService', () => {
       await t.service.update(t.debt.id, { comment: 'new' }, ISSUER);
 
       expect(live.comment).toBe('new');
-      expect(live.remaining).toBe(0);
+      expect(live.remaining).toEqual(toCrypto(0));
       expect(live.autoWriteOffAt).toBeNull();
     });
 
@@ -804,10 +809,10 @@ describe('DebtsService', () => {
       const t = build();
 
       await t.service.list(query({ status: DebtStatus.Active }));
-      expect(lastCall(t).where).toEqual([{ remaining: MoreThan(0) }]);
+      expect(lastCall(t).where).toEqual([{ remaining: MoreThan(toCrypto(0)) }]);
 
       await t.service.list(query({ status: DebtStatus.Repaid }));
-      expect(lastCall(t).where).toEqual([{ remaining: 0 }]);
+      expect(lastCall(t).where).toEqual([{ remaining: toCrypto(0) }]);
     });
 
     it('filters by debtor', async () => {
@@ -826,8 +831,8 @@ describe('DebtsService', () => {
 
       expect(t.directory.findIdsMatching).toHaveBeenCalledWith('42');
       expect(lastCall(t).where).toEqual([
-        { remaining: MoreThan(0), userId: In([DEBTOR, uuidOf(2)]) },
-        { remaining: MoreThan(0), id: 42 },
+        { remaining: MoreThan(toCrypto(0)), userId: In([DEBTOR, uuidOf(2)]) },
+        { remaining: MoreThan(toCrypto(0)), id: 42 },
       ]);
     });
 
@@ -960,7 +965,7 @@ describe('DebtsService', () => {
         );
 
         expect(t.debts.find).toHaveBeenNthCalledWith(1, {
-          where: [{ remaining: MoreThan(0) }],
+          where: [{ remaining: MoreThan(toCrypto(0)) }],
           select: { id: true, userId: true },
         });
       });
@@ -1029,7 +1034,7 @@ describe('DebtsService', () => {
   describe('listEvents', () => {
     it('pages the events of one debt with their actor', async () => {
       const t = build();
-      const debt = await t.service.issue(DEBTOR, 1, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(1), ISSUER);
 
       await t.service.listEvents(debt.id, {
         page: 2,
@@ -1049,7 +1054,7 @@ describe('DebtsService', () => {
 
     it('orders by id alone when asked', async () => {
       const t = build();
-      const debt = await t.service.issue(DEBTOR, 1, ISSUER);
+      const debt = await t.service.issue(DEBTOR, toCrypto(1), ISSUER);
 
       await t.service.listEvents(debt.id, {
         page: 1,

@@ -1,3 +1,7 @@
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { toCrypto } from '../../common/utils/to-crypto';
+import { toDecimal } from '../../common/utils/to-decimal';
+import { toFiat } from '../../common/utils/to-fiat';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
@@ -11,10 +15,10 @@ describe('AnalyticsService', () => {
       kind: TransactionKind.PayIn,
       status: TransactionStatus.Success,
       traderUserId: uuidOf(1),
-      amountFiat: 0,
-      amountCrypto: 0,
-      traderAmount: 0,
-      traderCommission: 0,
+      amountFiat: toFiat(0),
+      amountCrypto: toDecimal(0),
+      traderAmount: toDecimal(0),
+      traderCommission: toDecimal(0),
       createdAt: new Date(),
       ...overrides,
     }) as Transaction;
@@ -23,20 +27,20 @@ describe('AnalyticsService', () => {
     row({
       kind: TransactionKind.PayIn,
       status: TransactionStatus.Success,
-      amountFiat: 26262,
-      amountCrypto: 270,
-      traderAmount: 272.207,
-      traderCommission: 23.137,
+      amountFiat: toFiat(26262),
+      amountCrypto: toCrypto(270),
+      traderAmount: toCrypto(272.207),
+      traderCommission: toCrypto(23.137),
     }),
     row({ kind: TransactionKind.PayIn, status: TransactionStatus.Canceled }),
     row({ kind: TransactionKind.PayIn, status: TransactionStatus.Dispute }),
     row({
       kind: TransactionKind.PayOut,
       status: TransactionStatus.Success,
-      amountFiat: 40000,
-      amountCrypto: 450,
-      traderAmount: 455.924,
-      traderCommission: 6.738,
+      amountFiat: toFiat(40000),
+      amountCrypto: toCrypto(450),
+      traderAmount: toCrypto(455.924),
+      traderCommission: toCrypto(6.738),
     }),
   ];
 
@@ -74,27 +78,27 @@ describe('AnalyticsService', () => {
 
     expect(analytics.payInCount).toBe(3);
     expect(analytics.payOutCount).toBe(1);
-    expect(analytics.summary.cryptoSent).toBe(270);
-    expect(analytics.summary.cryptoReceived).toBe(450);
-    expect(analytics.summary.fiatReceived).toBe(26262);
-    expect(analytics.summary.fiatSent).toBe(40000);
-    expect(analytics.summary.profit).toBe(29.875);
+    expect(analytics.summary.cryptoSent).toBe('270.000000');
+    expect(analytics.summary.cryptoReceived).toBe('450.000000');
+    expect(analytics.summary.fiatReceived).toBe('26262.00');
+    expect(analytics.summary.fiatSent).toBe('40000.00');
+    expect(analytics.summary.profit).toBe('29.875000');
   });
 
   it('sums amountCrypto of success and success_changed, not traderAmount', async () => {
     transactions.findTraderWindow.mockResolvedValue([
-      row({ amountCrypto: 10, traderAmount: 10.7 }),
+      row({ amountCrypto: toCrypto(10), traderAmount: toCrypto(10.7) }),
       row({
         status: TransactionStatus.SuccessChanged,
-        amountCrypto: 5,
-        traderAmount: 5.3,
+        amountCrypto: toCrypto(5),
+        traderAmount: toCrypto(5.3),
       }),
-      row({ status: TransactionStatus.Canceled, amountCrypto: 99 }),
+      row({ status: TransactionStatus.Canceled, amountCrypto: toCrypto(99) }),
     ]);
 
     const analytics = await service.volume(uuidOf(1));
 
-    expect(analytics.summary.cryptoSent).toBe(15);
+    expect(analytics.summary.cryptoSent).toBe('15.000000');
   });
 
   describe('volume amounts per day', () => {
@@ -120,81 +124,83 @@ describe('AnalyticsService', () => {
       const analytics = await serve([
         at('2026-10-24T01:00:00.000Z', {
           kind: TransactionKind.PayIn,
-          amountCrypto: 10.5,
+          amountCrypto: toCrypto(10.5),
         }),
         at('2026-10-24T23:59:59.000Z', {
           kind: TransactionKind.PayIn,
           status: TransactionStatus.SuccessChanged,
-          amountCrypto: 4.25,
+          amountCrypto: toCrypto(4.25),
         }),
         at('2026-10-24T05:00:00.000Z', {
           kind: TransactionKind.PayOut,
-          amountCrypto: 7,
+          amountCrypto: toCrypto(7),
         }),
         at('2026-10-23T05:00:00.000Z', {
           kind: TransactionKind.PayOut,
-          amountCrypto: 3,
+          amountCrypto: toCrypto(3),
         }),
       ]).volume(uuidOf(1));
 
       const last = analytics.series[13];
       expect(last.date).toBe('2026-10-24');
-      expect(last.payInAmount).toBe(14.75);
-      expect(last.payOutAmount).toBe(7);
+      expect(last.payInAmount).toBe('14.750000');
+      expect(last.payOutAmount).toBe('7.000000');
       expect(last.payInCount).toBe(2);
       expect(last.payOutCount).toBe(1);
-      expect(analytics.series[12].payOutAmount).toBe(3);
-      expect(analytics.series[12].payInAmount).toBe(0);
+      expect(analytics.series[12].payOutAmount).toBe('3.000000');
+      expect(analytics.series[12].payInAmount).toBe('0.000000');
     });
 
     it('has daily amounts that add up to the summary of the same kind', async () => {
       const analytics = await serve([
         at('2026-10-24T01:00:00.000Z', {
           kind: TransactionKind.PayIn,
-          amountCrypto: 10.5,
+          amountCrypto: toCrypto(10.5),
         }),
         at('2026-10-20T01:00:00.000Z', {
           kind: TransactionKind.PayIn,
           status: TransactionStatus.SuccessChanged,
-          amountCrypto: 4.25,
+          amountCrypto: toCrypto(4.25),
         }),
         at('2026-10-22T01:00:00.000Z', {
           kind: TransactionKind.PayOut,
-          amountCrypto: 7.125,
+          amountCrypto: toCrypto(7.125),
         }),
         at('2026-10-23T01:00:00.000Z', {
           kind: TransactionKind.PayOut,
           status: TransactionStatus.Canceled,
-          amountCrypto: 50,
+          amountCrypto: toCrypto(50),
         }),
       ]).volume(uuidOf(1));
 
-      const sum = (pick: 'payInAmount' | 'payOutAmount'): number =>
-        analytics.series.reduce((total, point) => total + point[pick], 0);
-      expect(sum('payInAmount')).toBeCloseTo(analytics.summary.cryptoSent, 3);
-      expect(sum('payOutAmount')).toBeCloseTo(
-        analytics.summary.cryptoReceived,
-        3,
-      );
+      const sum = (pick: 'payInAmount' | 'payOutAmount'): string =>
+        formatCrypto(
+          analytics.series.reduce(
+            (total, point) => total.plus(point[pick]),
+            toDecimal(0),
+          ),
+        );
+      expect(sum('payInAmount')).toBe(analytics.summary.cryptoSent);
+      expect(sum('payOutAmount')).toBe(analytics.summary.cryptoReceived);
     });
 
     it('counts only success and success_changed', async () => {
       const analytics = await serve([
         at('2026-10-24T01:00:00.000Z', {
           status: TransactionStatus.Canceled,
-          amountCrypto: 100,
+          amountCrypto: toCrypto(100),
         }),
         at('2026-10-24T01:00:00.000Z', {
           status: TransactionStatus.Dispute,
-          amountCrypto: 100,
+          amountCrypto: toCrypto(100),
         }),
         at('2026-10-24T01:00:00.000Z', {
           status: TransactionStatus.Success,
-          amountCrypto: 1,
+          amountCrypto: toCrypto(1),
         }),
       ]).volume(uuidOf(1));
 
-      expect(analytics.series[13].payInAmount).toBe(1);
+      expect(analytics.series[13].payInAmount).toBe('1.000000');
       expect(analytics.series[13].payInCount).toBe(3);
     });
 
@@ -203,34 +209,34 @@ describe('AnalyticsService', () => {
 
       expect(analytics.series).toHaveLength(14);
       for (const point of analytics.series) {
-        expect(point.payInAmount).toBe(0);
-        expect(point.payOutAmount).toBe(0);
+        expect(point.payInAmount).toBe('0.000000');
+        expect(point.payOutAmount).toBe('0.000000');
       }
     });
 
     it('keeps the first and last day of the window and ignores the day before', async () => {
       const analytics = await serve([
-        at('2026-10-11T00:00:00.000Z', { amountCrypto: 2 }),
-        at('2026-10-10T23:59:59.000Z', { amountCrypto: 50 }),
+        at('2026-10-11T00:00:00.000Z', { amountCrypto: toCrypto(2) }),
+        at('2026-10-10T23:59:59.000Z', { amountCrypto: toCrypto(50) }),
       ]).volume(uuidOf(1));
 
       expect(analytics.series[0].date).toBe('2026-10-11');
-      expect(analytics.series[0].payInAmount).toBe(2);
+      expect(analytics.series[0].payInAmount).toBe('2.000000');
       const total = analytics.series.reduce(
-        (sum, point) => sum + point.payInAmount,
-        0,
+        (sum, point) => sum.plus(point.payInAmount),
+        toDecimal(0),
       );
-      expect(total).toBe(2);
+      expect(formatCrypto(total)).toBe('2.000000');
     });
 
-    it('rounds sums to three decimals without float drift', async () => {
+    it('sums exactly to six decimals without float drift', async () => {
       const analytics = await serve([
-        at('2026-10-24T01:00:00.000Z', { amountCrypto: 0.1 }),
-        at('2026-10-24T02:00:00.000Z', { amountCrypto: 0.2 }),
-        at('2026-10-24T03:00:00.000Z', { amountCrypto: 0.0004 }),
+        at('2026-10-24T01:00:00.000Z', { amountCrypto: toCrypto(0.1) }),
+        at('2026-10-24T02:00:00.000Z', { amountCrypto: toCrypto(0.2) }),
+        at('2026-10-24T03:00:00.000Z', { amountCrypto: toCrypto(0.0004) }),
       ]).volume(uuidOf(1));
 
-      expect(analytics.series[13].payInAmount).toBe(0.3);
+      expect(analytics.series[13].payInAmount).toBe('0.300400');
     });
   });
 });

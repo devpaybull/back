@@ -1,13 +1,17 @@
+import { Fiat } from '../../common/types/fiat';
+
 export const bandsAreValid = (
-  bands: { fromAmount: number; toAmount: number }[],
+  bands: { fromAmount: Fiat; toAmount: Fiat }[],
 ): boolean => {
   for (const band of bands) {
-    if (band.fromAmount > band.toAmount) return false;
+    if (band.fromAmount.gt(band.toAmount)) return false;
   }
 
-  const sorted = [...bands].sort((a, b) => a.fromAmount - b.fromAmount);
+  const sorted = [...bands].sort((a, b) =>
+    a.fromAmount.comparedTo(b.fromAmount),
+  );
   for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index].fromAmount <= sorted[index - 1].toAmount) return false;
+    if (sorted[index].fromAmount.lte(sorted[index - 1].toAmount)) return false;
   }
 
   return true;

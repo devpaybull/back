@@ -9,6 +9,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
+import { formatFiat } from '../../common/utils/format-fiat';
 import { MethodRate } from '../../transactions/entities/method-rate.entity';
 import { TransactionMethod } from '../../transactions/types/transaction-method';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
@@ -26,15 +28,13 @@ export class RateGeneralDto {
 }
 
 export class RateBandDto {
-  @ApiProperty()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @Min(0)
-  fromAmount: number;
+  @ApiProperty({ type: String, example: '1000.00' })
+  @IsFiatAmount()
+  fromAmount: string;
 
-  @ApiProperty()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @Min(0)
-  toAmount: number;
+  @ApiProperty({ type: String, example: '5000.00' })
+  @IsFiatAmount()
+  toAmount: string;
 
   @ApiProperty()
   @IsNumber({ maxDecimalPlaces: 3 })
@@ -144,8 +144,8 @@ export const toRateSetDto = (
       };
     } else {
       entry.bands.push({
-        fromAmount: row.fromAmount,
-        toAmount: row.toAmount,
+        fromAmount: formatFiat(row.fromAmount),
+        toAmount: formatFiat(row.toAmount),
         payInPercent: row.payInPercent,
         payOutPercent: row.payOutPercent,
       });

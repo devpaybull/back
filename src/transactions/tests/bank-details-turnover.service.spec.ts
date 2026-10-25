@@ -1,3 +1,4 @@
+import { toCrypto } from '../../common/utils/to-crypto';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { BankDetailsTurnoverService } from '../services/bank-details-turnover.service';
 import { TransactionStatus } from '../types/transaction-status.enum';
@@ -108,11 +109,15 @@ describe('BankDetailsTurnoverService', () => {
       );
 
       expect(turnover.get(uuidOf(1))).toEqual({
-        total: 1500.5,
-        today: 200,
-        month: 700.5,
+        total: toCrypto('1500.5'),
+        today: toCrypto(200),
+        month: toCrypto('700.5'),
       });
-      expect(turnover.get(uuidOf(2))).toEqual({ total: 0, today: 0, month: 0 });
+      expect(turnover.get(uuidOf(2))).toEqual({
+        total: toCrypto(0),
+        today: toCrypto(0),
+        month: toCrypto(0),
+      });
     });
 
     it('does not query for no ids', async () => {

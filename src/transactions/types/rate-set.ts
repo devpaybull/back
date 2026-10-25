@@ -1,8 +1,9 @@
+import { Fiat } from '../../common/types/fiat';
 import { TransactionMethod } from './transaction-method';
 
 export interface RateBandEntry {
-  fromAmount: number;
-  toAmount: number;
+  fromAmount: Fiat;
+  toAmount: Fiat;
   payInPercent: number;
   payOutPercent: number;
 }

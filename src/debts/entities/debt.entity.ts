@@ -8,7 +8,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('debts')
@@ -31,11 +32,11 @@ export class Debt {
   @Column({ type: 'uuid' })
   issuedByUserId: string;
 
-  @Column(moneyColumn())
-  amount: number;
+  @Column(cryptoColumn())
+  amount: Crypto;
 
-  @Column(moneyColumn())
-  remaining: number;
+  @Column(cryptoColumn())
+  remaining: Crypto;
 
   @Column({ type: 'text', nullable: true })
   comment: string | null;

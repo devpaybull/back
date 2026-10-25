@@ -1,6 +1,6 @@
 import { BankDetailsLimits } from '../types/bank-details-limits';
 
-const settled = (enabled: boolean, value: number): [boolean, number] =>
+const settled = <T>(enabled: boolean, value: T): [boolean, T | null] =>
   enabled ? [true, value ?? null] : [false, null];
 
 export const toggledLimits = (

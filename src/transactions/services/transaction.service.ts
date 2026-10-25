@@ -15,6 +15,9 @@ import {
 } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { Page, toPage } from '../../common/types/page';
+import { FIAT_SCALE } from '../../common/utils/fiat-scale';
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { RATE_SCALE } from '../../common/utils/rate-scale';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { UserTeamService } from '../../users/services/user-team.service';
 import { Transaction } from '../entities/transaction.entity';
@@ -130,6 +133,18 @@ export class TransactionService {
 
     if (!method) {
       throw new BadRequestException(`Unknown method ${input.method}`);
+    }
+
+    if (input.amountFiat.decimalPlaces() > FIAT_SCALE) {
+      throw new BadRequestException(
+        `amountFiat must have at most ${FIAT_SCALE} decimal places`,
+      );
+    }
+
+    if (input.rate.decimalPlaces() > RATE_SCALE) {
+      throw new BadRequestException(
+        `rate must have at most ${RATE_SCALE} decimal places`,
+      );
     }
 
     const leads = await this.rates.resolveLeadPercents({
@@ -313,7 +328,7 @@ export class TransactionService {
                 transactionId: created.id,
                 fromUserId: input.fromUserId,
                 toUserId: input.toUserId,
-                amount: input.amount,
+                amount: formatCrypto(input.amount),
               },
             },
             manager,
@@ -386,7 +401,7 @@ export class TransactionService {
         where: { transactionId: transaction.id },
         order: { id: 'ASC' },
       })
-    ).filter((share) => share.amount > 0);
+    ).filter((share) => share.amount.gt(0));
     const leadUserIds = shares.map((share) => share.leadUserId);
 
     await this.wallets.lockWalletsWithin(

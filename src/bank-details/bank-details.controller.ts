@@ -33,6 +33,7 @@ import {
   toOwnBankDetailsDto,
 } from './dto/own-bank-details.dto';
 import { UpdateBankDetailsDto } from './dto/update-bank-details.dto';
+import { withFiatLimits } from './utils/with-fiat-limits';
 
 @ApiTags('Bank details')
 @ApiBearerAuth()
@@ -52,7 +53,7 @@ export class BankDetailsController {
   ): Promise<OwnBankDetailsDto> {
     return toOwnBankDetailsDto(
       await this.bankDetails.create(
-        { ...dto, userId: trader.id },
+        { ...withFiatLimits(dto), userId: trader.id },
         trader.impersonatedBy ?? null,
       ),
       this.bankDetails.counterpartyMinAmount,
@@ -158,7 +159,7 @@ export class BankDetailsController {
     }
 
     return toOwnBankDetailsDto(
-      await this.bankDetails.updateOwn(id, trader.id, dto),
+      await this.bankDetails.updateOwn(id, trader.id, withFiatLimits(dto)),
       this.bankDetails.counterpartyMinAmount,
     );
   }

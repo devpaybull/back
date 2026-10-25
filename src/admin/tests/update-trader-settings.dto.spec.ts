@@ -16,19 +16,25 @@ describe('UpdateTraderSettingsDto insurancePayInMin', () => {
     expect(failedProperties({ insurancePayInMin: null })).toEqual([]);
   });
 
-  it('accepts zero and a three-decimal amount', () => {
-    expect(failedProperties({ insurancePayInMin: 0 })).toEqual([]);
-    expect(failedProperties({ insurancePayInMin: 12.345 })).toEqual([]);
+  it('accepts zero and a six-decimal amount as strings', () => {
+    expect(failedProperties({ insurancePayInMin: '0' })).toEqual([]);
+    expect(failedProperties({ insurancePayInMin: '12.345678' })).toEqual([]);
   });
 
   it('rejects a negative amount', () => {
-    expect(failedProperties({ insurancePayInMin: -1 })).toEqual([
+    expect(failedProperties({ insurancePayInMin: '-1' })).toEqual([
       'insurancePayInMin',
     ]);
   });
 
-  it('rejects more than three decimals', () => {
-    expect(failedProperties({ insurancePayInMin: 1.2345 })).toEqual([
+  it('rejects more than six decimals', () => {
+    expect(failedProperties({ insurancePayInMin: '1.1234567' })).toEqual([
+      'insurancePayInMin',
+    ]);
+  });
+
+  it('rejects a JSON number: money travels as a string', () => {
+    expect(failedProperties({ insurancePayInMin: 12 })).toEqual([
       'insurancePayInMin',
     ]);
   });
@@ -41,14 +47,14 @@ describe('UpdateTraderSettingsDto insurancePayInMin', () => {
 });
 
 describe('UpdateTraderSettingsDto insurancePayOutMin', () => {
-  it('accepts null, zero and a three-decimal amount', () => {
+  it('accepts null, zero and a six-decimal amount', () => {
     expect(failedProperties({ insurancePayOutMin: null })).toEqual([]);
-    expect(failedProperties({ insurancePayOutMin: 0 })).toEqual([]);
-    expect(failedProperties({ insurancePayOutMin: 12.345 })).toEqual([]);
+    expect(failedProperties({ insurancePayOutMin: '0' })).toEqual([]);
+    expect(failedProperties({ insurancePayOutMin: '12.345678' })).toEqual([]);
   });
 
-  it('rejects a negative amount, four decimals and a non-number', () => {
-    for (const value of [-1, 1.2345, 'abc']) {
+  it('rejects a negative amount, seven decimals, a JSON number and a non-number', () => {
+    for (const value of ['-1', '1.1234567', 12, 'abc']) {
       expect(failedProperties({ insurancePayOutMin: value })).toEqual([
         'insurancePayOutMin',
       ]);

@@ -7,6 +7,9 @@ import { Page } from '../../common/types/page';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { AuthenticatedUser } from '../../common/types/token';
+import { toCrypto } from '../../common/utils/to-crypto';
+import { toFiat } from '../../common/utils/to-fiat';
+import { toRate } from '../../common/utils/to-rate';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { StatusEventSource } from '../../transactions/types/status-event-source.enum';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
@@ -36,9 +39,9 @@ describe('AdminTransactionsController', () => {
       counterpartyId: null,
       recipientUserId: null,
       merchantId: null,
-      amountFiat: 100,
-      amountCrypto: 1,
-      rate: 100,
+      amountFiat: toFiat(100),
+      amountCrypto: toCrypto(1),
+      rate: toRate(100),
       merchantPercent: null,
       traderPercent: null,
       leadPercent: null,
@@ -167,6 +170,29 @@ describe('AdminTransactionsController', () => {
       expect(bankDetails.findIdsOfBank).not.toHaveBeenCalled();
       expect(transactions.list).toHaveBeenCalledWith(
         expect.objectContaining({ bankDetailsIds: undefined }),
+      );
+    });
+
+    it('hands the fiat amount bounds to the list as exact fiat amounts', async () => {
+      transactions.list.mockResolvedValue(page([]));
+
+      await controller.list(query({ amountFrom: '1000.50', amountTo: '2500' }));
+
+      expect(transactions.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amountFrom: toFiat('1000.50'),
+          amountTo: toFiat('2500'),
+        }),
+      );
+    });
+
+    it('leaves absent amount bounds absent', async () => {
+      transactions.list.mockResolvedValue(page([]));
+
+      await controller.list(query());
+
+      expect(transactions.list).toHaveBeenCalledWith(
+        expect.objectContaining({ amountFrom: undefined, amountTo: undefined }),
       );
     });
 

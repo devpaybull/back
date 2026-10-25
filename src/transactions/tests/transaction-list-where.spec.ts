@@ -1,4 +1,5 @@
 import { Between, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { toFiat } from '../../common/utils/to-fiat';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TransactionKind } from '../types/transaction-kind.enum';
@@ -65,16 +66,18 @@ describe('transactionListWhere', () => {
 
   it('bounds the fiat amount on both sides, inclusively', () => {
     expect(
-      transactionListWhere(query({ amountFrom: 1000, amountTo: 5000 })),
-    ).toEqual({ amountFiat: Between(1000, 5000) });
+      transactionListWhere(
+        query({ amountFrom: toFiat(1000), amountTo: toFiat(5000) }),
+      ),
+    ).toEqual({ amountFiat: Between(toFiat(1000), toFiat(5000)) });
   });
 
   it('treats a zero amount bound as a real bound, not as absent', () => {
-    expect(transactionListWhere(query({ amountFrom: 0 }))).toEqual({
-      amountFiat: MoreThanOrEqual(0),
+    expect(transactionListWhere(query({ amountFrom: toFiat(0) }))).toEqual({
+      amountFiat: MoreThanOrEqual(toFiat(0)),
     });
-    expect(transactionListWhere(query({ amountTo: 0 }))).toEqual({
-      amountFiat: LessThanOrEqual(0),
+    expect(transactionListWhere(query({ amountTo: toFiat(0) }))).toEqual({
+      amountFiat: LessThanOrEqual(toFiat(0)),
     });
   });
 
@@ -91,7 +94,7 @@ describe('transactionListWhere', () => {
           kind: TransactionKind.PayOut,
           merchantId: uuidOf(2),
           createdFrom: FROM,
-          amountTo: 300,
+          amountTo: toFiat(300),
           bankDetailsIds: [uuidOf(10)],
         }),
       ),
@@ -99,7 +102,7 @@ describe('transactionListWhere', () => {
       kind: TransactionKind.PayOut,
       merchantId: uuidOf(2),
       createdAt: MoreThanOrEqual(FROM),
-      amountFiat: LessThanOrEqual(300),
+      amountFiat: LessThanOrEqual(toFiat(300)),
       bankDetailsId: In([uuidOf(10)]),
     });
   });

@@ -17,11 +17,13 @@ export class UserListItemDto extends UserDto {
   balances: BalancesDto | null;
 
   @ApiProperty({
+    type: String,
+    example: '100.000000',
     nullable: true,
     description:
       'Effective minimum insurance pay-in deposit. Null for roles other than trader and lead_trader.',
   })
-  insurancePayInMin: number | null;
+  insurancePayInMin: string | null;
 
   @ApiProperty({
     type: BaseMethodRateDto,

@@ -15,10 +15,13 @@ import {
   Repository,
 } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
+import { Crypto } from '../../common/types/crypto';
 import { Page, toPage } from '../../common/types/page';
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { roundCrypto } from '../../common/utils/round-crypto';
 import { sortDirection } from '../../common/utils/sort-direction';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { WalletService } from '../../transactions/services/wallet.service';
-import { roundMoney } from '../../transactions/utils/round-money';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { DebtEvent } from '../entities/debt-event.entity';
 import { Debt } from '../entities/debt.entity';
@@ -59,7 +62,7 @@ export class DebtsService {
 
   async issue(
     userId: string,
-    amount: number,
+    amount: Crypto,
     actorUserId: string,
   ): Promise<Debt> {
     const debtor = await this.directory.findById(userId);
@@ -105,7 +108,7 @@ export class DebtsService {
           action: 'debt.issued',
           metadata: {
             debtId: debt.id,
-            amount,
+            amount: formatCrypto(amount),
             balanceOperationId: operation.id,
           },
         },
@@ -120,7 +123,7 @@ export class DebtsService {
 
   async writeOff(
     debtId: number,
-    amount: number | undefined,
+    amount: Crypto | undefined,
     actorUserId: string,
   ): Promise<Debt> {
     await this.dataSource.transaction(async (manager) => {
@@ -131,13 +134,13 @@ export class DebtsService {
 
       if (!debt) throw new NotFoundException(DEBT_NOT_FOUND);
 
-      if (debt.remaining <= 0) {
+      if (debt.remaining.lte(0)) {
         throw new ConflictException('Debt is already repaid');
       }
 
       const withheld = amount ?? debt.remaining;
 
-      if (withheld > debt.remaining) {
+      if (withheld.gt(debt.remaining)) {
         throw new BadRequestException(
           'Write-off amount exceeds the remaining debt',
         );
@@ -161,7 +164,7 @@ export class DebtsService {
       where: {
         autoWriteOffAt: LessThanOrEqual(now),
         autoWriteOffPaused: false,
-        remaining: MoreThan(0),
+        remaining: MoreThan(toCrypto(0)),
       },
       order: { autoWriteOffAt: 'ASC', id: 'ASC' },
       take: limit,
@@ -329,7 +332,7 @@ export class DebtsService {
   private async withhold(
     manager: EntityManager,
     debt: Debt,
-    amount: number,
+    amount: Crypto,
     type: DebtEventType.ManualWriteOff | DebtEventType.AutoWriteOff,
     actorUserId: string | null,
   ): Promise<void> {
@@ -338,7 +341,7 @@ export class DebtsService {
       debt.userId,
       amount,
     );
-    debt.remaining = roundMoney(debt.remaining - amount);
+    debt.remaining = roundCrypto(debt.remaining.minus(amount));
     await manager.save(debt);
     await manager.save(
       manager.create(DebtEvent, {
@@ -356,8 +359,8 @@ export class DebtsService {
         action: WRITE_OFF_ACTIONS[type],
         metadata: {
           debtId: debt.id,
-          amount,
-          remaining: debt.remaining,
+          amount: formatCrypto(amount),
+          remaining: formatCrypto(debt.remaining),
           balanceOperationId: operation.id,
         },
       },
@@ -406,8 +409,10 @@ export class DebtsService {
     query: DebtListQuery,
   ): Promise<FindOptionsWhere<Debt>[]> {
     const filters: FindOptionsWhere<Debt> = {
-      ...(query.status === DebtStatus.Active ? { remaining: MoreThan(0) } : {}),
-      ...(query.status === DebtStatus.Repaid ? { remaining: 0 } : {}),
+      ...(query.status === DebtStatus.Active
+        ? { remaining: MoreThan(toCrypto(0)) }
+        : {}),
+      ...(query.status === DebtStatus.Repaid ? { remaining: toCrypto(0) } : {}),
       ...(query.userId !== undefined ? { userId: query.userId } : {}),
     };
 

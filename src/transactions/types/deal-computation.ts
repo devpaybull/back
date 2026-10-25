@@ -1,3 +1,6 @@
+import { Crypto } from '../../common/types/crypto';
+import { Fiat } from '../../common/types/fiat';
+import { Rate } from '../../common/types/rate';
 import { TransactionKind } from './transaction-kind.enum';
 
 export interface DealLeadPercent {
@@ -6,13 +9,13 @@ export interface DealLeadPercent {
 }
 
 export interface DealLeadShare extends DealLeadPercent {
-  amount: number;
+  amount: Crypto;
 }
 
 export interface DealComputationInput {
   kind: TransactionKind.PayIn | TransactionKind.PayOut;
-  amountFiat: number;
-  rate: number;
+  amountFiat: Fiat;
+  rate: Rate;
   merchantPercent: number;
   traderPercent: number;
   platformMinPercent: number;
@@ -20,14 +23,14 @@ export interface DealComputationInput {
 }
 
 export interface DealComputation {
-  amountCrypto: number;
-  merchantCommission: number;
+  amountCrypto: Crypto;
+  merchantCommission: Crypto;
   traderEffectivePercent: number;
   shortfallPercent: number;
-  traderCommission: number;
+  traderCommission: Crypto;
   leadPercent: number | null;
-  leadCommission: number | null;
+  leadCommission: Crypto | null;
   leadShares: DealLeadShare[];
-  traderAmount: number;
-  merchantAmount: number;
+  traderAmount: Crypto;
+  merchantAmount: Crypto;
 }

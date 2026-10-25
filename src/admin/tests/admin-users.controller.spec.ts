@@ -11,6 +11,8 @@ import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { LoginLinkService } from '../../auth/services/login-link.service';
 import { PasswordService } from '../../auth/services/password.service';
 import { SessionService } from '../../auth/services/session.service';
@@ -127,7 +129,7 @@ describe('AdminUsersController', () => {
     traderSettings.findByUserIds.mockResolvedValue([]);
     traderSettings.insurancePayInMinOf.mockImplementation(
       (settings?: TraderSettings | null) =>
-        settings?.insurancePayInMin ?? GLOBAL_MIN,
+        settings?.insurancePayInMin ?? toCrypto(GLOBAL_MIN),
     );
     rateService.getEffectiveGeneralRates.mockImplementation(
       async (_scope: RateScope, subjects: RateSubject[]) => ({
@@ -370,12 +372,12 @@ describe('AdminUsersController', () => {
         ({
           id: 1,
           userId: uuidOf(7),
-          mainBalance: 1000,
-          mainReserved: 250,
-          insurancePayInBalance: 800,
-          insurancePayOutBalance: 300,
-          insurancePayInReserved: 10,
-          insurancePayOutReserved: 20,
+          mainBalance: toCrypto(1000),
+          mainReserved: toCrypto(250),
+          insurancePayInBalance: toCrypto(800),
+          insurancePayOutBalance: toCrypto(300),
+          insurancePayInReserved: toCrypto(10),
+          insurancePayOutReserved: toCrypto(20),
           lastAcceptedDealAt: null,
           ...overrides,
         }) as Wallet;
@@ -397,7 +399,7 @@ describe('AdminUsersController', () => {
       it('gives a trader every wallet amount, its minimum, its rates and its leads', async () => {
         wallets.findByUserIds.mockResolvedValue([wallet()]);
         traderSettings.findByUserIds.mockResolvedValue([
-          settings({ insurancePayInMin: 1000 }),
+          settings({ insurancePayInMin: toCrypto(1000) }),
         ]);
         team.leadsOf.mockResolvedValue(
           new Map([
@@ -408,16 +410,16 @@ describe('AdminUsersController', () => {
         const [row] = await listed([user()]);
 
         expect(row.balances).toEqual({
-          mainBalance: 1000,
-          mainReserved: 250,
-          availableMain: 750,
-          insurancePayInBalance: 800,
-          insurancePayOutBalance: 300,
-          insurancePayInReserved: 10,
-          insurancePayOutReserved: 20,
+          mainBalance: '1000.000000',
+          mainReserved: '250.000000',
+          availableMain: '750.000000',
+          insurancePayInBalance: '800.000000',
+          insurancePayOutBalance: '300.000000',
+          insurancePayInReserved: '10.000000',
+          insurancePayOutReserved: '20.000000',
           lastAcceptedDealAt: null,
         });
-        expect(row.insurancePayInMin).toBe(1000);
+        expect(row.insurancePayInMin).toBe('1000.000000');
         expect(row.rates).toEqual(traderBase);
         expect(row.leads).toEqual([
           { id: uuidOf(20), login: 'lead@example.com' },
@@ -441,7 +443,7 @@ describe('AdminUsersController', () => {
 
         expect(rateService.getEffectiveGeneralRates).not.toHaveBeenCalled();
         expect(row.rates).toBeNull();
-        expect(row.insurancePayInMin).toBe(GLOBAL_MIN);
+        expect(row.insurancePayInMin).toBe(formatCrypto(toCrypto(GLOBAL_MIN)));
         expect(row.subordinates).toEqual([
           { id: uuidOf(30), login: 'trader3_tg' },
         ]);
@@ -481,7 +483,7 @@ describe('AdminUsersController', () => {
         const [row] = await listed([user()]);
 
         expect(row.balances).toBeNull();
-        expect(row.insurancePayInMin).toBe(GLOBAL_MIN);
+        expect(row.insurancePayInMin).toBe(formatCrypto(toCrypto(GLOBAL_MIN)));
       });
 
       it.each([Role.Merchant, Role.MerchantSupport, Role.MerchantAgent])(

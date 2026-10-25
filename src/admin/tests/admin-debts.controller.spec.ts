@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -53,8 +54,8 @@ describe('AdminDebtsController', () => {
       user: debtor,
       issuedByUserId: issuer.id,
       issuedBy: issuer,
-      amount: 400,
-      remaining: 400,
+      amount: toCrypto(400),
+      remaining: toCrypto(400),
       comment: null,
       autoWriteOffAt: null,
       autoWriteOffPaused: false,
@@ -77,7 +78,7 @@ describe('AdminDebtsController', () => {
       issue: jest.fn(async () => debt()),
       list: jest.fn(),
       listEvents: jest.fn(),
-      writeOff: jest.fn(async () => debt({ remaining: 0 })),
+      writeOff: jest.fn(async () => debt({ remaining: toCrypto(0) })),
       update: jest.fn(async () => debt({ comment: 'x' })),
     };
     directory = { findById: jest.fn(async () => debtor) };
@@ -183,7 +184,7 @@ describe('AdminDebtsController', () => {
   describe('issue', () => {
     it('lends to the account and answers with the debt', async () => {
       await expect(
-        controller.issue(debtor.id, { amount: 400 }, superadmin),
+        controller.issue(debtor.id, { amount: '400' }, superadmin),
       ).resolves.toEqual({
         id: 5,
         user: { id: debtor.id, login: 'durov', telegramUsername: 'durov' },
@@ -192,20 +193,24 @@ describe('AdminDebtsController', () => {
           login: 'root@example.com',
           role: Role.Superadmin,
         },
-        amount: 400,
-        remaining: 400,
+        amount: '400.000000',
+        remaining: '400.000000',
         repaid: false,
         comment: null,
         autoWriteOffAt: null,
         autoWriteOffPaused: false,
         createdAt: new Date('2026-10-24T10:00:00Z'),
       });
-      expect(debts.issue).toHaveBeenCalledWith(debtor.id, 400, superadmin.id);
+      expect(debts.issue).toHaveBeenCalledWith(
+        debtor.id,
+        toCrypto(400),
+        superadmin.id,
+      );
     });
 
     it('refuses lending to yourself with a 403', async () => {
       await expect(
-        controller.issue(superadmin.id, { amount: 1 }, superadmin),
+        controller.issue(superadmin.id, { amount: '1' }, superadmin),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(debts.issue).not.toHaveBeenCalled();
     });
@@ -214,7 +219,7 @@ describe('AdminDebtsController', () => {
       directory.findById.mockResolvedValue(null);
 
       await expect(
-        controller.issue(debtor.id, { amount: 1 }, superadmin),
+        controller.issue(debtor.id, { amount: '1' }, superadmin),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(debts.issue).not.toHaveBeenCalled();
     });
@@ -224,7 +229,7 @@ describe('AdminDebtsController', () => {
       debts.issue.mockRejectedValue(new BadRequestException('role'));
 
       await expect(
-        controller.issue(debtor.id, { amount: 1 }, superadmin),
+        controller.issue(debtor.id, { amount: '1' }, superadmin),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -236,7 +241,7 @@ describe('AdminDebtsController', () => {
       });
 
       await expect(
-        controller.issue(debtor.id, { amount: 1 }, admin),
+        controller.issue(debtor.id, { amount: '1' }, admin),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(debts.issue).not.toHaveBeenCalled();
     });
@@ -251,9 +256,13 @@ describe('AdminDebtsController', () => {
     });
 
     it('passes a partial amount through', async () => {
-      await controller.writeOff(5, { amount: 12.5 }, superadmin);
+      await controller.writeOff(5, { amount: '12.5' }, superadmin);
 
-      expect(debts.writeOff).toHaveBeenCalledWith(5, 12.5, superadmin.id);
+      expect(debts.writeOff).toHaveBeenCalledWith(
+        5,
+        toCrypto('12.5'),
+        superadmin.id,
+      );
     });
   });
 
@@ -309,7 +318,7 @@ describe('AdminDebtsController', () => {
   describe('lists', () => {
     it('maps a page of debts to DTOs', async () => {
       debts.list.mockResolvedValue(
-        new Page([debt({ remaining: 0 })], {
+        new Page([debt({ remaining: toCrypto(0) })], {
           total: 1,
           page: 1,
           limit: 20,
@@ -337,7 +346,7 @@ describe('AdminDebtsController', () => {
               id: 2,
               debtId: 5,
               type: DebtEventType.AutoWriteOff,
-              amount: 400,
+              amount: toCrypto(400),
               actor: null,
               actorUserId: null,
               balanceOperationId: 31,
@@ -359,7 +368,7 @@ describe('AdminDebtsController', () => {
           id: 2,
           debtId: 5,
           type: DebtEventType.AutoWriteOff,
-          amount: 400,
+          amount: '400.000000',
           actor: null,
           balanceOperationId: 31,
           createdAt: new Date('2026-10-25T00:00:00Z'),

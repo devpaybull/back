@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -32,12 +33,12 @@ describe('AdminBalancesController', () => {
     ({
       id: 1,
       userId: uuidOf(1),
-      mainBalance: 100,
-      mainReserved: 30,
-      insurancePayInBalance: 500,
-      insurancePayOutBalance: 0,
-      insurancePayInReserved: 0,
-      insurancePayOutReserved: 0,
+      mainBalance: toCrypto(100),
+      mainReserved: toCrypto(30),
+      insurancePayInBalance: toCrypto(500),
+      insurancePayOutBalance: toCrypto(0),
+      insurancePayInReserved: toCrypto(0),
+      insurancePayOutReserved: toCrypto(0),
       lastAcceptedDealAt: null,
       ...overrides,
     }) as Wallet;
@@ -100,13 +101,16 @@ describe('AdminBalancesController', () => {
 
       const result = await controller.balances(uuidOf(1));
 
-      expect(result.availableMain).toBe(70);
-      expect(result.mainBalance).toBe(100);
+      expect(result.availableMain).toBe('70.000000');
+      expect(result.mainBalance).toBe('100.000000');
     });
   });
 
   describe('transfer', () => {
-    const dto: AdminTransferDto = { recipient: 'lead@example.com', amount: 50 };
+    const dto: AdminTransferDto = {
+      recipient: 'lead@example.com',
+      amount: '50',
+    };
 
     it('403 when the admin transfers from their own account', async () => {
       await expect(
@@ -161,7 +165,7 @@ describe('AdminBalancesController', () => {
         status: TransactionStatus.Success,
         traderUserId: uuidOf(1),
         recipientUserId: uuidOf(2),
-        amountCrypto: 50,
+        amountCrypto: toCrypto(50),
         createdAt: new Date(),
       } as Transaction);
 
@@ -170,7 +174,7 @@ describe('AdminBalancesController', () => {
       expect(transactions.createInternalTransfer).toHaveBeenCalledWith({
         fromUserId: uuidOf(1),
         toUserId: uuidOf(2),
-        amount: 50,
+        amount: toCrypto(50),
         source: StatusEventSource.Admin,
         actorUserId: admin.id,
         comment: undefined,

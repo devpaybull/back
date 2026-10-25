@@ -10,8 +10,10 @@ import { FindOptionsRelations, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/services/audit.service';
 import { ActivityAction } from '../audit/types/activity-action.enum';
 import { BanksService } from '../banks/banks.service';
+import { Fiat } from '../common/types/fiat';
 import { Page, toPage } from '../common/types/page';
 import { sortDirection } from '../common/utils/sort-direction';
+import { toFiat } from '../common/utils/to-fiat';
 import { DevicesService } from '../devices/devices.service';
 import { BankDetails } from './entities/bank-details.entity';
 import { BankDetailsListQuery } from './types/bank-details-list-query';
@@ -41,8 +43,8 @@ export class BankDetailsService {
     private readonly audit: AuditService,
   ) {}
 
-  get counterpartyMinAmount(): number {
-    return this.config.get<number>('COUNTERPARTY_MIN_AMOUNT');
+  get counterpartyMinAmount(): Fiat {
+    return toFiat(this.config.get<string>('COUNTERPARTY_MIN_AMOUNT'));
   }
 
   async create(

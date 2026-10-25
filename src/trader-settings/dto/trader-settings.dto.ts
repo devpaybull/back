@@ -1,4 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Crypto } from '../../common/types/crypto';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { TraderSettings } from '../entities/trader-settings.entity';
 
 export class TraderSettingsDto {
@@ -33,28 +35,36 @@ export class TraderSettingsDto {
   trustedUser: boolean;
 
   @ApiProperty({
+    type: String,
     nullable: true,
+    example: '500.000000',
     description:
       'Personal minimum insurance pay-in deposit; null means the global default applies',
   })
-  insurancePayInMin: number | null;
+  insurancePayInMin: string | null;
 
   @ApiProperty({
+    type: String,
+    example: '500.000000',
     description: 'The minimum insurance pay-in deposit that actually applies',
   })
-  effectiveInsurancePayInMin: number;
+  effectiveInsurancePayInMin: string;
 
   @ApiProperty({
+    type: String,
     nullable: true,
+    example: '500.000000',
     description:
       'Personal minimum insurance pay-out deposit; null means the global default applies',
   })
-  insurancePayOutMin: number | null;
+  insurancePayOutMin: string | null;
 
   @ApiProperty({
+    type: String,
+    example: '500.000000',
     description: 'The minimum insurance pay-out deposit that actually applies',
   })
-  effectiveInsurancePayOutMin: number;
+  effectiveInsurancePayOutMin: string;
 
   @ApiProperty({
     description: 'Whether the night stop applies to this trader',
@@ -75,8 +85,8 @@ export class TraderSettingsDto {
 }
 
 export interface EffectiveTraderSettings {
-  insurancePayInMin: number;
-  insurancePayOutMin: number;
+  insurancePayInMin: Crypto;
+  insurancePayOutMin: Crypto;
   nightStopThreshold: number;
 }
 
@@ -94,10 +104,10 @@ export const toTraderSettingsDto = (
   qrBuybackAccess: row.qrBuybackAccess,
   userTransferAccess: row.userTransferAccess,
   trustedUser: row.trustedUser,
-  insurancePayInMin: row.insurancePayInMin,
-  effectiveInsurancePayInMin: effective.insurancePayInMin,
-  insurancePayOutMin: row.insurancePayOutMin,
-  effectiveInsurancePayOutMin: effective.insurancePayOutMin,
+  insurancePayInMin: formatCrypto(row.insurancePayInMin),
+  effectiveInsurancePayInMin: formatCrypto(effective.insurancePayInMin),
+  insurancePayOutMin: formatCrypto(row.insurancePayOutMin),
+  effectiveInsurancePayOutMin: formatCrypto(effective.insurancePayOutMin),
   nightStopEnabled: row.nightStopEnabled,
   nightStopThreshold: row.nightStopThreshold,
   effectiveNightStopThreshold: effective.nightStopThreshold,

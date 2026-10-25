@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
@@ -24,14 +25,18 @@ export class BalanceOperationDto {
   @ApiProperty({ enum: BalanceKind })
   kind: BalanceKind;
 
-  @ApiProperty({ description: 'Signed: negative for a debit' })
-  amount: number;
+  @ApiProperty({
+    type: String,
+    example: '100.000000',
+    description: 'Signed: negative for a debit',
+  })
+  amount: string;
 
-  @ApiProperty()
-  balanceBefore: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  balanceBefore: string;
 
-  @ApiProperty()
-  balanceAfter: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  balanceAfter: string;
 
   @ApiProperty({
     type: BalanceOperationReferenceDto,
@@ -50,9 +55,9 @@ export const toBalanceOperationDto = (
   createdAt: operation.createdAt,
   type: operation.type,
   kind: operation.balanceKind,
-  amount: operation.amount,
-  balanceBefore: operation.balanceBefore,
-  balanceAfter: operation.balanceAfter,
+  amount: formatCrypto(operation.amount),
+  balanceBefore: formatCrypto(operation.balanceBefore),
+  balanceAfter: formatCrypto(operation.balanceAfter),
   reference:
     operation.transactionId || debtId !== null
       ? { transactionId: operation.transactionId ?? null, debtId }

@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   BadRequestException,
   ConflictException,
@@ -7,8 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Crypto } from '../../common/types/crypto';
 import { Page, toPage } from '../../common/types/page';
+import { roundCrypto } from '../../common/utils/round-crypto';
 import { sortDirection } from '../../common/utils/sort-direction';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { Wallet } from '../entities/wallet.entity';
@@ -19,7 +23,6 @@ import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
 import { canWithdrawInsurance } from '../utils/can-withdraw-insurance';
 import { isNightWindow } from '../utils/is-night-window';
-import { roundMoney } from '../utils/round-money';
 
 @Injectable()
 export class WalletService {
@@ -92,15 +95,17 @@ export class WalletService {
     return this.wallets.save(this.wallets.create({ userId }));
   }
 
-  getAvailableMain(wallet: Wallet): number {
-    return roundMoney(wallet.mainBalance - wallet.mainReserved);
+  getAvailableMain(wallet: Wallet): Crypto {
+    return roundCrypto(wallet.mainBalance.minus(wallet.mainReserved));
   }
 
   async isTradingEnabled(userId: string): Promise<boolean> {
     const wallet = await this.requireWallet(userId);
-    const threshold = this.config.get<number>('MAIN_BALANCE_MIN_THRESHOLD', 0);
+    const threshold = toCrypto(
+      this.config.get<string>('MAIN_BALANCE_MIN_THRESHOLD', '0'),
+    );
 
-    return this.getAvailableMain(wallet) > threshold;
+    return this.getAvailableMain(wallet).gt(threshold);
   }
 
   async hasMinInsurancePayIn(userId: string): Promise<boolean> {
@@ -108,7 +113,7 @@ export class WalletService {
     const minimum =
       await this.traderSettings.effectiveInsurancePayInMin(userId);
 
-    return wallet.insurancePayInBalance >= minimum;
+    return wallet.insurancePayInBalance.gte(minimum);
   }
 
   isWithinNightWindow(now: Date): boolean {
@@ -137,14 +142,14 @@ export class WalletService {
   async reserveMainEscrowWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
   ): Promise<void> {
     const wallet = await this.lock(manager, userId);
-    if (this.getAvailableMain(wallet) < amount) {
+    if (this.getAvailableMain(wallet).lt(amount)) {
       throw new ConflictException('Insufficient available balance');
     }
 
-    wallet.mainReserved = roundMoney(wallet.mainReserved + amount);
+    wallet.mainReserved = roundCrypto(wallet.mainReserved.plus(amount));
     await manager.save(wallet);
   }
 
@@ -176,7 +181,7 @@ export class WalletService {
   async debitMainWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
     transactionId: string,
   ): Promise<void> {
     const wallet = await this.lock(manager, userId);
@@ -184,11 +189,11 @@ export class WalletService {
       manager,
       wallet,
       BalanceKind.Main,
-      -amount,
+      amount.neg(),
       BalanceOperationType.Transaction,
       transactionId,
     );
-    wallet.mainReserved = roundMoney(wallet.mainReserved - amount);
+    wallet.mainReserved = roundCrypto(wallet.mainReserved.minus(amount));
     await manager.save(wallet);
     await manager.save(operation);
   }
@@ -196,7 +201,7 @@ export class WalletService {
   async creditMainWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
     transactionId: string,
   ): Promise<void> {
     const wallet = await this.lock(manager, userId);
@@ -215,7 +220,7 @@ export class WalletService {
   async creditLeadShareWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
     transactionId: string,
   ): Promise<void> {
     await manager
@@ -231,7 +236,7 @@ export class WalletService {
   async creditDebtWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
   ): Promise<BalanceOperation> {
     await manager
       .createQueryBuilder()
@@ -252,12 +257,12 @@ export class WalletService {
   debitDebtWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
   ): Promise<BalanceOperation> {
     return this.moveMainWithin(
       manager,
       userId,
-      -amount,
+      amount.neg(),
       BalanceOperationType.DebtWriteOff,
     );
   }
@@ -265,44 +270,46 @@ export class WalletService {
   async releaseEscrowWithin(
     manager: EntityManager,
     userId: string,
-    amount: number,
+    amount: Crypto,
   ): Promise<void> {
     const wallet = await this.lock(manager, userId);
-    wallet.mainReserved = roundMoney(wallet.mainReserved - amount);
+    wallet.mainReserved = roundCrypto(wallet.mainReserved.minus(amount));
     await manager.save(wallet);
   }
 
   async applyDisputeLoss(
     userId: string,
-    amount: number,
+    amount: Crypto,
     transactionId: string,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const wallet = await this.lock(manager, userId);
       const operations: BalanceOperation[] = [];
 
-      const fromMain = Math.min(amount, Math.max(wallet.mainBalance, 0));
-      if (fromMain > 0) {
+      const fromMain = toCrypto(
+        Decimal.min(amount, Decimal.max(wallet.mainBalance, 0)),
+      );
+      if (fromMain.gt(0)) {
         operations.push(
           this.journalMove(
             manager,
             wallet,
             BalanceKind.Main,
-            -fromMain,
+            fromMain.neg(),
             BalanceOperationType.Transaction,
             transactionId,
           ),
         );
       }
 
-      const remainder = roundMoney(amount - fromMain);
-      if (remainder > 0) {
+      const remainder = roundCrypto(amount.minus(fromMain));
+      if (remainder.gt(0)) {
         operations.push(
           this.journalMove(
             manager,
             wallet,
             BalanceKind.InsurancePayIn,
-            -remainder,
+            remainder.neg(),
             BalanceOperationType.Transaction,
             transactionId,
           ),
@@ -318,7 +325,7 @@ export class WalletService {
     manager: EntityManager,
     fromUserId: string,
     toUserId: string,
-    amount: number,
+    amount: Crypto,
     transactionId: string,
   ): Promise<void> {
     if (fromUserId === toUserId) {
@@ -333,7 +340,7 @@ export class WalletService {
     const from = first.userId === fromUserId ? first : second;
     const to = first.userId === fromUserId ? second : first;
 
-    if (this.getAvailableMain(from) < amount) {
+    if (this.getAvailableMain(from).lt(amount)) {
       throw new ConflictException('Insufficient available balance');
     }
 
@@ -341,7 +348,7 @@ export class WalletService {
       manager,
       from,
       BalanceKind.Main,
-      -amount,
+      amount.neg(),
       BalanceOperationType.Internal,
       transactionId,
     );
@@ -361,7 +368,7 @@ export class WalletService {
   private async moveMainWithin(
     manager: EntityManager,
     userId: string,
-    delta: number,
+    delta: Decimal,
     type: BalanceOperationType,
   ): Promise<BalanceOperation> {
     const wallet = await this.lock(manager, userId);
@@ -399,12 +406,12 @@ export class WalletService {
     manager: EntityManager,
     wallet: Wallet,
     kind: BalanceKind,
-    delta: number,
+    delta: Decimal,
     type: BalanceOperationType,
     transactionId: string | null,
   ): BalanceOperation {
     const before = this.readBalance(wallet, kind);
-    const after = roundMoney(before + delta);
+    const after = roundCrypto(before.plus(delta));
     this.writeBalance(wallet, kind, after);
 
     return manager.create(BalanceOperation, {
@@ -412,13 +419,13 @@ export class WalletService {
       type,
       balanceKind: kind,
       transactionId,
-      amount: roundMoney(delta),
+      amount: roundCrypto(delta),
       balanceBefore: before,
       balanceAfter: after,
     });
   }
 
-  private readBalance(wallet: Wallet, kind: BalanceKind): number {
+  private readBalance(wallet: Wallet, kind: BalanceKind): Crypto {
     switch (kind) {
       case BalanceKind.Main:
         return wallet.mainBalance;
@@ -429,7 +436,7 @@ export class WalletService {
     }
   }
 
-  private writeBalance(wallet: Wallet, kind: BalanceKind, value: number): void {
+  private writeBalance(wallet: Wallet, kind: BalanceKind, value: Crypto): void {
     switch (kind) {
       case BalanceKind.Main:
         wallet.mainBalance = value;

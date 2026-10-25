@@ -1,5 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Rate } from '../../common/types/rate';
+import { toRate } from '../../common/utils/to-rate';
 
 interface RapiraRate {
   symbol: string;
@@ -12,11 +14,11 @@ interface RapiraRatesResponse {
 
 @Injectable()
 export class RapiraRateProvider {
-  private cached: { value: number; fetchedAt: number } | null = null;
+  private cached: { value: Rate; fetchedAt: number } | null = null;
 
   constructor(private readonly config: ConfigService) {}
 
-  async getFiatPerUsdt(): Promise<number> {
+  async getFiatPerUsdt(): Promise<Rate> {
     const ttlMs = this.config.get<number>('RAPIRA_RATE_TTL_SECONDS', 0) * 1000;
     if (this.cached && Date.now() - this.cached.fetchedAt < ttlMs) {
       return this.cached.value;
@@ -32,7 +34,7 @@ export class RapiraRateProvider {
     }
   }
 
-  private async fetchRate(): Promise<number> {
+  private async fetchRate(): Promise<Rate> {
     const url = this.config.get<string>('RAPIRA_RATE_URL', '');
     const symbol = this.config.get<string>('RAPIRA_RATE_SYMBOL', '');
 
@@ -58,6 +60,6 @@ export class RapiraRateProvider {
       );
     }
 
-    return row.close;
+    return toRate(String(row.close));
   }
 }

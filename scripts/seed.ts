@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import 'dotenv/config';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'crypto';
@@ -40,7 +41,11 @@ import { TransactionStatus } from '../src/transactions/types/transaction-status.
 import { TransactionStatusEvent } from '../src/transactions/entities/transaction-status-event.entity';
 import { StatusEventSource } from '../src/transactions/types/status-event-source.enum';
 import { computeDeal } from '../src/transactions/utils/compute-deal';
-import { roundMoney } from '../src/transactions/utils/round-money';
+import { formatCrypto } from '../src/common/utils/format-crypto';
+import { roundCrypto } from '../src/common/utils/round-crypto';
+import { toCrypto } from '../src/common/utils/to-crypto';
+import { toFiat } from '../src/common/utils/to-fiat';
+import { toRate } from '../src/common/utils/to-rate';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
 import { AuditSource } from '../src/audit/types/audit-source.enum';
@@ -146,7 +151,7 @@ async function recordBalanceMove(
   manager: EntityManager,
   wallet: Wallet,
   balanceKind: BalanceKind,
-  delta: number,
+  delta: Decimal.Value,
   type: BalanceOperationType,
   transactionId: string | null,
 ): Promise<BalanceOperation> {
@@ -157,8 +162,8 @@ async function recordBalanceMove(
         ? 'insurancePayInBalance'
         : 'insurancePayOutBalance';
 
-  const before = wallet[field];
-  const after = roundMoney(before + delta);
+  const before = toCrypto(wallet[field] ?? 0);
+  const after = roundCrypto(before.plus(delta));
   wallet[field] = after;
 
   return manager.save(
@@ -168,7 +173,7 @@ async function recordBalanceMove(
       type,
       balanceKind,
       transactionId,
-      amount: roundMoney(delta),
+      amount: roundCrypto(delta),
       balanceBefore: before,
       balanceAfter: after,
     }),
@@ -218,10 +223,12 @@ async function createDeal(
     resolved: boolean;
   },
 ): Promise<Transaction & { leadShares: DealLeadShare[] }> {
+  const amountFiat = toFiat(input.amountFiat);
+  const rate = toRate(input.rate);
   const computation = computeDeal({
     kind: input.kind,
-    amountFiat: input.amountFiat,
-    rate: input.rate,
+    amountFiat,
+    rate,
     merchantPercent: input.merchantPercent,
     traderPercent: input.traderPercent,
     platformMinPercent: platformMinPercent(),
@@ -241,9 +248,9 @@ async function createDeal(
       bankDetailsId: input.bankDetailsId,
       merchantId: input.merchantId,
       counterpartyId: input.counterpartyId ?? null,
-      amountFiat: input.amountFiat,
+      amountFiat,
       amountCrypto: computation.amountCrypto,
-      rate: input.rate,
+      rate,
       merchantPercent: input.merchantPercent,
       traderPercent: input.traderPercent,
       traderEffectivePercent: computation.traderEffectivePercent,
@@ -480,8 +487,8 @@ async function main(): Promise<void> {
       manager.create(LeadRate, {
         traderLeadId: trader1Lead1.id,
         method: 'sbp',
-        fromAmount: 1000,
-        toAmount: 5000,
+        fromAmount: toFiat(1000),
+        toAmount: toFiat(5000),
         payInPercent: 0.3,
         payOutPercent: 0.1,
       }),
@@ -528,9 +535,9 @@ async function main(): Promise<void> {
         cardholderName: 'IVAN PETROV',
         card: '4276000011112222',
         minAmountEnabled: true,
-        minAmount: 500,
+        minAmount: toFiat(500),
         maxAmountEnabled: true,
-        maxAmount: 50000,
+        maxAmount: toFiat(50000),
         dailyLimitEnabled: true,
         dailyLimit: 20,
         active: true,
@@ -545,7 +552,7 @@ async function main(): Promise<void> {
         type: TransactionType.Sbp,
         phone: '+79261234567',
         monthlyAmountLimitEnabled: true,
-        monthlyAmountLimit: 1000000,
+        monthlyAmountLimit: toFiat(1000000),
         active: true,
       }),
     );
@@ -733,7 +740,7 @@ async function main(): Promise<void> {
       manager,
       trader1Wallet,
       BalanceKind.Main,
-      -d1.traderAmount,
+      d1.traderAmount.neg(),
       BalanceOperationType.Transaction,
       d1.id,
     );
@@ -769,8 +776,8 @@ async function main(): Promise<void> {
         },
       ],
     });
-    trader1Wallet.mainReserved = roundMoney(
-      trader1Wallet.mainReserved + d2.traderAmount,
+    trader1Wallet.mainReserved = roundCrypto(
+      toCrypto(trader1Wallet.mainReserved ?? 0).plus(d2.traderAmount),
     );
 
     const d3 = await createDeal(manager, {
@@ -803,8 +810,8 @@ async function main(): Promise<void> {
         },
       ],
     });
-    trader1Wallet.mainReserved = roundMoney(
-      trader1Wallet.mainReserved + d3.traderAmount,
+    trader1Wallet.mainReserved = roundCrypto(
+      toCrypto(trader1Wallet.mainReserved ?? 0).plus(d3.traderAmount),
     );
 
     await createDeal(manager, {
@@ -944,8 +951,8 @@ async function main(): Promise<void> {
       manager.create(Debt, {
         userId: trader2.user.id,
         issuedByUserId: superadmin.user.id,
-        amount: 400,
-        remaining: 300,
+        amount: toCrypto(400),
+        remaining: toCrypto(300),
         comment: 'Вернёт до конца месяца',
       }),
     );
@@ -961,14 +968,14 @@ async function main(): Promise<void> {
       manager.create(DebtEvent, {
         debtId: partialDebt.id,
         type: DebtEventType.Issued,
-        amount: 400,
+        amount: toCrypto(400),
         actorUserId: superadmin.user.id,
         balanceOperationId: debtIssued.id,
       }),
       manager.create(DebtEvent, {
         debtId: partialDebt.id,
         type: DebtEventType.ManualWriteOff,
-        amount: 100,
+        amount: toCrypto(100),
         actorUserId: superadmin.user.id,
         balanceOperationId: debtWithheld.id,
       }),
@@ -987,8 +994,8 @@ async function main(): Promise<void> {
       manager.create(Debt, {
         userId: trader3.user.id,
         issuedByUserId: superadmin.user.id,
-        amount: 250,
-        remaining: 250,
+        amount: toCrypto(250),
+        remaining: toCrypto(250),
         autoWriteOffAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       }),
     );
@@ -997,7 +1004,7 @@ async function main(): Promise<void> {
       manager.create(DebtEvent, {
         debtId: scheduledDebt.id,
         type: DebtEventType.Issued,
-        amount: 250,
+        amount: toCrypto(250),
         actorUserId: superadmin.user.id,
         balanceOperationId: scheduledIssued.id,
       }),
@@ -1137,7 +1144,7 @@ async function main(): Promise<void> {
           transactionId: transfer.id,
           fromUserId: trader1.user.id,
           toUserId: lead1.user.id,
-          amount: 50,
+          amount: formatCrypto(toCrypto(50)),
         },
       }),
       manager.create(AuditLog, {

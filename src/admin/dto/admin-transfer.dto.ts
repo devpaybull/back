@@ -1,12 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsNumber,
-  IsOptional,
-  IsPositive,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsCryptoAmount } from '../../common/decorators/is-crypto-amount.decorator';
 
 export class AdminTransferDto {
   @ApiProperty()
@@ -15,10 +10,13 @@ export class AdminTransferDto {
   @MaxLength(320)
   recipient: string;
 
-  @ApiProperty()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @IsPositive()
-  amount: number;
+  @ApiProperty({
+    type: String,
+    example: '100.000000',
+    description: 'USDT, a decimal string with at most 6 decimals',
+  })
+  @IsCryptoAmount({ positive: true })
+  amount: string;
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()

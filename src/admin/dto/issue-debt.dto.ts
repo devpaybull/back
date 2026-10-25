@@ -1,12 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsPositive, Max } from 'class-validator';
-
-const MAX_DEBT_AMOUNT = 1e15;
+import { IsCryptoAmount } from '../../common/decorators/is-crypto-amount.decorator';
 
 export class IssueDebtDto {
-  @ApiProperty({ description: 'USDT credited to the main balance as a debt' })
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @IsPositive()
-  @Max(MAX_DEBT_AMOUNT)
-  amount: number;
+  @ApiProperty({
+    type: String,
+    example: '500.000000',
+    description:
+      'USDT credited to the main balance as a debt, a decimal string with at most 6 decimals',
+  })
+  @IsCryptoAmount({ positive: true })
+  amount: string;
 }

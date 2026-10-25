@@ -9,11 +9,12 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Bank } from '../../banks/entities/bank.entity';
+import { Fiat } from '../../common/types/fiat';
+import { fiatColumn } from '../../common/utils/fiat-column';
 import { Merchant } from '../../merchants/entities/merchant.entity';
 import { User } from '../../users/entities/user.entity';
 import { RateScope } from '../types/rate-scope.enum';
 import { TransactionMethod } from '../types/transaction-method';
-import { moneyColumn } from '../../common/utils/money-column';
 import { percentColumn } from '../../common/utils/percent-column';
 
 @Entity('method_rates')
@@ -52,11 +53,11 @@ export class MethodRate {
   @Column({ type: 'int', nullable: true })
   bankId: number;
 
-  @Column(moneyColumn({ nullable: true }))
-  fromAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  fromAmount: Fiat;
 
-  @Column(moneyColumn({ nullable: true }))
-  toAmount: number;
+  @Column(fiatColumn({ nullable: true }))
+  toAmount: Fiat;
 
   @Column(percentColumn())
   payInPercent: number;

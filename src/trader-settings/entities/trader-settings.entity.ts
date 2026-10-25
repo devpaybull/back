@@ -8,7 +8,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('trader_settings')
@@ -51,11 +52,11 @@ export class TraderSettings {
   @Column({ default: false })
   trustedUser: boolean;
 
-  @Column(moneyColumn({ nullable: true }))
-  insurancePayInMin: number | null;
+  @Column(cryptoColumn({ nullable: true }))
+  insurancePayInMin: Crypto | null;
 
-  @Column(moneyColumn({ nullable: true }))
-  insurancePayOutMin: number | null;
+  @Column(cryptoColumn({ nullable: true }))
+  insurancePayOutMin: Crypto | null;
 
   @Column({ default: true })
   nightStopEnabled: boolean;

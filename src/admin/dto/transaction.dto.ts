@@ -1,4 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { formatFiat } from '../../common/utils/format-fiat';
+import { formatRate } from '../../common/utils/format-rate';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
@@ -34,14 +37,14 @@ export class TransactionDto {
   @ApiProperty({ nullable: true })
   merchantId: string;
 
-  @ApiProperty({ nullable: true })
-  amountFiat: number;
+  @ApiProperty({ type: String, example: '26262.00', nullable: true })
+  amountFiat: string;
 
-  @ApiProperty()
-  amountCrypto: number;
+  @ApiProperty({ type: String, example: '100.000000' })
+  amountCrypto: string;
 
-  @ApiProperty({ nullable: true })
-  rate: number;
+  @ApiProperty({ type: String, example: '88.920000', nullable: true })
+  rate: string;
 
   @ApiProperty({ nullable: true })
   merchantPercent: number;
@@ -65,24 +68,26 @@ export class TransactionDto {
   })
   leadPercent: number;
 
-  @ApiProperty({ nullable: true })
-  merchantCommission: number;
+  @ApiProperty({ type: String, example: '100.000000', nullable: true })
+  merchantCommission: string;
 
-  @ApiProperty({ nullable: true })
-  traderCommission: number;
+  @ApiProperty({ type: String, example: '100.000000', nullable: true })
+  traderCommission: string;
 
   @ApiProperty({
+    type: String,
+    example: '100.000000',
     nullable: true,
     description:
       'The sum of every lead’s share on this deal; null with no lead',
   })
-  leadCommission: number;
+  leadCommission: string;
 
-  @ApiProperty({ nullable: true })
-  traderAmount: number;
+  @ApiProperty({ type: String, example: '100.000000', nullable: true })
+  traderAmount: string;
 
-  @ApiProperty({ nullable: true })
-  merchantAmount: number;
+  @ApiProperty({ type: String, example: '100.000000', nullable: true })
+  merchantAmount: string;
 
   @ApiProperty({ nullable: true })
   comment: string;
@@ -111,18 +116,18 @@ export const toTransactionDto = (row: Transaction): TransactionDto => ({
   counterpartyId: row.counterpartyId,
   recipientUserId: row.recipientUserId,
   merchantId: row.merchantId,
-  amountFiat: row.amountFiat,
-  amountCrypto: row.amountCrypto,
-  rate: row.rate,
+  amountFiat: formatFiat(row.amountFiat),
+  amountCrypto: formatCrypto(row.amountCrypto),
+  rate: formatRate(row.rate),
   merchantPercent: row.merchantPercent,
   traderPercent: row.traderPercent,
   traderEffectivePercent: row.traderEffectivePercent ?? null,
   leadPercent: row.leadPercent,
-  merchantCommission: row.merchantCommission,
-  traderCommission: row.traderCommission,
-  leadCommission: row.leadCommission,
-  traderAmount: row.traderAmount,
-  merchantAmount: row.merchantAmount,
+  merchantCommission: formatCrypto(row.merchantCommission),
+  traderCommission: formatCrypto(row.traderCommission),
+  leadCommission: formatCrypto(row.leadCommission),
+  traderAmount: formatCrypto(row.traderAmount),
+  merchantAmount: formatCrypto(row.merchantAmount),
   comment: row.comment,
   createdAt: row.createdAt,
   resolvedAt: row.resolvedAt,

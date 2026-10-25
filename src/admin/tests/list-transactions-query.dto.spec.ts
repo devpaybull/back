@@ -72,14 +72,18 @@ describe('ListTransactionsQueryDto — the deals tab filters', () => {
     ).toEqual([]);
   });
 
-  it('reads the amount bounds as numbers, decimals included', () => {
-    const query = parsed({ amountFrom: '1000', amountTo: '2500.5' });
+  it('keeps the amount bounds as fiat strings, kopecks included', () => {
+    const query = parsed({ amountFrom: '1000', amountTo: '2500.55' });
 
     expect(
-      failedProperties({ amountFrom: '1000', amountTo: '2500.5' }),
+      failedProperties({ amountFrom: '1000', amountTo: '2500.55' }),
     ).toEqual([]);
-    expect(query.amountFrom).toBe(1000);
-    expect(query.amountTo).toBe(2500.5);
+    expect(query.amountFrom).toBe('1000');
+    expect(query.amountTo).toBe('2500.55');
+  });
+
+  it('refuses an amount bound with a third decimal', () => {
+    expect(failedProperties({ amountFrom: '1.123' })).toEqual(['amountFrom']);
   });
 
   it('refuses an amount range whose lower bound is above the upper one', () => {

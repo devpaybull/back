@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { plainToInstance } from 'class-transformer';
+import { formatCrypto } from '../../common/utils/format-crypto';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -125,7 +127,7 @@ describe('AdminInvitesController', () => {
     traderSettings.findByUserIds.mockResolvedValue([]);
     traderSettings.insurancePayInMinOf.mockImplementation(
       (settings?: TraderSettings | null) =>
-        settings?.insurancePayInMin ?? GLOBAL_MIN,
+        settings?.insurancePayInMin ?? toCrypto(GLOBAL_MIN),
     );
 
     const module = await Test.createTestingModule({
@@ -602,7 +604,7 @@ describe('AdminInvitesController', () => {
       const [listed] = await listedInvites([row]);
 
       expect(listed.rates).toEqual(baseRates);
-      expect(listed.insurancePayInMin).toBe(GLOBAL_MIN);
+      expect(listed.insurancePayInMin).toBe(formatCrypto(toCrypto(GLOBAL_MIN)));
       expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
         RateScope.Trader,
         [],
@@ -614,7 +616,7 @@ describe('AdminInvitesController', () => {
         {
           userId,
           individualRatesEnabled: true,
-          insurancePayInMin: 250,
+          insurancePayInMin: toCrypto(250),
         } as TraderSettings,
       ]);
       rateService.getEffectiveGeneralRates.mockResolvedValue({
@@ -625,7 +627,7 @@ describe('AdminInvitesController', () => {
       const [listed] = await listedInvites([usedTrader()]);
 
       expect(listed.rates).toEqual(ownRates);
-      expect(listed.insurancePayInMin).toBe(250);
+      expect(listed.insurancePayInMin).toBe('250.000000');
       expect(traderSettings.findByUserIds).toHaveBeenCalledWith([userId]);
       expect(rateService.getEffectiveGeneralRates).toHaveBeenCalledWith(
         RateScope.Trader,
@@ -646,7 +648,7 @@ describe('AdminInvitesController', () => {
         [{ userId, individualEnabled: false }],
       );
       expect(listed.rates).toEqual(baseRates);
-      expect(listed.insurancePayInMin).toBe(GLOBAL_MIN);
+      expect(listed.insurancePayInMin).toBe(formatCrypto(toCrypto(GLOBAL_MIN)));
     });
 
     it('gives a used non-trader invite no terms and looks nothing up', async () => {
@@ -740,7 +742,9 @@ describe('AdminInvitesController', () => {
 
       for (const result of [created, revoked, extended]) {
         expect(result.rates).toEqual(baseRates);
-        expect(result.insurancePayInMin).toBe(GLOBAL_MIN);
+        expect(result.insurancePayInMin).toBe(
+          formatCrypto(toCrypto(GLOBAL_MIN)),
+        );
       }
     });
   });

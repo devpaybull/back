@@ -1,10 +1,15 @@
+import Decimal from 'decimal.js';
+import { Crypto } from '../../common/types/crypto';
+import { PERCENT_SCALE } from '../../common/utils/percent-scale';
+import { roundCrypto } from '../../common/utils/round-crypto';
+import { roundHalfEven } from '../../common/utils/round-half-even';
+import { toDecimal } from '../../common/utils/to-decimal';
 import {
   DealComputation,
   DealComputationInput,
   DealLeadShare,
 } from '../types/deal-computation';
 import { TransactionKind } from '../types/transaction-kind.enum';
-import { roundMoney } from './round-money';
 
 export class PlatformMinimumUnreachableError extends Error {
   constructor() {
@@ -15,65 +20,80 @@ export class PlatformMinimumUnreachableError extends Error {
   }
 }
 
+const toPercentNumber = (value: Decimal): number =>
+  roundHalfEven(value, PERCENT_SCALE).toNumber();
+
+const share = (amount: Crypto, percent: Decimal.Value): Crypto =>
+  roundCrypto(amount.times(percent).div(100));
+
 export function computeDeal(input: DealComputationInput): DealComputation {
   const { amountFiat, rate, merchantPercent, traderPercent } = input;
   const leads = input.leads ?? [];
 
-  const leadSum = roundMoney(
-    leads.reduce((sum, lead) => sum + lead.percent, 0),
+  const leadSum = leads.reduce(
+    (sum, lead) => sum.plus(lead.percent),
+    toDecimal(0),
   );
-  const shortfallPercent =
+  const shortfall =
     leads.length === 0
-      ? 0
-      : roundMoney(
-          Math.max(
+      ? toDecimal(0)
+      : toDecimal(
+          Decimal.max(
             0,
-            input.platformMinPercent -
-              (merchantPercent - traderPercent - leadSum),
+            toDecimal(input.platformMinPercent).minus(
+              toDecimal(merchantPercent).minus(traderPercent).minus(leadSum),
+            ),
           ),
         );
 
-  if (shortfallPercent > traderPercent) {
+  if (shortfall.gt(traderPercent)) {
     throw new PlatformMinimumUnreachableError();
   }
 
-  const traderEffectivePercent = roundMoney(traderPercent - shortfallPercent);
-  const traderFraction = traderEffectivePercent / 100;
+  const traderEffective = toDecimal(traderPercent).minus(shortfall);
 
-  const amountCrypto = roundMoney(amountFiat / rate);
-  const merchantCommission = roundMoney(amountCrypto * (merchantPercent / 100));
+  const amountCrypto = roundCrypto(amountFiat.div(rate));
+  const merchantCommission = share(amountCrypto, merchantPercent);
   const leadShares: DealLeadShare[] = leads.map((lead) => ({
     leadUserId: lead.leadUserId,
     percent: lead.percent,
-    amount: roundMoney(amountCrypto * (lead.percent / 100)),
+    amount: share(amountCrypto, lead.percent),
   }));
   const hasLeads = leadShares.length > 0;
-  const leadPercent = hasLeads ? leadSum : null;
-  const leadCommission = hasLeads
-    ? roundMoney(leadShares.reduce((sum, share) => sum + share.amount, 0))
-    : null;
 
   const shared = {
     amountCrypto,
     merchantCommission,
-    traderEffectivePercent,
-    shortfallPercent,
-    leadPercent,
-    leadCommission,
+    traderEffectivePercent: toPercentNumber(traderEffective),
+    shortfallPercent: toPercentNumber(shortfall),
+    leadPercent: hasLeads ? toPercentNumber(leadSum) : null,
+    leadCommission: hasLeads
+      ? roundCrypto(
+          leadShares.reduce((sum, lead) => sum.plus(lead.amount), toDecimal(0)),
+        )
+      : null,
     leadShares,
   };
 
   if (input.kind === TransactionKind.PayIn) {
-    const traderAmount = roundMoney(amountFiat / (rate * (1 + traderFraction)));
-    const traderCommission = roundMoney(Math.abs(amountCrypto - traderAmount));
-    const merchantAmount = roundMoney(amountCrypto - merchantCommission);
+    const traderAmount = roundCrypto(
+      amountFiat.div(rate.times(traderEffective.div(100).plus(1))),
+    );
 
-    return { ...shared, traderCommission, traderAmount, merchantAmount };
+    return {
+      ...shared,
+      traderCommission: roundCrypto(amountCrypto.minus(traderAmount).abs()),
+      traderAmount,
+      merchantAmount: roundCrypto(amountCrypto.minus(merchantCommission)),
+    };
   }
 
-  const traderCommission = roundMoney(amountCrypto * traderFraction);
-  const traderAmount = roundMoney(amountCrypto + traderCommission);
-  const merchantAmount = roundMoney(amountCrypto + merchantCommission);
+  const traderCommission = share(amountCrypto, traderEffective);
 
-  return { ...shared, traderCommission, traderAmount, merchantAmount };
+  return {
+    ...shared,
+    traderCommission,
+    traderAmount: roundCrypto(amountCrypto.plus(traderCommission)),
+    merchantAmount: roundCrypto(amountCrypto.plus(merchantCommission)),
+  };
 }

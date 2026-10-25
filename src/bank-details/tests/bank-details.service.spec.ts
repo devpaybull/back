@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { toFiat } from '../../common/utils/to-fiat';
 import { AuditService } from '../../audit/services/audit.service';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { BanksService } from '../../banks/banks.service';
@@ -320,7 +321,7 @@ describe('BankDetailsService', () => {
         userId: owner,
         bankId: 1,
         type: TransactionType.Card,
-        minAmount: 500,
+        minAmount: toFiat(500),
         dailyLimit: 40,
       });
 
@@ -335,11 +336,14 @@ describe('BankDetailsService', () => {
         bankId: 1,
         type: TransactionType.Card,
         minAmountEnabled: true,
-        minAmount: 500,
+        minAmount: toFiat(500),
       });
 
       expect(bankDetails.create).toHaveBeenCalledWith(
-        expect.objectContaining({ minAmountEnabled: true, minAmount: 500 }),
+        expect.objectContaining({
+          minAmountEnabled: true,
+          minAmount: toFiat(500),
+        }),
       );
     });
 
@@ -588,7 +592,7 @@ describe('BankDetailsService', () => {
 
   describe('the counterparty-only floor', () => {
     it('reads the configured floor rather than inventing one', () => {
-      expect(service.counterpartyMinAmount).toBe(5000);
+      expect(service.counterpartyMinAmount).toEqual(toFiat(5000));
       expect(config.get).toHaveBeenCalledWith('COUNTERPARTY_MIN_AMOUNT');
     });
 
@@ -616,7 +620,7 @@ describe('BankDetailsService', () => {
           bankId: 1,
           type: TransactionType.Card,
           counterpartyOnly: true,
-          minAmount: 100,
+          minAmount: toFiat(100),
         }),
       ).rejects.toThrow(ConflictException);
       expect(bankDetails.save).not.toHaveBeenCalled();
@@ -638,7 +642,7 @@ describe('BankDetailsService', () => {
       stored = [card({ counterpartyOnly: true, minAmountEnabled: true })];
 
       await expect(
-        service.updateOwn(uuidOf(100), owner, { minAmount: 100 }),
+        service.updateOwn(uuidOf(100), owner, { minAmount: toFiat(100) }),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -646,13 +650,13 @@ describe('BankDetailsService', () => {
       await expect(
         service.updateOwn(uuidOf(100), owner, {
           counterpartyOnly: true,
-          minAmount: 100,
+          minAmount: toFiat(100),
         }),
       ).rejects.toThrow(ConflictException);
     });
 
     it('clears the trader’s own minimum when the flag goes on', async () => {
-      stored = [card({ minAmountEnabled: true, minAmount: 700 })];
+      stored = [card({ minAmountEnabled: true, minAmount: toFiat(700) })];
 
       await expect(
         service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true }),
@@ -677,9 +681,12 @@ describe('BankDetailsService', () => {
       await expect(
         service.updateOwn(uuidOf(100), owner, {
           minAmountEnabled: true,
-          minAmount: 700,
+          minAmount: toFiat(700),
         }),
-      ).resolves.toMatchObject({ minAmountEnabled: true, minAmount: 700 });
+      ).resolves.toMatchObject({
+        minAmountEnabled: true,
+        minAmount: toFiat(700),
+      });
     });
 
     it('leaves the other limits alone', async () => {
@@ -687,9 +694,12 @@ describe('BankDetailsService', () => {
         service.updateOwn(uuidOf(100), owner, {
           counterpartyOnly: true,
           maxAmountEnabled: true,
-          maxAmount: 100000,
+          maxAmount: toFiat(100000),
         }),
-      ).resolves.toMatchObject({ maxAmountEnabled: true, maxAmount: 100000 });
+      ).resolves.toMatchObject({
+        maxAmountEnabled: true,
+        maxAmount: toFiat(100000),
+      });
     });
   });
 
@@ -805,13 +815,13 @@ describe('BankDetailsService', () => {
       await expect(
         service.updateOwn(uuidOf(100), owner, {
           minAmountEnabled: true,
-          minAmount: 500,
+          minAmount: toFiat(500),
         }),
-      ).resolves.toMatchObject({ minAmount: 500 });
+      ).resolves.toMatchObject({ minAmount: toFiat(500) });
     });
 
     it('drops the limit to null when its toggle is switched off', async () => {
-      stored = [card({ minAmountEnabled: true, minAmount: 500 })];
+      stored = [card({ minAmountEnabled: true, minAmount: toFiat(500) })];
 
       await expect(
         service.updateOwn(uuidOf(100), owner, { minAmountEnabled: false }),
@@ -825,19 +835,22 @@ describe('BankDetailsService', () => {
     });
 
     it('keeps a standing limit when an unrelated field is patched', async () => {
-      stored = [card({ maxAmountEnabled: true, maxAmount: 100000 })];
+      stored = [card({ maxAmountEnabled: true, maxAmount: toFiat(100000) })];
 
       await expect(
         service.updateOwn(uuidOf(100), owner, { card: '4400430212345679' }),
-      ).resolves.toMatchObject({ maxAmountEnabled: true, maxAmount: 100000 });
+      ).resolves.toMatchObject({
+        maxAmountEnabled: true,
+        maxAmount: toFiat(100000),
+      });
     });
 
     it('takes a limit on its own once the toggle is already on', async () => {
-      stored = [card({ maxAmountEnabled: true, maxAmount: 100000 })];
+      stored = [card({ maxAmountEnabled: true, maxAmount: toFiat(100000) })];
 
       await expect(
-        service.updateOwn(uuidOf(100), owner, { maxAmount: 250000 }),
-      ).resolves.toMatchObject({ maxAmount: 250000 });
+        service.updateOwn(uuidOf(100), owner, { maxAmount: toFiat(250000) }),
+      ).resolves.toMatchObject({ maxAmount: toFiat(250000) });
     });
 
     it('checks a moved bank exists', async () => {

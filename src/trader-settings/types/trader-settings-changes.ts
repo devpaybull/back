@@ -1,3 +1,5 @@
+import { Crypto } from '../../common/types/crypto';
+
 export interface TraderSettingsChanges {
   tradingEnabled?: boolean;
   payoutTradingEnabled?: boolean;
@@ -8,8 +10,8 @@ export interface TraderSettingsChanges {
   qrBuybackAccess?: boolean;
   userTransferAccess?: boolean;
   trustedUser?: boolean;
-  insurancePayInMin?: number | null;
-  insurancePayOutMin?: number | null;
+  insurancePayInMin?: Crypto | null;
+  insurancePayOutMin?: Crypto | null;
   nightStopEnabled?: boolean;
   nightStopThreshold?: number | null;
 }

@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -40,8 +41,8 @@ describe('AdminTraderSettingsController', () => {
       ensure: jest.fn(),
       findOrDefaults: jest.fn(),
       update: jest.fn(),
-      insurancePayInMinOf: jest.fn(() => 500),
-      insurancePayOutMinOf: jest.fn(() => 300),
+      insurancePayInMinOf: jest.fn(() => toCrypto(500)),
+      insurancePayOutMinOf: jest.fn(() => toCrypto(300)),
       nightStopThresholdOf: jest.fn(() => 2),
     };
     directory = { findById: jest.fn() };
@@ -96,7 +97,7 @@ describe('AdminTraderSettingsController', () => {
       const result = await controller.read(uuidOf(1));
 
       expect(result.insurancePayInMin).toBeNull();
-      expect(result.effectiveInsurancePayInMin).toBe(500);
+      expect(result.effectiveInsurancePayInMin).toBe('500.000000');
     });
 
     it('reports the pay-out minimum and the night stop, personal and effective', async () => {
@@ -111,7 +112,7 @@ describe('AdminTraderSettingsController', () => {
       const result = await controller.read(uuidOf(1));
 
       expect(result.insurancePayOutMin).toBeNull();
-      expect(result.effectiveInsurancePayOutMin).toBe(300);
+      expect(result.effectiveInsurancePayOutMin).toBe('300.000000');
       expect(result.nightStopEnabled).toBe(true);
       expect(result.nightStopThreshold).toBeNull();
       expect(result.effectiveNightStopThreshold).toBe(2);
@@ -119,6 +120,23 @@ describe('AdminTraderSettingsController', () => {
   });
 
   describe('update', () => {
+    it('hands a personal minimum to the service as an exact decimal', async () => {
+      directory.findById.mockResolvedValue(target);
+      settings.update.mockResolvedValue(settingsRow);
+
+      await controller.update(
+        uuidOf(1),
+        { insurancePayInMin: '250.123456' },
+        admin,
+      );
+
+      expect(settings.update).toHaveBeenCalledWith(
+        uuidOf(1),
+        { insurancePayInMin: toCrypto('250.123456') },
+        expect.anything(),
+      );
+    });
+
     it('400 on an empty change set', async () => {
       await expect(
         controller.update(uuidOf(1), {}, admin),

@@ -61,11 +61,13 @@ export class InviteDto {
   rates: BaseMethodRateDto[] | null;
 
   @ApiProperty({
+    type: String,
+    example: '100.000000',
     nullable: true,
     description:
       "Minimum insurance pay-in deposit. Null for non-trader invites. Until the invite is redeemed this is the global value; after redemption, the redeeming account's own value.",
   })
-  insurancePayInMin: number | null;
+  insurancePayInMin: string | null;
 }
 
 export const toInviteDto = (invite: Invite, terms: InviteTerms): InviteDto => ({

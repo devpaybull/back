@@ -10,7 +10,8 @@ import {
 } from 'typeorm';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { Transaction } from './transaction.entity';
 import { Wallet } from './wallet.entity';
 
@@ -41,14 +42,14 @@ export class BalanceOperation {
   @Column({ type: 'uuid', nullable: true })
   transactionId: string;
 
-  @Column(moneyColumn())
-  amount: number;
+  @Column(cryptoColumn())
+  amount: Crypto;
 
-  @Column(moneyColumn())
-  balanceBefore: number;
+  @Column(cryptoColumn())
+  balanceBefore: Crypto;
 
-  @Column(moneyColumn())
-  balanceAfter: number;
+  @Column(cryptoColumn())
+  balanceAfter: Crypto;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

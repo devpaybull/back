@@ -16,6 +16,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -81,7 +82,9 @@ export class AdminDebtsController {
       throw new ForbiddenException(`Cannot act on a ${debtor.role}`);
     }
 
-    return toDebtDto(await this.debts.issue(id, dto.amount, admin.id));
+    return toDebtDto(
+      await this.debts.issue(id, toCrypto(dto.amount), admin.id),
+    );
   }
 
   @Get('debts')
@@ -119,7 +122,13 @@ export class AdminDebtsController {
   ): Promise<DebtDto> {
     assertDebtIdInRange(id);
 
-    return toDebtDto(await this.debts.writeOff(id, dto.amount, admin.id));
+    return toDebtDto(
+      await this.debts.writeOff(
+        id,
+        dto.amount === undefined ? undefined : toCrypto(dto.amount),
+        admin.id,
+      ),
+    );
   }
 
   @Patch('debts/:id')

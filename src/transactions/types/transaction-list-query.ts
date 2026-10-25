@@ -1,3 +1,4 @@
+import { Fiat } from '../../common/types/fiat';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { TransactionKind } from './transaction-kind.enum';
 import { TransactionMethod } from './transaction-method';
@@ -16,8 +17,8 @@ export interface TransactionListQuery {
   merchantId?: string;
   createdFrom?: Date;
   createdTo?: Date;
-  amountFrom?: number;
-  amountTo?: number;
+  amountFrom?: Fiat;
+  amountTo?: Fiat;
   bankDetailsIds?: string[];
   merchantRanks?: ReadonlyMap<string, number>;
 }

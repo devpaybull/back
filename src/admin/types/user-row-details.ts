@@ -5,7 +5,7 @@ import { UserMerchantDto } from '../dto/user-merchant.dto';
 
 export interface UserRowDetails {
   balances: BalancesDto | null;
-  insurancePayInMin: number | null;
+  insurancePayInMin: string | null;
   rates: MethodPercent[] | null;
   leads: TeamMember[] | null;
   subordinates: TeamMember[] | null;

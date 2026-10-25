@@ -32,6 +32,7 @@ import { RateSetDto, toRateSetDto } from '../dto/rate-set.dto';
 import { ReferralDto, ReferralRateSummaryDto } from '../dto/referral.dto';
 import { ReplaceLeadsDto } from '../dto/replace-leads.dto';
 import { canIssueRole } from '../utils/can-issue-role';
+import { toSubjectMethodRates } from '../utils/to-subject-method-rates';
 
 @ApiTags('Admin · Leads')
 @ApiBearerAuth()
@@ -110,12 +111,7 @@ export class AdminLeadsController {
     await this.assertMayEdit(id, admin);
     const links = await this.requirePair(id, leadUserId);
 
-    const entries = dto.methods.map((method) => ({
-      method: method.method,
-      general: method.general ?? null,
-      bands: method.bands ?? [],
-      banks: method.banks ?? [],
-    }));
+    const entries = toSubjectMethodRates(dto);
 
     return toRateSetDto(
       await this.rates.replaceLeadSet(links, entries, {

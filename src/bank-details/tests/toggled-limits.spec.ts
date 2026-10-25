@@ -1,3 +1,4 @@
+import { toFiat } from '../../common/utils/to-fiat';
 import { BankDetailsLimits } from '../types/bank-details-limits';
 import { toggledLimits } from '../utils/toggled-limits';
 
@@ -77,6 +78,12 @@ describe('toggledLimits', () => {
     ).toMatchObject({ dailyLimitEnabled: true, dailyLimit: 0 });
   });
 
+  it('takes a fiat zero as a real amount too', () => {
+    expect(
+      toggledLimits({}, { maxAmountEnabled: true, maxAmount: toFiat(0) }),
+    ).toMatchObject({ maxAmountEnabled: true, maxAmount: toFiat(0) });
+  });
+
   describe('counterpartyOnly forces the minimum', () => {
     it('switches the minimum on and holds no number, since the floor is configured', () => {
       expect(toggledLimits({}, { counterpartyOnly: true })).toMatchObject({
@@ -88,7 +95,7 @@ describe('toggledLimits', () => {
     it('discards a minimum the trader already had', () => {
       expect(
         toggledLimits(
-          { minAmountEnabled: true, minAmount: 700 },
+          { minAmountEnabled: true, minAmount: toFiat(700) },
           { counterpartyOnly: true },
         ),
       ).toMatchObject({ minAmountEnabled: true, minAmount: null });
@@ -113,10 +120,10 @@ describe('toggledLimits', () => {
     it('does not touch a minimum on a row that was never counterparty-only', () => {
       expect(
         toggledLimits(
-          { minAmountEnabled: true, minAmount: 700 },
+          { minAmountEnabled: true, minAmount: toFiat(700) },
           { counterpartyOnly: false },
         ),
-      ).toMatchObject({ minAmountEnabled: true, minAmount: 700 });
+      ).toMatchObject({ minAmountEnabled: true, minAmount: toFiat(700) });
     });
 
     it('leaves the other seven pairs to the ordinary rules', () => {
@@ -126,13 +133,13 @@ describe('toggledLimits', () => {
           {
             counterpartyOnly: true,
             maxAmountEnabled: true,
-            maxAmount: 100000,
+            maxAmount: toFiat(100000),
             dailyLimit: 40,
           },
         ),
       ).toMatchObject({
         maxAmountEnabled: true,
-        maxAmount: 100000,
+        maxAmount: toFiat(100000),
         dailyLimitEnabled: false,
         dailyLimit: null,
       });
@@ -141,15 +148,15 @@ describe('toggledLimits', () => {
 
   it('settles each pair on its own', () => {
     const settled = toggledLimits(
-      { maxAmountEnabled: true, maxAmount: 100000 },
-      { minAmountEnabled: true, minAmount: 500, dailyLimit: 40 },
+      { maxAmountEnabled: true, maxAmount: toFiat(100000) },
+      { minAmountEnabled: true, minAmount: toFiat(500), dailyLimit: 40 },
     );
 
     expect(settled).toMatchObject({
       minAmountEnabled: true,
-      minAmount: 500,
+      minAmount: toFiat(500),
       maxAmountEnabled: true,
-      maxAmount: 100000,
+      maxAmount: toFiat(100000),
       dailyLimitEnabled: false,
       dailyLimit: null,
     });

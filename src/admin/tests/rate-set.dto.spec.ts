@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync, ValidationError } from 'class-validator';
+import { toFiat } from '../../common/utils/to-fiat';
 import { MethodRate } from '../../transactions/entities/method-rate.entity';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
 import { RateSetDto, toRateSetDto } from '../dto/rate-set.dto';
@@ -105,7 +106,11 @@ describe('toRateSetDto', () => {
     expect(
       toRateSetDto([
         row({}),
-        row({ fromAmount: 0, toAmount: 100, payInPercent: 4 }),
+        row({
+          fromAmount: toFiat(0),
+          toAmount: toFiat(100),
+          payInPercent: 4,
+        }),
         row({ bankId: 7, payInPercent: 3 }),
       ]),
     ).toEqual({
@@ -114,7 +119,12 @@ describe('toRateSetDto', () => {
           method: 'sbp',
           general: percent,
           bands: [
-            { fromAmount: 0, toAmount: 100, payInPercent: 4, payOutPercent: 2 },
+            {
+              fromAmount: '0.00',
+              toAmount: '100.00',
+              payInPercent: 4,
+              payOutPercent: 2,
+            },
           ],
           banks: [{ bankId: 7, payInPercent: 3, payOutPercent: 2 }],
         },

@@ -11,9 +11,9 @@ describe('balanceOperationsCsv', () => {
     createdAt: new Date('2026-10-24T12:30:00.000Z'),
     type: BalanceOperationType.Transaction,
     kind: BalanceKind.Main,
-    amount: -12.5,
-    balanceBefore: 100,
-    balanceAfter: 87.5,
+    amount: '-12.500000',
+    balanceBefore: '100.000000',
+    balanceAfter: '87.500000',
     reference: { transactionId: 'tx-1', debtId: null },
     ...overrides,
   });
@@ -24,10 +24,10 @@ describe('balanceOperationsCsv', () => {
     );
   });
 
-  it('writes an ISO date, signed numbers and the reference per row', () => {
+  it('writes an ISO date, signed six-decimal amounts and the reference per row', () => {
     expect(balanceOperationsCsv([row()])).toBe(
       'date,type,kind,amount,balanceBefore,balanceAfter,reference\r\n' +
-        '2026-10-24T12:30:00.000Z,transaction,main,-12.5,100,87.5,transaction:tx-1\r\n',
+        '2026-10-24T12:30:00.000Z,transaction,main,-12.500000,100.000000,87.500000,transaction:tx-1\r\n',
     );
   });
 
@@ -41,7 +41,7 @@ describe('balanceOperationsCsv', () => {
     ]);
 
     expect(csv).toContain(',debt:7\r\n');
-    expect(csv.split('\r\n')[2]).toMatch(/,87\.5,$/);
+    expect(csv.split('\r\n')[2]).toMatch(/,87\.500000,$/);
   });
 
   it('quotes a field with a comma, a quote or a line break, doubling quotes', () => {

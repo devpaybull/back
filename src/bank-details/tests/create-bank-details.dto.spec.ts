@@ -105,25 +105,42 @@ describe('CreateBankDetailsDto', () => {
   });
 
   describe('the amounts and limits', () => {
-    const values = [
+    const amounts = [
       'minAmount',
       'maxAmount',
-      'dailyLimit',
-      'monthlyLimit',
       'dailyAmountLimit',
       'monthlyAmountLimit',
+    ];
+    const counts = [
+      'dailyLimit',
+      'monthlyLimit',
       'maxActiveTransactions',
       'delayBetweenRequests',
     ];
+    const values = [...amounts, ...counts];
 
     const toggles = values.map((field) => `${field}Enabled`);
 
-    it.each(values)('takes %s as an integer', (field) => {
+    it.each(amounts)('takes %s as a fiat string with kopecks', (field) => {
+      expect(failedProperties(body({ [field]: '500.50' }))).toEqual([]);
+      expect(parse(body({ [field]: '500.50' }))[field]).toBe('500.50');
+    });
+
+    it.each(amounts)(
+      'refuses %s as a JSON number, with a third decimal or negative',
+      (field) => {
+        for (const value of [500, '500.505', '-1']) {
+          expect(failedProperties(body({ [field]: value }))).toEqual([field]);
+        }
+      },
+    );
+
+    it.each(counts)('takes %s as an integer', (field) => {
       expect(failedProperties(body({ [field]: 500 }))).toEqual([]);
       expect(parse(body({ [field]: '500' }))[field]).toBe(500);
     });
 
-    it.each(values)('refuses a negative %s', (field) => {
+    it.each(counts)('refuses a negative %s', (field) => {
       expect(failedProperties(body({ [field]: -1 }))).toEqual([field]);
     });
 
@@ -145,7 +162,7 @@ describe('CreateBankDetailsDto', () => {
 
     it('lets a limit through beside a toggle that contradicts it, and leaves the service to null it', () => {
       expect(
-        failedProperties(body({ minAmountEnabled: false, minAmount: 500 })),
+        failedProperties(body({ minAmountEnabled: false, minAmount: '500' })),
       ).toEqual([]);
     });
   });

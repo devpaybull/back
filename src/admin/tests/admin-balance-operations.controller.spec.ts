@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -38,9 +39,9 @@ const operation = (
     type: BalanceOperationType.Transaction,
     balanceKind: BalanceKind.Main,
     transactionId: null,
-    amount: 10,
-    balanceBefore: 0,
-    balanceAfter: 10,
+    amount: toCrypto(10),
+    balanceBefore: toCrypto(0),
+    balanceAfter: toCrypto(10),
     ...overrides,
   }) as BalanceOperation;
 
@@ -137,9 +138,9 @@ describe('AdminBalancesController balance journal', () => {
     expect(page.items[0]).toMatchObject({
       id: 1,
       kind: BalanceKind.Main,
-      amount: 10,
-      balanceBefore: 0,
-      balanceAfter: 10,
+      amount: '10.000000',
+      balanceBefore: '0.000000',
+      balanceAfter: '10.000000',
     });
     expect(page.meta.total).toBe(3);
   });
@@ -277,8 +278,8 @@ describe('balance journal over HTTP', () => {
     );
     expect(response.text).toBe(
       'date,type,kind,amount,balanceBefore,balanceAfter,reference\r\n' +
-        `2026-10-21T10:00:00.000Z,transaction,main,10,0,10,transaction:${uuidOf(50)}\r\n` +
-        '2026-10-22T10:00:00.000Z,debt_issued,main,10,0,10,debt:9\r\n',
+        `2026-10-21T10:00:00.000Z,transaction,main,10.000000,0.000000,10.000000,transaction:${uuidOf(50)}\r\n` +
+        '2026-10-22T10:00:00.000Z,debt_issued,main,10.000000,0.000000,10.000000,debt:9\r\n',
     );
   });
 

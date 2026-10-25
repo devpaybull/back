@@ -4,6 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In } from 'typeorm';
+import { Crypto } from '../../common/types/crypto';
+import { toCrypto } from '../../common/utils/to-crypto';
+import { toRate } from '../../common/utils/to-rate';
+import { toFiat } from '../../common/utils/to-fiat';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
@@ -60,7 +64,7 @@ const build = () => {
     ),
   };
   const wallets = {
-    reserveMainEscrowWithin: jest.fn<Promise<void>, [unknown, string, number]>(
+    reserveMainEscrowWithin: jest.fn<Promise<void>, [unknown, string, Crypto]>(
       async () => undefined,
     ),
     lockWalletsWithin: jest.fn(async () => undefined),
@@ -116,8 +120,8 @@ const input = (overrides: Partial<CreateDealInput> = {}): CreateDealInput =>
     traderUserId: TRADER,
     bankDetailsId: uuidOf(2),
     merchantId: uuidOf(3),
-    amountFiat: 10000,
-    rate: 100,
+    amountFiat: toFiat(10000),
+    rate: toRate(100),
     merchantPercent: 10,
     traderPercent: 7,
     ...overrides,
@@ -135,6 +139,23 @@ describe('TransactionService.createDeal', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a fiat amount with a third decimal', { amountFiat: toFiat('100.005') }],
+    ['a rate with a seventh decimal', { rate: toRate('88.9200001') }],
+  ])(
+    'refuses %s before pricing anything, rather than storing a rounded figure',
+    async (_case, overrides) => {
+      const { service, wallets, dataSource, team } = build();
+
+      await expect(service.createDeal(input(overrides))).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(team.assignmentsOf).not.toHaveBeenCalled();
+      expect(wallets.reserveMainEscrowWithin).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it('stores the method code of a registered method as it was given', async () => {
     const { service } = build();
 
@@ -148,13 +169,13 @@ describe('TransactionService.createDeal', () => {
   it('resolves the lead rates from the trader’s assignments, not from the caller', async () => {
     const { service, rates, team, links } = build();
 
-    await service.createDeal(input({ amountFiat: 2500, bankId: 4 }));
+    await service.createDeal(input({ amountFiat: toFiat(2500), bankId: 4 }));
 
     expect(team.assignmentsOf).toHaveBeenCalledWith(TRADER);
     expect(rates.resolveLeadPercents).toHaveBeenCalledWith({
       links,
       method: 'sbp',
-      amount: 2500,
+      amount: toFiat(2500),
       bankId: 4,
       direction: 'payIn',
     });
@@ -181,12 +202,12 @@ describe('TransactionService.createDeal', () => {
     expect(created.traderPercent).toBe(7);
     expect(created.traderEffectivePercent).toBe(6.5);
     expect(created.leadPercent).toBe(2.5);
-    expect(created.leadCommission).toBe(2.5);
+    expect(created.leadCommission).toEqual(toCrypto(2.5));
     expect(manager.create).toHaveBeenCalledWith(TransactionLeadShare, {
       transactionId: uuidOf(50),
       leadUserId: LEAD_A,
       percent: 2.5,
-      amount: 2.5,
+      amount: toCrypto(2.5),
     });
   });
 
@@ -204,12 +225,17 @@ describe('TransactionService.createDeal', () => {
       .map(([, data]) => data);
 
     expect(shares).toEqual([
-      { transactionId: uuidOf(50), leadUserId: LEAD_A, percent: 1, amount: 1 },
+      {
+        transactionId: uuidOf(50),
+        leadUserId: LEAD_A,
+        percent: 1,
+        amount: toCrypto(1),
+      },
       {
         transactionId: uuidOf(50),
         leadUserId: LEAD_B,
         percent: 0.5,
-        amount: 0.5,
+        amount: toCrypto(0.5),
       },
     ]);
     expect(created.leadPercent).toBe(1.5);
@@ -283,15 +309,15 @@ describe('TransactionService.createDeal', () => {
     expect(wallets.reserveMainEscrowWithin).toHaveBeenCalledWith(
       manager,
       TRADER,
-      93.897,
+      toCrypto('93.896714'),
     );
   });
 
   const withRollback = (built: ReturnType<typeof build>) => {
-    const wallet = { mainReserved: 0 };
+    const wallet = { mainReserved: toCrypto(0) };
     built.wallets.reserveMainEscrowWithin.mockImplementation(
-      async (_manager: unknown, _userId: string, amount: number) => {
-        wallet.mainReserved += amount;
+      async (_manager: unknown, _userId: string, amount: Crypto) => {
+        wallet.mainReserved = toCrypto(wallet.mainReserved.plus(amount));
       },
     );
     built.dataSource.transaction.mockImplementation(async (work) => {
@@ -316,7 +342,7 @@ describe('TransactionService.createDeal', () => {
     await built.service.createDeal(input());
 
     expect(built.dataSource.transaction).toHaveBeenCalledTimes(1);
-    expect(wallet.mainReserved).toBe(93.897);
+    expect(wallet.mainReserved).toEqual(toCrypto('93.896714'));
     expect(
       built.wallets.reserveMainEscrowWithin.mock.invocationCallOrder[0],
     ).toBeLessThan(built.manager.save.mock.invocationCallOrder[0]);
@@ -331,7 +357,7 @@ describe('TransactionService.createDeal', () => {
       'insert failed',
     );
     expect(built.wallets.reserveMainEscrowWithin).toHaveBeenCalledTimes(1);
-    expect(wallet.mainReserved).toBe(0);
+    expect(wallet.mainReserved).toEqual(toCrypto(0));
   });
 
   it('reserves nothing for a pay-out', async () => {
@@ -350,7 +376,7 @@ describe('TransactionService.transition, settling lead shares', () => {
       kind: TransactionKind.PayIn,
       status: TransactionStatus.Active,
       traderUserId: TRADER,
-      traderAmount: 93.897,
+      traderAmount: toCrypto(93.897),
       ...overrides,
     }) as Transaction;
 
@@ -359,7 +385,7 @@ describe('TransactionService.transition, settling lead shares', () => {
       transactionId: uuidOf(50),
       leadUserId,
       percent: amount,
-      amount,
+      amount: toCrypto(amount),
     }) as TransactionLeadShare;
 
   const settle = async (
@@ -402,13 +428,13 @@ describe('TransactionService.transition, settling lead shares', () => {
       expect(wallets.creditLeadShareWithin).toHaveBeenCalledWith(
         manager,
         LEAD_A,
-        2.5,
+        toCrypto(2.5),
         uuidOf(50),
       );
       expect(wallets.creditLeadShareWithin).toHaveBeenCalledWith(
         manager,
         LEAD_B,
-        1,
+        toCrypto(1),
         uuidOf(50),
       );
       expect(wallets.debitMainWithin).toHaveBeenCalled();
@@ -567,7 +593,7 @@ describe('TransactionService.transition, the deadline', () => {
       kind: TransactionKind.PayIn,
       status,
       traderUserId: TRADER,
-      traderAmount: 10,
+      traderAmount: toCrypto(10),
       createdAt: new Date('2026-10-24T12:00:00.000Z'),
       expiresAt: EXPIRES_AT,
     }) as Transaction;
@@ -631,7 +657,7 @@ describe('TransactionService.transitionLocked', () => {
       kind: TransactionKind.PayIn,
       status: TransactionStatus.Active,
       traderUserId: TRADER,
-      traderAmount: 93.897,
+      traderAmount: toCrypto(93.897),
       ...overrides,
     }) as Transaction;
 
@@ -656,7 +682,7 @@ describe('TransactionService.transitionLocked', () => {
     expect(built.wallets.releaseEscrowWithin).toHaveBeenCalledWith(
       built.manager,
       TRADER,
-      93.897,
+      toCrypto(93.897),
     );
     expect(built.saved).toContainEqual(
       expect.objectContaining({
@@ -731,7 +757,10 @@ describe('TransactionService.list', () => {
     const { service, repository, rows } = buildList();
 
     const page = await service.list(
-      query({ amountFrom: 100, sortBy: TransactionSortField.AmountFiat }),
+      query({
+        amountFrom: toFiat(100),
+        sortBy: TransactionSortField.AmountFiat,
+      }),
     );
 
     expect(repository.findAndCount).toHaveBeenCalledWith({
@@ -824,5 +853,37 @@ describe('TransactionService.list', () => {
       merchantRankIds: [],
       merchantRankValues: [],
     });
+  });
+});
+
+describe('TransactionService.createInternalTransfer, the audit row', () => {
+  it('records the amount as a six-decimal string, not as a decimal object', async () => {
+    const built = build();
+    const audit = { record: jest.fn(async () => undefined) };
+    const service = new TransactionService(
+      built.dataSource as never,
+      {} as never,
+      { transferWithin: jest.fn(async () => undefined) } as never,
+      audit as never,
+      built.rates as never,
+      built.team as never,
+      built.config as never,
+    );
+
+    await service.createInternalTransfer({
+      fromUserId: TRADER,
+      toUserId: LEAD_A,
+      amount: toCrypto('12.5'),
+      source: StatusEventSource.Admin,
+      actorUserId: uuidOf(9),
+    });
+
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'user.transfer',
+        metadata: expect.objectContaining({ amount: '12.500000' }),
+      }),
+      built.manager,
+    );
   });
 });

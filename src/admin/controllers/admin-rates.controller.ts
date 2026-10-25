@@ -32,6 +32,7 @@ import {
   TransactionMethodDto,
 } from '../dto/transaction-method.dto';
 import { canIssueRole } from '../utils/can-issue-role';
+import { toSubjectMethodRates } from '../utils/to-subject-method-rates';
 
 const scopeOfUser = (user: User): RateScope => {
   if (user.role === Role.Trader) return RateScope.Trader;
@@ -119,12 +120,7 @@ export class AdminRatesController {
       throw new ForbiddenException(`Cannot edit a ${user.role}`);
     }
 
-    const entries = dto.methods.map((method) => ({
-      method: method.method,
-      general: method.general ?? null,
-      bands: method.bands ?? [],
-      banks: method.banks ?? [],
-    }));
+    const entries = toSubjectMethodRates(dto);
 
     return toRateSetDto(
       await this.rates.replaceSubjectSet(scopeOfUser(user), id, entries, {

@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { toFiat } from '../../common/utils/to-fiat';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
@@ -211,7 +212,11 @@ describe('AdminLeadsController', () => {
       ]);
       rates.getLeadSet.mockResolvedValue([
         detail({}),
-        detail({ fromAmount: 1000, toAmount: 5000, payInPercent: 0.8 }),
+        detail({
+          fromAmount: toFiat(1000),
+          toAmount: toFiat(5000),
+          payInPercent: 0.8,
+        }),
       ]);
 
       const set = await controller.readLeadRates(TRADER, LEAD);
@@ -225,8 +230,8 @@ describe('AdminLeadsController', () => {
             general: { payInPercent: 1, payOutPercent: 0.2 },
             bands: [
               {
-                fromAmount: 1000,
-                toAmount: 5000,
+                fromAmount: '1000.00',
+                toAmount: '5000.00',
                 payInPercent: 0.8,
                 payOutPercent: 0.2,
               },
@@ -302,7 +307,11 @@ describe('AdminLeadsController', () => {
       ]);
       rates.getLeadSet.mockResolvedValue([
         detail({ payInPercent: 0, payOutPercent: 2 }),
-        detail({ fromAmount: 1, toAmount: 2, payInPercent: 14 }),
+        detail({
+          fromAmount: toFiat(1),
+          toAmount: toFiat(2),
+          payInPercent: 14,
+        }),
       ]);
 
       const referrals = await controller.referrals(LEAD);

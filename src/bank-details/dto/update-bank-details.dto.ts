@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 
 const MAX_CARDHOLDER_NAME_LENGTH = 100;
@@ -81,14 +82,13 @@ export class UpdateBankDetailsDto {
   minAmountEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 500,
+    type: String,
+    example: '500.00',
     description: 'Ignored and stored as null unless minAmountEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  minAmount?: number;
+  @IsFiatAmount()
+  minAmount?: string;
 
   @ApiPropertyOptional({
     description: 'Caps the largest amount an order may ask for',
@@ -98,14 +98,13 @@ export class UpdateBankDetailsDto {
   maxAmountEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 100000,
+    type: String,
+    example: '100000.00',
     description: 'Ignored and stored as null unless maxAmountEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  maxAmount?: number;
+  @IsFiatAmount()
+  maxAmount?: string;
 
   @ApiPropertyOptional({
     description: 'Caps how many orders a day these details may take',
@@ -149,14 +148,13 @@ export class UpdateBankDetailsDto {
   dailyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 300000,
+    type: String,
+    example: '300000.00',
     description: 'Turnover a day; null unless dailyAmountLimitEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  dailyAmountLimit?: number;
+  @IsFiatAmount()
+  dailyAmountLimit?: string;
 
   @ApiPropertyOptional({
     description: 'Caps the turnover these details may take in a month',
@@ -166,15 +164,14 @@ export class UpdateBankDetailsDto {
   monthlyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 5000000,
+    type: String,
+    example: '5000000.00',
     description:
       'Turnover a month; null unless monthlyAmountLimitEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  monthlyAmountLimit?: number;
+  @IsFiatAmount()
+  monthlyAmountLimit?: string;
 
   @ApiPropertyOptional({
     description: 'Caps how many deals may be open at once',

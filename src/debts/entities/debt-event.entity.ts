@@ -8,7 +8,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { User } from '../../users/entities/user.entity';
 import { DebtEventType } from '../types/debt-event-type.enum';
@@ -30,8 +31,8 @@ export class DebtEvent {
   @Column({ type: 'enum', enum: DebtEventType })
   type: DebtEventType;
 
-  @Column(moneyColumn())
-  amount: number;
+  @Column(cryptoColumn())
+  amount: Crypto;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'actorUserId' })

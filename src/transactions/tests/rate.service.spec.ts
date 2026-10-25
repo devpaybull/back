@@ -2,9 +2,12 @@ import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { FindOperator } from 'typeorm';
+import { Fiat } from '../../common/types/fiat';
+import { toRate } from '../../common/utils/to-rate';
+import { toFiat } from '../../common/utils/to-fiat';
 import { AuditService } from '../../audit/services/audit.service';
 import { BanksService } from '../../banks/banks.service';
-import { FindOperator } from 'typeorm';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { LeadRate } from '../entities/lead-rate.entity';
@@ -279,7 +282,9 @@ describe('RateService rate sets', () => {
         replace([
           entry({
             method: BY_BANK,
-            bands: [{ fromAmount: 0, toAmount: 100, ...percent }],
+            bands: [
+              { fromAmount: toFiat(0), toAmount: toFiat(100), ...percent },
+            ],
           }),
         ]),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -291,8 +296,8 @@ describe('RateService rate sets', () => {
         replace([
           entry({
             bands: [
-              { fromAmount: 0, toAmount: 100, ...percent },
-              { fromAmount: 100, toAmount: 200, ...percent },
+              { fromAmount: toFiat(0), toAmount: toFiat(100), ...percent },
+              { fromAmount: toFiat(100), toAmount: toFiat(200), ...percent },
             ],
           }),
         ]),
@@ -303,8 +308,8 @@ describe('RateService rate sets', () => {
       await replace([
         entry({
           bands: [
-            { fromAmount: 0, toAmount: 100, ...percent },
-            { fromAmount: 500, toAmount: 900, ...percent },
+            { fromAmount: toFiat(0), toAmount: toFiat(100), ...percent },
+            { fromAmount: toFiat(500), toAmount: toFiat(900), ...percent },
           ],
         }),
       ]);
@@ -389,11 +394,17 @@ describe('RateService rate sets', () => {
 
     it('stores bands without a bank for a method priced by amount', async () => {
       await replace([
-        entry({ bands: [{ fromAmount: 0, toAmount: 100, ...percent }] }),
+        entry({
+          bands: [{ fromAmount: toFiat(0), toAmount: toFiat(100), ...percent }],
+        }),
       ]);
 
       expect(savedRows()[1]).toEqual(
-        expect.objectContaining({ fromAmount: 0, toAmount: 100, bankId: null }),
+        expect.objectContaining({
+          fromAmount: toFiat(0),
+          toAmount: toFiat(100),
+          bankId: null,
+        }),
       );
     });
 
@@ -492,8 +503,8 @@ describe('RateService rate sets', () => {
           entry({
             bands: [
               {
-                fromAmount: 1000,
-                toAmount: 5000,
+                fromAmount: toFiat(1000),
+                toAmount: toFiat(5000),
                 payInPercent: 1,
                 payOutPercent: 0.2,
               },
@@ -517,8 +528,8 @@ describe('RateService rate sets', () => {
         }),
         expect.objectContaining({
           traderLeadId: 70,
-          fromAmount: 1000,
-          toAmount: 5000,
+          fromAmount: toFiat(1000),
+          toAmount: toFiat(5000),
           payInPercent: 1,
           payOutPercent: 0.2,
         }),
@@ -570,15 +581,15 @@ describe('RateService rate sets', () => {
         'bands on a method priced by bank',
         entry({
           method: BY_BANK,
-          bands: [{ fromAmount: 0, toAmount: 1, ...percent }],
+          bands: [{ fromAmount: toFiat(0), toAmount: toFiat(1), ...percent }],
         }),
       ],
       [
         'overlapping bands',
         entry({
           bands: [
-            { fromAmount: 0, toAmount: 100, ...percent },
-            { fromAmount: 50, toAmount: 200, ...percent },
+            { fromAmount: toFiat(0), toAmount: toFiat(100), ...percent },
+            { fromAmount: toFiat(50), toAmount: toFiat(200), ...percent },
           ],
         }),
       ],
@@ -599,8 +610,8 @@ describe('RateService rate sets', () => {
         [
           entry({
             bands: [
-              { fromAmount: 0, toAmount: 100, ...percent },
-              { fromAmount: 500, toAmount: 900, ...percent },
+              { fromAmount: toFiat(0), toAmount: toFiat(100), ...percent },
+              { fromAmount: toFiat(500), toAmount: toFiat(900), ...percent },
             ],
           }),
         ],
@@ -649,7 +660,7 @@ describe('RateService rate sets', () => {
     const resolve = (
       method: TransactionMethod,
       overrides: {
-        amount?: number;
+        amount?: Fiat;
         bankId?: number | null;
         direction?: 'payIn' | 'payOut';
       } = {},
@@ -658,7 +669,7 @@ describe('RateService rate sets', () => {
       service.resolveLeadPercents({
         links,
         method,
-        amount: overrides.amount ?? 2000,
+        amount: overrides.amount ?? toFiat(2000),
         bankId: overrides.bankId ?? null,
         direction: overrides.direction ?? 'payIn',
       });
@@ -666,7 +677,11 @@ describe('RateService rate sets', () => {
     it('takes the band containing the amount first', async () => {
       leadRepository.find.mockResolvedValue([
         detail({}),
-        detail({ fromAmount: 1000, toAmount: 5000, payInPercent: 1.5 }),
+        detail({
+          fromAmount: toFiat(1000),
+          toAmount: toFiat(5000),
+          payInPercent: 1.5,
+        }),
       ]);
 
       await expect(resolve('sbp')).resolves.toEqual([
@@ -677,10 +692,14 @@ describe('RateService rate sets', () => {
     it('falls back to the method general rate outside every band', async () => {
       leadRepository.find.mockResolvedValue([
         detail({}),
-        detail({ fromAmount: 1000, toAmount: 5000, payInPercent: 1.5 }),
+        detail({
+          fromAmount: toFiat(1000),
+          toAmount: toFiat(5000),
+          payInPercent: 1.5,
+        }),
       ]);
 
-      await expect(resolve('sbp', { amount: 9000 })).resolves.toEqual([
+      await expect(resolve('sbp', { amount: toFiat(9000) })).resolves.toEqual([
         { leadUserId: uuidOf(2), percent: 2 },
       ]);
     });
@@ -859,7 +878,7 @@ describe('RateService rate sets', () => {
       service.resolveMethodPercent({
         scope: RateScope.Trader,
         method,
-        amount: 2000,
+        amount: toFiat(2000),
         bankId,
         direction: 'payIn',
         individualEnabled: true,
@@ -899,7 +918,11 @@ describe('RateService rate sets', () => {
       repository.find.mockResolvedValue([
         rate({}, null),
         rate({ payInPercent: 8 }),
-        rate({ fromAmount: 1000, toAmount: 5000, payInPercent: 4 }),
+        rate({
+          fromAmount: toFiat(1000),
+          toAmount: toFiat(5000),
+          payInPercent: 4,
+        }),
       ]);
 
       await expect(query('sbp', null)).resolves.toBe(4);
@@ -911,5 +934,21 @@ describe('RateService rate sets', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(repository.find).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('RateService.getBaseRate', () => {
+  it('applies the markup to the Rapira rate exactly, to six decimals', async () => {
+    const service = new RateService(
+      {} as never,
+      {} as never,
+      {} as never,
+      { getFiatPerUsdt: jest.fn(async () => toRate('88.92')) } as never,
+      { get: jest.fn(() => 0.01) } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(service.getBaseRate()).resolves.toEqual(toRate('89.8092'));
   });
 });

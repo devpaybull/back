@@ -29,6 +29,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { DebtsService } from '../../debts/services/debts.service';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { TransactionService } from '../../transactions/services/transaction.service';
@@ -182,7 +183,7 @@ export class AdminBalancesController {
     const transaction = await this.transactions.createInternalTransfer({
       fromUserId: id,
       toUserId: recipient.id,
-      amount: dto.amount,
+      amount: toCrypto(dto.amount),
       source: StatusEventSource.Admin,
       actorUserId: admin.id,
       comment: dto.comment,

@@ -4,6 +4,9 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/services/audit.service';
 import { ActivityAction } from '../audit/types/activity-action.enum';
+import { Crypto } from '../common/types/crypto';
+import { formatCrypto } from '../common/utils/format-crypto';
+import { toCrypto } from '../common/utils/to-crypto';
 import { TraderSettings } from './entities/trader-settings.entity';
 import {
   TraderSettingsAudit,
@@ -59,27 +62,27 @@ export class TraderSettingsService {
     return this.settings.find({ where: { userId: In(userIds) } });
   }
 
-  insurancePayInMinOf(settings: TraderSettings | null | undefined): number {
+  insurancePayInMinOf(settings: TraderSettings | null | undefined): Crypto {
     return (
       settings?.insurancePayInMin ??
-      this.config.get<number>('INSURANCE_PAY_IN_MIN', 0)
+      toCrypto(this.config.get<string>('INSURANCE_PAY_IN_MIN', '0'))
     );
   }
 
-  async effectiveInsurancePayInMin(userId: string): Promise<number> {
+  async effectiveInsurancePayInMin(userId: string): Promise<Crypto> {
     return this.insurancePayInMinOf(
       await this.settings.findOne({ where: { userId } }),
     );
   }
 
-  insurancePayOutMinOf(settings: TraderSettings | null | undefined): number {
+  insurancePayOutMinOf(settings: TraderSettings | null | undefined): Crypto {
     return (
       settings?.insurancePayOutMin ??
-      this.config.getOrThrow<number>('INSURANCE_PAY_OUT_MIN')
+      toCrypto(this.config.getOrThrow<string>('INSURANCE_PAY_OUT_MIN'))
     );
   }
 
-  async effectiveInsurancePayOutMin(userId: string): Promise<number> {
+  async effectiveInsurancePayOutMin(userId: string): Promise<Crypto> {
     return this.insurancePayOutMinOf(
       await this.settings.findOne({ where: { userId } }),
     );
@@ -159,7 +162,15 @@ export class TraderSettingsService {
             ? 'trader_settings.auto_buyback_changed'
             : 'trader_settings.updated',
           reason: audit.reason,
-          metadata: { ...changes },
+          metadata: {
+            ...changes,
+            ...(changes.insurancePayInMin !== undefined && {
+              insurancePayInMin: formatCrypto(changes.insurancePayInMin),
+            }),
+            ...(changes.insurancePayOutMin !== undefined && {
+              insurancePayOutMin: formatCrypto(changes.insurancePayOutMin),
+            }),
+          },
         },
         manager,
       );

@@ -19,11 +19,13 @@ import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { AuthenticatedUser } from '../../common/types/token';
+import { toCrypto } from '../../common/utils/to-crypto';
 import {
   TraderSettingsDto,
   toTraderSettingsDto,
 } from '../../trader-settings/dto/trader-settings.dto';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
+import { TraderSettingsChanges } from '../../trader-settings/types/trader-settings-changes';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UpdateTraderSettingsDto } from '../dto/update-trader-settings.dto';
 import { canIssueRole } from '../utils/can-issue-role';
@@ -67,7 +69,18 @@ export class AdminTraderSettingsController {
     @Body() dto: UpdateTraderSettingsDto,
     @CurrentUser() admin: AuthenticatedUser,
   ): Promise<TraderSettingsDto> {
-    const { reason, ...changes } = dto;
+    const { reason, insurancePayInMin, insurancePayOutMin, ...flags } = dto;
+    const toMinimum = (value: string | null) =>
+      value === null ? null : toCrypto(value);
+    const changes: TraderSettingsChanges = {
+      ...flags,
+      ...(insurancePayInMin !== undefined && {
+        insurancePayInMin: toMinimum(insurancePayInMin),
+      }),
+      ...(insurancePayOutMin !== undefined && {
+        insurancePayOutMin: toMinimum(insurancePayOutMin),
+      }),
+    };
 
     if (Object.keys(changes).length === 0) {
       throw new BadRequestException('No changes were given');

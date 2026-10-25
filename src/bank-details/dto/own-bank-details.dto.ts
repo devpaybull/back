@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { Fiat } from '../../common/types/fiat';
+import { formatFiat } from '../../common/utils/format-fiat';
 import { DeviceStatus } from '../../devices/types/device-status.enum';
 import { BankDetails } from '../entities/bank-details.entity';
 
@@ -59,17 +61,19 @@ export class OwnBankDetailsDto {
   minAmountEnabled: boolean;
 
   @ApiPropertyOptional({
+    type: String,
+    example: '500.00',
     nullable: true,
     description:
       'While counterpartyOnly is set this is the configured floor, not a stored value',
   })
-  minAmount: number;
+  minAmount: string;
 
   @ApiProperty()
   maxAmountEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true })
-  maxAmount: number;
+  @ApiPropertyOptional({ type: String, example: '100000.00', nullable: true })
+  maxAmount: string;
 
   @ApiProperty()
   dailyLimitEnabled: boolean;
@@ -86,14 +90,24 @@ export class OwnBankDetailsDto {
   @ApiProperty()
   dailyAmountLimitEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Turnover a day' })
-  dailyAmountLimit: number;
+  @ApiPropertyOptional({
+    type: String,
+    example: '300000.00',
+    nullable: true,
+    description: 'Turnover a day',
+  })
+  dailyAmountLimit: string;
 
   @ApiProperty()
   monthlyAmountLimitEnabled: boolean;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Turnover a month' })
-  monthlyAmountLimit: number;
+  @ApiPropertyOptional({
+    type: String,
+    example: '5000000.00',
+    nullable: true,
+    description: 'Turnover a month',
+  })
+  monthlyAmountLimit: string;
 
   @ApiProperty()
   maxActiveTransactionsEnabled: boolean;
@@ -128,7 +142,7 @@ export class OwnBankDetailsDto {
 
 export const toOwnBankDetailsDto = (
   details: BankDetails,
-  counterpartyMinAmount: number,
+  counterpartyMinAmount: Fiat,
 ): OwnBankDetailsDto => ({
   id: details.id,
   bankId: details.bankId,
@@ -154,19 +168,19 @@ export const toOwnBankDetailsDto = (
   minAmountEnabled: details.counterpartyOnly
     ? true
     : Boolean(details.minAmountEnabled),
-  minAmount: details.counterpartyOnly
-    ? counterpartyMinAmount
-    : (details.minAmount ?? null),
+  minAmount: formatFiat(
+    details.counterpartyOnly ? counterpartyMinAmount : details.minAmount,
+  ),
   maxAmountEnabled: Boolean(details.maxAmountEnabled),
-  maxAmount: details.maxAmount ?? null,
+  maxAmount: formatFiat(details.maxAmount),
   dailyLimitEnabled: Boolean(details.dailyLimitEnabled),
   dailyLimit: details.dailyLimit ?? null,
   monthlyLimitEnabled: Boolean(details.monthlyLimitEnabled),
   monthlyLimit: details.monthlyLimit ?? null,
   dailyAmountLimitEnabled: Boolean(details.dailyAmountLimitEnabled),
-  dailyAmountLimit: details.dailyAmountLimit ?? null,
+  dailyAmountLimit: formatFiat(details.dailyAmountLimit),
   monthlyAmountLimitEnabled: Boolean(details.monthlyAmountLimitEnabled),
-  monthlyAmountLimit: details.monthlyAmountLimit ?? null,
+  monthlyAmountLimit: formatFiat(details.monthlyAmountLimit),
   maxActiveTransactionsEnabled: Boolean(details.maxActiveTransactionsEnabled),
   maxActiveTransactions: details.maxActiveTransactions ?? null,
   delayBetweenRequestsEnabled: Boolean(details.delayBetweenRequestsEnabled),

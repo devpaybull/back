@@ -1,9 +1,12 @@
+import Decimal from 'decimal.js';
 import { Injectable } from '@nestjs/common';
+import { formatCrypto } from '../common/utils/format-crypto';
+import { formatFiat } from '../common/utils/format-fiat';
+import { toDecimal } from '../common/utils/to-decimal';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransactionService } from '../transactions/services/transaction.service';
 import { TransactionKind } from '../transactions/types/transaction-kind.enum';
 import { TransactionStatus } from '../transactions/types/transaction-status.enum';
-import { roundMoney } from '../transactions/utils/round-money';
 import {
   DealsAnalyticsDto,
   PayInAnalyticsDto,
@@ -31,9 +34,9 @@ const percent = (numerator: number, denominator: number): number =>
 
 const sumOf = (
   rows: Transaction[],
-  select: (row: Transaction) => number,
-): number =>
-  roundMoney(rows.reduce((total, row) => total + (select(row) ?? 0), 0));
+  select: (row: Transaction) => Decimal | null,
+): Decimal =>
+  rows.reduce((total, row) => total.plus(select(row) ?? 0), toDecimal(0));
 
 @Injectable()
 export class AnalyticsService {
@@ -96,13 +99,11 @@ export class AnalyticsService {
         date,
         payInCount: day.filter(isPayIn).length,
         payOutCount: day.filter(isPayOut).length,
-        payInAmount: sumOf(
-          successful.filter(isPayIn),
-          (row) => row.amountCrypto,
+        payInAmount: formatCrypto(
+          sumOf(successful.filter(isPayIn), (row) => row.amountCrypto),
         ),
-        payOutAmount: sumOf(
-          successful.filter(isPayOut),
-          (row) => row.amountCrypto,
+        payOutAmount: formatCrypto(
+          sumOf(successful.filter(isPayOut), (row) => row.amountCrypto),
         ),
       };
     });
@@ -119,11 +120,19 @@ export class AnalyticsService {
       payOutCount: rows.filter(isPayOut).length,
       series,
       summary: {
-        cryptoSent: sumOf(successfulPayIn, (row) => row.amountCrypto),
-        cryptoReceived: sumOf(successfulPayOut, (row) => row.amountCrypto),
-        fiatReceived: sumOf(successfulPayIn, (row) => row.amountFiat),
-        fiatSent: sumOf(successfulPayOut, (row) => row.amountFiat),
-        profit: sumOf(rows.filter(isSuccess), (row) => row.traderCommission),
+        cryptoSent: formatCrypto(
+          sumOf(successfulPayIn, (row) => row.amountCrypto),
+        ),
+        cryptoReceived: formatCrypto(
+          sumOf(successfulPayOut, (row) => row.amountCrypto),
+        ),
+        fiatReceived: formatFiat(
+          sumOf(successfulPayIn, (row) => row.amountFiat),
+        ),
+        fiatSent: formatFiat(sumOf(successfulPayOut, (row) => row.amountFiat)),
+        profit: formatCrypto(
+          sumOf(rows.filter(isSuccess), (row) => row.traderCommission),
+        ),
       },
     };
   }

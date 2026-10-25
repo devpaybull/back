@@ -1,4 +1,5 @@
 import { getMetadataArgsStorage } from 'typeorm';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TraderSettings } from '../entities/trader-settings.entity';
@@ -288,27 +289,27 @@ describe('TraderSettingsService', () => {
 
       const result = await service.update(
         uuidOf(1),
-        { insurancePayInMin: 1000 },
+        { insurancePayInMin: toCrypto(1000) },
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayInMin).toBe(1000);
+      expect(result.insurancePayInMin).toEqual(toCrypto(1000));
     });
 
     it('keeps a zero minimum because it is a real value', async () => {
-      build(base({ insurancePayInMin: 700 }));
+      build(base({ insurancePayInMin: toCrypto(700) }));
 
       const result = await service.update(
         uuidOf(1),
-        { insurancePayInMin: 0 },
+        { insurancePayInMin: toCrypto(0) },
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayInMin).toBe(0);
+      expect(result.insurancePayInMin).toEqual(toCrypto(0));
     });
 
     it('resets to the global default on an explicit null', async () => {
-      build(base({ insurancePayInMin: 700 }));
+      build(base({ insurancePayInMin: toCrypto(700) }));
 
       const result = await service.update(
         uuidOf(1),
@@ -320,7 +321,7 @@ describe('TraderSettingsService', () => {
     });
 
     it('leaves the minimum alone when it is not given', async () => {
-      build(base({ insurancePayInMin: 700 }));
+      build(base({ insurancePayInMin: toCrypto(700) }));
 
       const result = await service.update(
         uuidOf(1),
@@ -328,7 +329,7 @@ describe('TraderSettingsService', () => {
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayInMin).toBe(700);
+      expect(result.insurancePayInMin).toEqual(toCrypto(700));
     });
   });
 
@@ -454,23 +455,27 @@ describe('TraderSettingsService', () => {
 
     it('prefers the personal value', () => {
       expect(
-        service.insurancePayInMinOf(base({ insurancePayInMin: 1000 })),
-      ).toBe(1000);
+        service.insurancePayInMinOf(
+          base({ insurancePayInMin: toCrypto(1000) }),
+        ),
+      ).toEqual(toCrypto(1000));
     });
 
     it('honours a personal zero', () => {
-      expect(service.insurancePayInMinOf(base({ insurancePayInMin: 0 }))).toBe(
-        0,
-      );
+      expect(
+        service.insurancePayInMinOf(base({ insurancePayInMin: toCrypto(0) })),
+      ).toEqual(toCrypto(0));
     });
 
     it('falls back to the global value without a personal one', () => {
-      expect(service.insurancePayInMinOf(base())).toBe(GLOBAL_MIN);
+      expect(service.insurancePayInMinOf(base())).toEqual(toCrypto(GLOBAL_MIN));
     });
 
     it('falls back to the global value without a row', () => {
-      expect(service.insurancePayInMinOf(null)).toBe(GLOBAL_MIN);
-      expect(service.insurancePayInMinOf(undefined)).toBe(GLOBAL_MIN);
+      expect(service.insurancePayInMinOf(null)).toEqual(toCrypto(GLOBAL_MIN));
+      expect(service.insurancePayInMinOf(undefined)).toEqual(
+        toCrypto(GLOBAL_MIN),
+      );
     });
   });
 
@@ -478,19 +483,21 @@ describe('TraderSettingsService', () => {
     beforeEach(() => build(base()));
 
     it('reads the personal value from the row', async () => {
-      repository.findOne.mockResolvedValue(base({ insurancePayInMin: 250 }));
-
-      await expect(service.effectiveInsurancePayInMin(uuidOf(1))).resolves.toBe(
-        250,
+      repository.findOne.mockResolvedValue(
+        base({ insurancePayInMin: toCrypto(250) }),
       );
+
+      await expect(
+        service.effectiveInsurancePayInMin(uuidOf(1)),
+      ).resolves.toEqual(toCrypto(250));
     });
 
     it('uses the global value when there is no row', async () => {
       repository.findOne.mockResolvedValue(null);
 
-      await expect(service.effectiveInsurancePayInMin(uuidOf(1))).resolves.toBe(
-        GLOBAL_MIN,
-      );
+      await expect(
+        service.effectiveInsurancePayInMin(uuidOf(1)),
+      ).resolves.toEqual(toCrypto(GLOBAL_MIN));
     });
   });
 
@@ -500,15 +507,15 @@ describe('TraderSettingsService', () => {
 
       const result = await service.update(
         uuidOf(1),
-        { insurancePayOutMin: 800 },
+        { insurancePayOutMin: toCrypto(800) },
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayOutMin).toBe(800);
+      expect(result.insurancePayOutMin).toEqual(toCrypto(800));
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'trader_settings.updated',
-          metadata: { insurancePayOutMin: 800 },
+          metadata: { insurancePayOutMin: '800.000000' },
         }),
         manager,
       );
@@ -519,15 +526,15 @@ describe('TraderSettingsService', () => {
 
       const result = await service.update(
         uuidOf(1),
-        { insurancePayOutMin: 0 },
+        { insurancePayOutMin: toCrypto(0) },
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayOutMin).toBe(0);
+      expect(result.insurancePayOutMin).toEqual(toCrypto(0));
     });
 
     it('resets to null', async () => {
-      build(base({ insurancePayOutMin: 700 }));
+      build(base({ insurancePayOutMin: toCrypto(700) }));
 
       const result = await service.update(
         uuidOf(1),
@@ -539,7 +546,7 @@ describe('TraderSettingsService', () => {
     });
 
     it('leaves it alone when absent', async () => {
-      build(base({ insurancePayOutMin: 700 }));
+      build(base({ insurancePayOutMin: toCrypto(700) }));
 
       const result = await service.update(
         uuidOf(1),
@@ -547,7 +554,7 @@ describe('TraderSettingsService', () => {
         { actorUserId: uuidOf(9) },
       );
 
-      expect(result.insurancePayOutMin).toBe(700);
+      expect(result.insurancePayOutMin).toEqual(toCrypto(700));
     });
   });
 
@@ -556,20 +563,28 @@ describe('TraderSettingsService', () => {
 
     it('prefers the personal value', () => {
       expect(
-        service.insurancePayOutMinOf(base({ insurancePayOutMin: 1000 })),
-      ).toBe(1000);
+        service.insurancePayOutMinOf(
+          base({ insurancePayOutMin: toCrypto(1000) }),
+        ),
+      ).toEqual(toCrypto(1000));
     });
 
     it('honours a personal zero', () => {
       expect(
-        service.insurancePayOutMinOf(base({ insurancePayOutMin: 0 })),
-      ).toBe(0);
+        service.insurancePayOutMinOf(base({ insurancePayOutMin: toCrypto(0) })),
+      ).toEqual(toCrypto(0));
     });
 
     it('falls back to the global value without a personal one or a row', () => {
-      expect(service.insurancePayOutMinOf(base())).toBe(GLOBAL_PAY_OUT_MIN);
-      expect(service.insurancePayOutMinOf(null)).toBe(GLOBAL_PAY_OUT_MIN);
-      expect(service.insurancePayOutMinOf(undefined)).toBe(GLOBAL_PAY_OUT_MIN);
+      expect(service.insurancePayOutMinOf(base())).toEqual(
+        toCrypto(GLOBAL_PAY_OUT_MIN),
+      );
+      expect(service.insurancePayOutMinOf(null)).toEqual(
+        toCrypto(GLOBAL_PAY_OUT_MIN),
+      );
+      expect(service.insurancePayOutMinOf(undefined)).toEqual(
+        toCrypto(GLOBAL_PAY_OUT_MIN),
+      );
     });
   });
 
@@ -577,11 +592,13 @@ describe('TraderSettingsService', () => {
     beforeEach(() => build(base()));
 
     it('reads the personal value from the row', async () => {
-      repository.findOne.mockResolvedValue(base({ insurancePayOutMin: 250 }));
+      repository.findOne.mockResolvedValue(
+        base({ insurancePayOutMin: toCrypto(250) }),
+      );
 
       await expect(
         service.effectiveInsurancePayOutMin(uuidOf(1)),
-      ).resolves.toBe(250);
+      ).resolves.toEqual(toCrypto(250));
     });
 
     it('uses the global value when there is no row', async () => {
@@ -589,7 +606,7 @@ describe('TraderSettingsService', () => {
 
       await expect(
         service.effectiveInsurancePayOutMin(uuidOf(1)),
-      ).resolves.toBe(GLOBAL_PAY_OUT_MIN);
+      ).resolves.toEqual(toCrypto(GLOBAL_PAY_OUT_MIN));
     });
   });
 

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { In, MoreThanOrEqual } from 'typeorm';
+import { toCrypto } from '../../common/utils/to-crypto';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
@@ -20,7 +21,7 @@ describe('WalletService.hasMinInsurancePayIn', () => {
   ) => {
     const wallets = {
       findOne: jest.fn(
-        async () => ({ insurancePayInBalance: balance }) as Wallet,
+        async () => ({ insurancePayInBalance: toCrypto(balance) }) as Wallet,
       ),
     };
     const settingsRepository = {
@@ -29,7 +30,7 @@ describe('WalletService.hasMinInsurancePayIn', () => {
           ? null
           : personal === null
             ? ({ insurancePayInMin: null } as TraderSettings)
-            : ({ insurancePayInMin: personal } as TraderSettings),
+            : ({ insurancePayInMin: toCrypto(personal) } as TraderSettings),
       ),
     };
     const config = { get: jest.fn(() => GLOBAL_MIN) };
@@ -152,12 +153,15 @@ describe('WalletService.creditLeadShareWithin', () => {
   };
 
   it('makes sure the lead has a wallet without failing on one that exists', async () => {
-    const { service, manager, insert } = build({ id: 4, mainBalance: 10 });
+    const { service, manager, insert } = build({
+      id: 4,
+      mainBalance: toCrypto(10),
+    });
 
     await service.creditLeadShareWithin(
       manager as never,
       uuidOf(21),
-      2.5,
+      toCrypto(2.5),
       uuidOf(50),
     );
 
@@ -168,13 +172,13 @@ describe('WalletService.creditLeadShareWithin', () => {
   });
 
   it('credits the main balance under a lock and journals it against the deal', async () => {
-    const wallet = { id: 4, userId: uuidOf(21), mainBalance: 10 };
+    const wallet = { id: 4, userId: uuidOf(21), mainBalance: toCrypto(10) };
     const { service, manager } = build(wallet);
 
     await service.creditLeadShareWithin(
       manager as never,
       uuidOf(21),
-      2.5,
+      toCrypto(2.5),
       uuidOf(50),
     );
 
@@ -182,15 +186,15 @@ describe('WalletService.creditLeadShareWithin', () => {
       where: { userId: uuidOf(21) },
       lock: { mode: 'pessimistic_write' },
     });
-    expect(wallet.mainBalance).toBe(12.5);
+    expect(wallet.mainBalance).toEqual(toCrypto(12.5));
     expect(manager.create).toHaveBeenCalledWith(BalanceOperation, {
       walletId: 4,
       type: BalanceOperationType.Transaction,
       balanceKind: BalanceKind.Main,
       transactionId: uuidOf(50),
-      amount: 2.5,
-      balanceBefore: 10,
-      balanceAfter: 12.5,
+      amount: toCrypto(2.5),
+      balanceBefore: toCrypto(10),
+      balanceAfter: toCrypto(12.5),
     });
   });
 });
@@ -231,13 +235,13 @@ describe('WalletService debt movements', () => {
   };
 
   it('credits an issued debt to the main balance, creating the wallet if missing, and returns the saved journal row', async () => {
-    const wallet = { id: 4, userId: uuidOf(1), mainBalance: 10 };
+    const wallet = { id: 4, userId: uuidOf(1), mainBalance: toCrypto(10) };
     const { service, manager, insert } = build([wallet]);
 
     const operation = await service.creditDebtWithin(
       manager as never,
       uuidOf(1),
-      400,
+      toCrypto(400),
     );
 
     expect(insert.into).toHaveBeenCalledWith(Wallet);
@@ -247,34 +251,34 @@ describe('WalletService debt movements', () => {
       where: { userId: uuidOf(1) },
       lock: { mode: 'pessimistic_write' },
     });
-    expect(wallet.mainBalance).toBe(410);
+    expect(wallet.mainBalance).toEqual(toCrypto(410));
     expect(manager.create).toHaveBeenCalledWith(BalanceOperation, {
       walletId: 4,
       type: BalanceOperationType.DebtIssued,
       balanceKind: BalanceKind.Main,
       transactionId: null,
-      amount: 400,
-      balanceBefore: 10,
-      balanceAfter: 410,
+      amount: toCrypto(400),
+      balanceBefore: toCrypto(10),
+      balanceAfter: toCrypto(410),
     });
     expect(operation.id).toBe(77);
   });
 
   it('withholds a write-off from the main balance even when it goes negative', async () => {
-    const wallet = { id: 4, userId: uuidOf(1), mainBalance: 50 };
+    const wallet = { id: 4, userId: uuidOf(1), mainBalance: toCrypto(50) };
     const { service, manager } = build([wallet]);
 
-    await service.debitDebtWithin(manager as never, uuidOf(1), 120.5);
+    await service.debitDebtWithin(manager as never, uuidOf(1), toCrypto(120.5));
 
-    expect(wallet.mainBalance).toBe(-70.5);
+    expect(wallet.mainBalance).toEqual(toCrypto(-70.5));
     expect(manager.create).toHaveBeenCalledWith(BalanceOperation, {
       walletId: 4,
       type: BalanceOperationType.DebtWriteOff,
       balanceKind: BalanceKind.Main,
       transactionId: null,
-      amount: -120.5,
-      balanceBefore: 50,
-      balanceAfter: -70.5,
+      amount: toCrypto(-120.5),
+      balanceBefore: toCrypto(50),
+      balanceAfter: toCrypto(-70.5),
     });
   });
 
@@ -283,15 +287,25 @@ describe('WalletService debt movements', () => {
 
     expect(
       service.getAvailableMain({
-        mainBalance: -70.5,
-        mainReserved: 0,
+        mainBalance: toCrypto(-70.5),
+        mainReserved: toCrypto(0),
       } as Wallet),
-    ).toBe(-70.5);
+    ).toEqual(toCrypto(-70.5));
   });
 
   it('refuses a transfer out of a wallet whose main balance is negative', async () => {
-    const from = { id: 1, userId: uuidOf(1), mainBalance: -5, mainReserved: 0 };
-    const to = { id: 2, userId: uuidOf(2), mainBalance: 0, mainReserved: 0 };
+    const from = {
+      id: 1,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(-5),
+      mainReserved: toCrypto(0),
+    };
+    const to = {
+      id: 2,
+      userId: uuidOf(2),
+      mainBalance: toCrypto(0),
+      mainReserved: toCrypto(0),
+    };
     const { service, manager } = build([from, to]);
 
     await expect(
@@ -299,11 +313,11 @@ describe('WalletService debt movements', () => {
         manager as never,
         uuidOf(1),
         uuidOf(2),
-        1,
+        toCrypto(1),
         uuidOf(50),
       ),
     ).rejects.toThrow(ConflictException);
-    expect(from.mainBalance).toBe(-5);
+    expect(from.mainBalance).toEqual(toCrypto(-5));
     expect(manager.save).not.toHaveBeenCalled();
   });
 });
@@ -390,8 +404,8 @@ describe('WalletService.lockWalletsWithin', () => {
         ({
           id: 1,
           userId: options.where.userId,
-          mainBalance: 0,
-          mainReserved: 0,
+          mainBalance: toCrypto(0),
+          mainReserved: toCrypto(0),
         }) as Wallet,
     );
 
@@ -400,7 +414,7 @@ describe('WalletService.lockWalletsWithin', () => {
         manager as never,
         uuidOf(22),
         uuidOf(1),
-        1,
+        toCrypto(1),
         uuidOf(50),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -412,8 +426,8 @@ describe('WalletService with a negative main balance', () => {
   const inTheRed = {
     id: 1,
     userId: uuidOf(1),
-    mainBalance: -5,
-    mainReserved: 0,
+    mainBalance: toCrypto(-5),
+    mainReserved: toCrypto(0),
   };
 
   it('refuses to reserve escrow', async () => {
@@ -430,9 +444,9 @@ describe('WalletService with a negative main balance', () => {
     );
 
     await expect(
-      service.reserveMainEscrowWithin(manager as never, uuidOf(1), 1),
+      service.reserveMainEscrowWithin(manager as never, uuidOf(1), toCrypto(1)),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(wallet.mainReserved).toBe(0);
+    expect(wallet.mainReserved).toEqual(toCrypto(0));
     expect(manager.save).not.toHaveBeenCalled();
   });
 

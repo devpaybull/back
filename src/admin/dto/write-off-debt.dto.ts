@@ -1,16 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsPositive, Max, ValidateIf } from 'class-validator';
-
-const MAX_DEBT_AMOUNT = 1e15;
+import { ValidateIf } from 'class-validator';
+import { IsCryptoAmount } from '../../common/decorators/is-crypto-amount.decorator';
 
 export class WriteOffDebtDto {
   @ApiPropertyOptional({
+    type: String,
+    example: '250.000000',
     description:
-      'USDT withheld from the main balance; absent withholds the whole remaining debt',
+      'USDT withheld from the main balance, a decimal string; absent withholds the whole remaining debt',
   })
   @ValidateIf((_dto, value) => value !== undefined)
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @IsPositive()
-  @Max(MAX_DEBT_AMOUNT)
-  amount?: number;
+  @IsCryptoAmount({ positive: true })
+  amount?: string;
 }

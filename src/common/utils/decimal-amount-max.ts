@@ -1,0 +1,1 @@
+export const DECIMAL_AMOUNT_MAX = '1000000000000';

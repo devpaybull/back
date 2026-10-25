@@ -9,7 +9,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 
 @Entity('wallets')
 export class Wallet {
@@ -24,23 +25,23 @@ export class Wallet {
   @Column({ type: 'uuid' })
   userId: string;
 
-  @Column(moneyColumn({ default: 0 }))
-  mainBalance: number;
+  @Column(cryptoColumn({ default: 0 }))
+  mainBalance: Crypto;
 
-  @Column(moneyColumn({ default: 0 }))
-  mainReserved: number;
+  @Column(cryptoColumn({ default: 0 }))
+  mainReserved: Crypto;
 
-  @Column(moneyColumn({ default: 0 }))
-  insurancePayInBalance: number;
+  @Column(cryptoColumn({ default: 0 }))
+  insurancePayInBalance: Crypto;
 
-  @Column(moneyColumn({ default: 0 }))
-  insurancePayOutBalance: number;
+  @Column(cryptoColumn({ default: 0 }))
+  insurancePayOutBalance: Crypto;
 
-  @Column(moneyColumn({ default: 0 }))
-  insurancePayInReserved: number;
+  @Column(cryptoColumn({ default: 0 }))
+  insurancePayInReserved: Crypto;
 
-  @Column(moneyColumn({ default: 0 }))
-  insurancePayOutReserved: number;
+  @Column(cryptoColumn({ default: 0 }))
+  insurancePayOutReserved: Crypto;
 
   @Column({ type: 'timestamptz', nullable: true })
   lastAcceptedDealAt: Date;

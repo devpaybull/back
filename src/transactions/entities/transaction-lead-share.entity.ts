@@ -8,7 +8,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { moneyColumn } from '../../common/utils/money-column';
+import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Crypto } from '../../common/types/crypto';
 import { percentColumn } from '../../common/utils/percent-column';
 import { User } from '../../users/entities/user.entity';
 import { Transaction } from './transaction.entity';
@@ -37,8 +38,8 @@ export class TransactionLeadShare {
   @Column(percentColumn())
   percent: number;
 
-  @Column(moneyColumn())
-  amount: number;
+  @Column(cryptoColumn())
+  amount: Crypto;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

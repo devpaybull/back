@@ -2,13 +2,13 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsInt,
-  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
   Max,
   Min,
 } from 'class-validator';
+import { IsCryptoAmount } from '../../common/decorators/is-crypto-amount.decorator';
 
 export class UpdateTraderSettingsDto {
   @ApiPropertyOptional()
@@ -58,26 +58,26 @@ export class UpdateTraderSettingsDto {
   trustedUser?: boolean;
 
   @ApiPropertyOptional({
+    type: String,
     nullable: true,
-    minimum: 0,
+    example: '500.000000',
     description:
-      'Personal minimum insurance pay-in deposit; null resets it to the global default',
+      'Personal minimum insurance pay-in deposit, a decimal string; null resets it to the global default',
   })
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @Min(0)
-  insurancePayInMin?: number | null;
+  @IsCryptoAmount()
+  insurancePayInMin?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
     nullable: true,
-    minimum: 0,
+    example: '500.000000',
     description:
-      'Personal minimum insurance pay-out deposit; null resets it to the global default',
+      'Personal minimum insurance pay-out deposit, a decimal string; null resets it to the global default',
   })
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 3 })
-  @Min(0)
-  insurancePayOutMin?: number | null;
+  @IsCryptoAmount()
+  insurancePayOutMin?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()

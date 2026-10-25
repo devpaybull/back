@@ -1,3 +1,4 @@
+import { toFiat } from '../../common/utils/to-fiat';
 import { RateCandidate } from '../types/rate-candidate';
 import { RateKind } from '../types/rate-kind.enum';
 import { NoBaseRateError, resolveRate } from '../utils/resolve-rate';
@@ -22,8 +23,8 @@ const individualGeneral: RateCandidate = {
 
 const individualRange: RateCandidate = {
   hasSubject: true,
-  fromAmount: 1000,
-  toAmount: 5000,
+  fromAmount: toFiat(1000),
+  toAmount: toFiat(5000),
   bankId: null,
   payInPercent: 6,
   payOutPercent: 1,
@@ -33,7 +34,7 @@ describe('resolveRate', () => {
   it('uses the base rate when individual rates are disabled', () => {
     const percent = resolveRate({
       candidates: [base, individualGeneral, individualRange],
-      amount: 2000,
+      amount: toFiat(2000),
       rateKind: RateKind.ByAmount,
       individualEnabled: false,
       direction: 'payIn',
@@ -44,7 +45,7 @@ describe('resolveRate', () => {
   it('prefers a matching individual range when enabled', () => {
     const percent = resolveRate({
       candidates: [base, individualGeneral, individualRange],
-      amount: 2000,
+      amount: toFiat(2000),
       rateKind: RateKind.ByAmount,
       individualEnabled: true,
       direction: 'payIn',
@@ -55,7 +56,7 @@ describe('resolveRate', () => {
   it('falls back to the individual general rate when no range matches', () => {
     const percent = resolveRate({
       candidates: [base, individualGeneral, individualRange],
-      amount: 9000,
+      amount: toFiat(9000),
       rateKind: RateKind.ByAmount,
       individualEnabled: true,
       direction: 'payIn',
@@ -66,7 +67,7 @@ describe('resolveRate', () => {
   it('falls back to the base rate when the subject has neither range nor general', () => {
     const percent = resolveRate({
       candidates: [base, individualRange],
-      amount: 9000,
+      amount: toFiat(9000),
       rateKind: RateKind.ByAmount,
       individualEnabled: true,
       direction: 'payIn',
@@ -77,7 +78,7 @@ describe('resolveRate', () => {
   it('reads the pay-out column for the pay-out direction', () => {
     const percent = resolveRate({
       candidates: [base, individualRange],
-      amount: 2000,
+      amount: toFiat(2000),
       rateKind: RateKind.ByAmount,
       individualEnabled: true,
       direction: 'payOut',
@@ -89,7 +90,7 @@ describe('resolveRate', () => {
     expect(
       resolveRate({
         candidates: [base, individualRange],
-        amount: 1000,
+        amount: toFiat(1000),
         rateKind: RateKind.ByAmount,
         individualEnabled: true,
         direction: 'payIn',
@@ -98,7 +99,7 @@ describe('resolveRate', () => {
     expect(
       resolveRate({
         candidates: [base, individualRange],
-        amount: 5000,
+        amount: toFiat(5000),
         rateKind: RateKind.ByAmount,
         individualEnabled: true,
         direction: 'payIn',
@@ -110,7 +111,7 @@ describe('resolveRate', () => {
     expect(() =>
       resolveRate({
         candidates: [individualGeneral],
-        amount: 2000,
+        amount: toFiat(2000),
         rateKind: RateKind.ByAmount,
         individualEnabled: false,
         direction: 'payIn',
@@ -121,7 +122,7 @@ describe('resolveRate', () => {
     expect(
       resolveRate({
         candidates: [base, bankRow(7, 4, 1)],
-        amount: 2000,
+        amount: toFiat(2000),
         rateKind: RateKind.ByAmount,
         individualEnabled: true,
         direction: 'payIn',
@@ -152,7 +153,7 @@ describe('resolveRate for a method priced by bank', () => {
   ) =>
     resolveRate({
       candidates,
-      amount: 2000,
+      amount: toFiat(2000),
       bankId,
       rateKind: RateKind.ByBank,
       individualEnabled,

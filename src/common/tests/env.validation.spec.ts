@@ -102,8 +102,8 @@ describe('validateEnv', () => {
   });
 
   describe('COUNTERPARTY_MIN_AMOUNT', () => {
-    it('parses the floor as a number', () => {
-      expect(validateEnv(baseEnv()).COUNTERPARTY_MIN_AMOUNT).toBe(5000);
+    it('keeps the floor as an exact decimal string', () => {
+      expect(validateEnv(baseEnv()).COUNTERPARTY_MIN_AMOUNT).toBe('5000');
     });
 
     it('refuses to boot without it, since there is no sane default floor', () => {
@@ -127,9 +127,16 @@ describe('validateEnv', () => {
       ).toThrow(/COUNTERPARTY_MIN_AMOUNT/);
     });
 
-    it('refuses a fractional floor', () => {
+    it('takes kopecks: a floor with two decimals', () => {
+      expect(
+        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '10.5' })
+          .COUNTERPARTY_MIN_AMOUNT,
+      ).toBe('10.5');
+    });
+
+    it('refuses a third decimal', () => {
       expect(() =>
-        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '10.5' }),
+        validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '10.505' }),
       ).toThrow(/COUNTERPARTY_MIN_AMOUNT/);
     });
 
@@ -137,22 +144,39 @@ describe('validateEnv', () => {
       expect(
         validateEnv({ ...baseEnv(), COUNTERPARTY_MIN_AMOUNT: '0' })
           .COUNTERPARTY_MIN_AMOUNT,
-      ).toBe(0);
+      ).toBe('0');
     });
   });
 
   describe('INSURANCE_PAY_OUT_MIN', () => {
-    it('refuses more than three decimals', () => {
+    it('refuses more than six decimals', () => {
       expect(() =>
-        validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '0.0005' }),
+        validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '1.1234567' }),
       ).toThrow(/INSURANCE_PAY_OUT_MIN/);
+    });
+
+    it('takes a tiny amount exactly, where a float would turn into an exponent', () => {
+      expect(
+        validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '0.000001' })
+          .INSURANCE_PAY_OUT_MIN,
+      ).toBe('0.000001');
+      expect(() =>
+        validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '0.0000001' }),
+      ).toThrow(/INSURANCE_PAY_OUT_MIN/);
+    });
+
+    it('accepts six decimals', () => {
+      expect(
+        validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '0.000005' })
+          .INSURANCE_PAY_OUT_MIN,
+      ).toBe('0.000005');
     });
 
     it('parses a decimal', () => {
       expect(
         validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '250.5' })
           .INSURANCE_PAY_OUT_MIN,
-      ).toBe(250.5);
+      ).toBe('250.5');
     });
 
     it('refuses to boot without it', () => {
@@ -181,7 +205,7 @@ describe('validateEnv', () => {
       expect(
         validateEnv({ ...baseEnv(), INSURANCE_PAY_OUT_MIN: '0' })
           .INSURANCE_PAY_OUT_MIN,
-      ).toBe(0);
+      ).toBe('0');
     });
   });
 

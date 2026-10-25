@@ -4,6 +4,9 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { BanksService } from '../../banks/banks.service';
+import { Rate } from '../../common/types/rate';
+import { roundRate } from '../../common/utils/round-rate';
+import { toDecimal } from '../../common/utils/to-decimal';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { LeadRate } from '../entities/lead-rate.entity';
 import { MethodRate } from '../entities/method-rate.entity';
@@ -26,7 +29,6 @@ import { TransactionMethodDefinition } from '../types/transaction-method-definit
 import { bandsAreValid } from '../utils/bands-valid';
 import { findTransactionMethod } from '../utils/find-transaction-method';
 import { resolveRate } from '../utils/resolve-rate';
-import { roundMoney } from '../utils/round-money';
 import { TRANSACTION_METHOD_CODES } from '../utils/transaction-methods';
 import { RapiraRateProvider } from './rapira-rate.provider';
 
@@ -420,11 +422,11 @@ export class RateService {
     });
   }
 
-  async getBaseRate(): Promise<number> {
+  async getBaseRate(): Promise<Rate> {
     const fiatPerUsdt = await this.rapira.getFiatPerUsdt();
     const markup = this.config.get<number>('RATE_MARKUP', 0);
 
-    return roundMoney(fiatPerUsdt * (1 + markup));
+    return roundRate(fiatPerUsdt.times(toDecimal(markup).plus(1)));
   }
 
   async resolveMethodPercent(query: MethodPercentQuery): Promise<number> {

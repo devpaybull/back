@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { formatCrypto } from '../../common/utils/format-crypto';
 import { DebtEvent } from '../../debts/entities/debt-event.entity';
 import { DebtEventType } from '../../debts/types/debt-event-type.enum';
 import { InviteAccountDto, toInviteAccountDto } from './invite-account.dto';
@@ -13,8 +14,12 @@ export class DebtEventDto {
   @ApiProperty({ enum: DebtEventType })
   type: DebtEventType;
 
-  @ApiProperty({ description: 'USDT issued or withheld' })
-  amount: number;
+  @ApiProperty({
+    type: String,
+    example: '100.000000',
+    description: 'USDT issued or withheld',
+  })
+  amount: string;
 
   @ApiProperty({
     type: InviteAccountDto,
@@ -34,7 +39,7 @@ export const toDebtEventDto = (event: DebtEvent): DebtEventDto => ({
   id: event.id,
   debtId: event.debtId,
   type: event.type,
-  amount: event.amount,
+  amount: formatCrypto(event.amount),
   actor: event.actor ? toInviteAccountDto(event.actor) : null,
   balanceOperationId: event.balanceOperationId ?? null,
   createdAt: event.createdAt,

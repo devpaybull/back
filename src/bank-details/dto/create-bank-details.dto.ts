@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 
 const MAX_CARDHOLDER_NAME_LENGTH = 100;
@@ -80,14 +81,13 @@ export class CreateBankDetailsDto {
   minAmountEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 500,
+    type: String,
+    example: '500.00',
     description: 'Ignored and stored as null unless minAmountEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  minAmount?: number;
+  @IsFiatAmount()
+  minAmount?: string;
 
   @ApiPropertyOptional({
     default: false,
@@ -98,14 +98,13 @@ export class CreateBankDetailsDto {
   maxAmountEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 100000,
+    type: String,
+    example: '100000.00',
     description: 'Ignored and stored as null unless maxAmountEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  maxAmount?: number;
+  @IsFiatAmount()
+  maxAmount?: string;
 
   @ApiPropertyOptional({
     default: false,
@@ -152,14 +151,13 @@ export class CreateBankDetailsDto {
   dailyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 300000,
+    type: String,
+    example: '300000.00',
     description: 'Turnover a day; null unless dailyAmountLimitEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  dailyAmountLimit?: number;
+  @IsFiatAmount()
+  dailyAmountLimit?: string;
 
   @ApiPropertyOptional({
     default: false,
@@ -170,15 +168,14 @@ export class CreateBankDetailsDto {
   monthlyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
-    example: 5000000,
+    type: String,
+    example: '5000000.00',
     description:
       'Turnover a month; null unless monthlyAmountLimitEnabled is true',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  monthlyAmountLimit?: number;
+  @IsFiatAmount()
+  monthlyAmountLimit?: string;
 
   @ApiPropertyOptional({
     default: false,
