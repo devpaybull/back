@@ -85,11 +85,29 @@ describe('AdminDebtsController', () => {
   });
 
   describe('access', () => {
-    it('is guarded for superadmin only', () => {
+    it('opens the controller to both admin roles', () => {
       expect(
         Reflect.getMetadata(ROLES_METADATA_KEY, AdminDebtsController),
-      ).toEqual([Role.Superadmin]);
+      ).toEqual([Role.Admin, Role.Superadmin]);
     });
+
+    it.each(['issue', 'writeOff', 'update'] as const)(
+      'narrows %s to superadmin',
+      (handler) => {
+        expect(
+          Reflect.getMetadata(ROLES_METADATA_KEY, controller[handler]),
+        ).toEqual([Role.Superadmin]);
+      },
+    );
+
+    it.each(['list', 'events'] as const)(
+      'leaves %s to the class roles',
+      (handler) => {
+        expect(
+          Reflect.getMetadata(ROLES_METADATA_KEY, controller[handler]),
+        ).toBeUndefined();
+      },
+    );
 
     it.each([
       ['issue', true],
@@ -113,7 +131,7 @@ describe('AdminDebtsController', () => {
         switchToHttp: () => ({ getRequest: () => ({ user: { role } }) }),
       }) as unknown as ExecutionContext;
 
-    it.each(['issue', 'list', 'events', 'writeOff', 'update'] as const)(
+    it.each(['issue', 'writeOff', 'update'] as const)(
       'refuses an admin on %s with a 403',
       (handler) => {
         const guard = new RolesGuard(new Reflector());
@@ -124,12 +142,41 @@ describe('AdminDebtsController', () => {
       },
     );
 
-    it('lets a superadmin through', () => {
+    it.each(['list', 'events'] as const)('lets an admin read %s', (handler) => {
       const guard = new RolesGuard(new Reflector());
 
-      expect(guard.canActivate(contextFor(Role.Superadmin, 'issue'))).toBe(
-        true,
-      );
+      expect(guard.canActivate(contextFor(Role.Admin, handler))).toBe(true);
+    });
+
+    it.each(['issue', 'list', 'events', 'writeOff', 'update'] as const)(
+      'lets a superadmin through %s',
+      (handler) => {
+        const guard = new RolesGuard(new Reflector());
+
+        expect(guard.canActivate(contextFor(Role.Superadmin, handler))).toBe(
+          true,
+        );
+      },
+    );
+
+    it.each(
+      Object.values(Role).filter(
+        (role) => role !== Role.Admin && role !== Role.Superadmin,
+      ),
+    )('refuses a %s everywhere', (role) => {
+      const guard = new RolesGuard(new Reflector());
+
+      for (const handler of [
+        'issue',
+        'list',
+        'events',
+        'writeOff',
+        'update',
+      ] as const) {
+        expect(() => guard.canActivate(contextFor(role, handler))).toThrow(
+          ForbiddenException,
+        );
+      }
     });
   });
 

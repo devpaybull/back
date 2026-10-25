@@ -9,6 +9,7 @@ import { FindOptionsWhere, ILike, In, Repository } from 'typeorm';
 import { AccountIdentifier } from '../../common/types/account-identifier';
 import { Page, toPage } from '../../common/types/page';
 import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
+import { loginOf } from '../../common/utils/login-of';
 import { toAccountIdentifier } from '../../common/utils/to-account-identifier';
 import { User } from '../entities/user.entity';
 import { AUTHENTICATABLE_STATUSES } from '../types/authenticatable-statuses';
@@ -39,6 +40,29 @@ export class UserDirectoryService {
     if (ids.length === 0) return [];
 
     return this.users.find({ where: { id: In(ids) } });
+  }
+
+  async rankByLogin(ids: string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+
+    const users = await this.users.find({
+      select: { id: true, email: true, telegramUsername: true },
+      where: { id: In(ids) },
+    });
+    const byLogin = users
+      .map((user) => ({ id: user.id, login: loginOf(user) }))
+      .sort((a, b) => (a.login < b.login ? -1 : a.login > b.login ? 1 : 0));
+    const ranks = new Map<string, number>();
+    let rank = -1;
+    let previousLogin: string | undefined;
+
+    for (const { id, login } of byLogin) {
+      if (login !== previousLogin) rank++;
+      previousLogin = login;
+      ranks.set(id, rank);
+    }
+
+    return ranks;
   }
 
   findAuthenticatableById(id: string): Promise<User> {

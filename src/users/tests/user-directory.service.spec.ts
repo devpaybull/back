@@ -258,6 +258,81 @@ describe('UserDirectoryService', () => {
     });
   });
 
+  describe('rankByLogin', () => {
+    it('ranks the named accounts by login, the Telegram username first and the email as fallback', async () => {
+      stored.push(
+        { id: uuidOf(1), telegramUsername: 'zed', email: 'a@example.com' },
+        { id: uuidOf(2), telegramUsername: null, email: 'boris@example.com' },
+        { id: uuidOf(3), telegramUsername: 'anna', email: null },
+        { id: uuidOf(4), telegramUsername: 'ignored', email: null },
+      );
+
+      const ranks = await service.rankByLogin([
+        uuidOf(1),
+        uuidOf(2),
+        uuidOf(3),
+      ]);
+
+      expect([...ranks]).toEqual([
+        [uuidOf(3), 0],
+        [uuidOf(2), 1],
+        [uuidOf(1), 2],
+      ]);
+      expect(users.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives equal logins one rank', async () => {
+      stored.push(
+        { id: uuidOf(1), telegramUsername: null, email: 'same@example.com' },
+        { id: uuidOf(2), telegramUsername: 'other', email: null },
+        { id: uuidOf(3), telegramUsername: null, email: 'same@example.com' },
+      );
+
+      const ranks = await service.rankByLogin([
+        uuidOf(1),
+        uuidOf(2),
+        uuidOf(3),
+      ]);
+
+      expect(ranks.get(uuidOf(2))).toBe(0);
+      expect(ranks.get(uuidOf(1))).toBe(1);
+      expect(ranks.get(uuidOf(3))).toBe(1);
+    });
+
+    it('compares logins by code point', async () => {
+      stored.push(
+        { id: uuidOf(1), telegramUsername: 'b', email: null },
+        { id: uuidOf(2), telegramUsername: '_a', email: null },
+        { id: uuidOf(3), telegramUsername: '9z', email: null },
+      );
+
+      const ranks = await service.rankByLogin([
+        uuidOf(1),
+        uuidOf(2),
+        uuidOf(3),
+      ]);
+
+      expect([...ranks]).toEqual([
+        [uuidOf(3), 0],
+        [uuidOf(2), 1],
+        [uuidOf(1), 2],
+      ]);
+    });
+
+    it('leaves out an id nobody holds', async () => {
+      stored.push({ id: uuidOf(1), telegramUsername: 'anna', email: null });
+
+      const ranks = await service.rankByLogin([uuidOf(1), uuidOf(404)]);
+
+      expect([...ranks]).toEqual([[uuidOf(1), 0]]);
+    });
+
+    it('answers an empty list without querying', async () => {
+      await expect(service.rankByLogin([])).resolves.toEqual(new Map());
+      expect(users.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findById', () => {
     it('returns a blocked user, so an admin can unblock them', async () => {
       const user = { id: uuidOf(1), status: UserStatus.Blocked };

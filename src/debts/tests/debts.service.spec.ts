@@ -166,6 +166,7 @@ const build = () => {
   };
   const directory = {
     findIdsMatching: jest.fn(async () => [] as string[]),
+    rankByLogin: jest.fn(async () => new Map<string, number>()),
     findById: jest.fn(async (id: string) => ({ id, role: Role.Trader })),
   };
   const audit = { record: jest.fn(async () => ({})) };
@@ -598,6 +599,107 @@ describe('DebtsService', () => {
       });
     });
 
+    describe('unpausing', () => {
+      const PAST = new Date('2020-01-01T00:00:00Z');
+      const FUTURE = new Date('2999-01-01T00:00:00Z');
+
+      const paused = async (autoWriteOffAt: Date | null) => {
+        const t = await existing();
+        t.rows<Debt>(Debt)[0].autoWriteOffAt = autoWriteOffAt;
+        t.rows<Debt>(Debt)[0].autoWriteOffPaused = true;
+        return t;
+      };
+
+      it('refuses with a 409 when the moment has passed and no new one is given', async () => {
+        const t = await paused(PAST);
+
+        await expect(
+          t.service.update(t.debt.id, { autoWriteOffPaused: false }, ISSUER),
+        ).rejects.toBeInstanceOf(ConflictException);
+
+        expect(t.rows<Debt>(Debt)[0].autoWriteOffPaused).toBe(true);
+        expect(t.rows<Debt>(Debt)[0].autoWriteOffAt).toEqual(PAST);
+        expect(t.audit.record).not.toHaveBeenCalled();
+        expect(t.wallet().mainBalance).toBe(400);
+      });
+
+      it('unpauses when a new future moment comes with it', async () => {
+        const t = await paused(PAST);
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: false, autoWriteOffAt: FUTURE },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(false);
+        expect(debt.autoWriteOffAt).toEqual(FUTURE);
+      });
+
+      it('unpauses when the stored moment is still ahead', async () => {
+        const t = await paused(FUTURE);
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: false },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(false);
+      });
+
+      it('unpauses a debt with no moment at all', async () => {
+        const t = await paused(null);
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: false },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(false);
+      });
+
+      it('does not refuse a debt that is not paused, whatever its stored moment', async () => {
+        const t = await existing();
+        t.rows<Debt>(Debt)[0].autoWriteOffAt = PAST;
+        t.rows<Debt>(Debt)[0].autoWriteOffPaused = false;
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: false },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(false);
+      });
+
+      it('lets a paused debt with a passed moment be paused again', async () => {
+        const t = await paused(PAST);
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: true },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(true);
+      });
+
+      it('unpauses when the same request removes the passed moment', async () => {
+        const t = await paused(PAST);
+
+        const debt = await t.service.update(
+          t.debt.id,
+          { autoWriteOffPaused: false, autoWriteOffAt: null },
+          ISSUER,
+        );
+
+        expect(debt.autoWriteOffPaused).toBe(false);
+        expect(debt.autoWriteOffAt).toBeNull();
+      });
+    });
+
     it('does not restore what a write-off changed between the read and the write', async () => {
       const t = await existing();
       const live = t.rows<Debt>(Debt)[0];
@@ -763,6 +865,164 @@ describe('DebtsService', () => {
       await t.service.list(query({ search: '99999999999' }));
 
       expect(t.debts.findAndCount).not.toHaveBeenCalled();
+    });
+
+    describe('by debtor login', () => {
+      const ANNA = uuidOf(11);
+      const BORIS = uuidOf(12);
+      const ZED = uuidOf(13);
+      const filtered = [
+        { id: 1, userId: ZED },
+        { id: 2, userId: ANNA },
+        { id: 3, userId: BORIS },
+        { id: 4, userId: ANNA },
+        { id: 5, userId: ZED },
+      ];
+
+      const sorted = () => {
+        const t = build();
+        t.directory.rankByLogin.mockResolvedValue(
+          new Map([
+            [ANNA, 0],
+            [BORIS, 1],
+            [ZED, 2],
+          ]),
+        );
+        t.debts.find.mockImplementation((async (options: {
+          where: { id?: { value: number[] } };
+        }) =>
+          options.where.id
+            ? options.where.id.value
+                .slice()
+                .reverse()
+                .map((id) => ({ id }) as Debt)
+            : filtered) as never);
+        return t;
+      };
+
+      const ids = (page: { items: Debt[] }) => page.items.map((d) => d.id);
+
+      it('orders by the debtor’s login rank, then by id, ascending', async () => {
+        const t = sorted();
+
+        const page = await t.service.list(
+          query({ sortBy: DebtSortField.User, sortOrder: SortOrder.Asc }),
+        );
+
+        expect(ids(page)).toEqual([2, 4, 3, 1, 5]);
+        expect(page.meta.total).toBe(5);
+        expect(t.directory.rankByLogin).toHaveBeenCalledWith([
+          ZED,
+          ANNA,
+          BORIS,
+        ]);
+        expect(t.debts.findAndCount).not.toHaveBeenCalled();
+      });
+
+      it('reverses both the login and the id descending', async () => {
+        const t = sorted();
+
+        const page = await t.service.list(
+          query({ sortBy: DebtSortField.User, sortOrder: SortOrder.Desc }),
+        );
+
+        expect(ids(page)).toEqual([5, 1, 3, 4, 2]);
+      });
+
+      it('pages after ordering and loads only the page with its relations', async () => {
+        const t = sorted();
+
+        const page = await t.service.list(
+          query({
+            sortBy: DebtSortField.User,
+            sortOrder: SortOrder.Asc,
+            page: 2,
+            limit: 2,
+          }),
+        );
+
+        expect(ids(page)).toEqual([3, 1]);
+        expect(page.meta).toEqual({ total: 5, page: 2, limit: 2, pages: 3 });
+        expect(t.debts.find).toHaveBeenLastCalledWith({
+          where: { id: In([3, 1]) },
+          relations: { user: true, issuedBy: true },
+        });
+      });
+
+      it('applies the same filters to the ordering read', async () => {
+        const t = sorted();
+
+        await t.service.list(
+          query({
+            sortBy: DebtSortField.User,
+            status: DebtStatus.Active,
+          }),
+        );
+
+        expect(t.debts.find).toHaveBeenNthCalledWith(1, {
+          where: [{ remaining: MoreThan(0) }],
+          select: { id: true, userId: true },
+        });
+      });
+
+      it('puts a debtor the ranking does not know last ascending', async () => {
+        const t = sorted();
+        t.directory.rankByLogin.mockResolvedValue(
+          new Map([
+            [ANNA, 0],
+            [ZED, 1],
+          ]),
+        );
+
+        const page = await t.service.list(
+          query({ sortBy: DebtSortField.User, sortOrder: SortOrder.Asc }),
+        );
+
+        expect(ids(page)).toEqual([2, 4, 1, 5, 3]);
+      });
+
+      it('interleaves two debtors with one rank by id', async () => {
+        const t = sorted();
+        t.directory.rankByLogin.mockResolvedValue(
+          new Map([
+            [ANNA, 0],
+            [BORIS, 0],
+            [ZED, 1],
+          ]),
+        );
+
+        const page = await t.service.list(
+          query({ sortBy: DebtSortField.User, sortOrder: SortOrder.Asc }),
+        );
+
+        expect(ids(page)).toEqual([2, 3, 4, 1, 5]);
+      });
+
+      it('orders what the search matched', async () => {
+        const t = sorted();
+        t.directory.findIdsMatching.mockResolvedValue([ANNA]);
+
+        await t.service.list(
+          query({ sortBy: DebtSortField.User, search: '4' }),
+        );
+
+        expect(t.debts.find).toHaveBeenNthCalledWith(1, {
+          where: [{ userId: In([ANNA]) }, { id: 4 }],
+          select: { id: true, userId: true },
+        });
+      });
+
+      it('answers an empty page without loading rows past the end', async () => {
+        const t = sorted();
+
+        const page = await t.service.list(
+          query({ sortBy: DebtSortField.User, page: 9 }),
+        );
+
+        expect(page.items).toEqual([]);
+        expect(page.meta.total).toBe(5);
+        expect(t.debts.find).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

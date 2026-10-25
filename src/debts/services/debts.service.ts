@@ -28,9 +28,11 @@ import { DebtEventListQuery } from '../types/debt-event-list-query';
 import { DebtEventSortField } from '../types/debt-event-sort-field.enum';
 import { DebtEventType } from '../types/debt-event-type.enum';
 import { DebtListQuery } from '../types/debt-list-query';
+import { DebtSortField } from '../types/debt-sort-field.enum';
 import { DebtStatus } from '../types/debt-status.enum';
 
 const DEBT_NOT_FOUND = 'Debt not found';
+const DEBT_ROW_RELATIONS = { user: true, issuedBy: true };
 const MAX_INT = 2147483647;
 
 const WRITE_OFF_ACTIONS: Record<
@@ -219,6 +221,22 @@ export class DebtsService {
 
       if (!debt) throw new NotFoundException(DEBT_NOT_FOUND);
 
+      const momentAfter =
+        patch.autoWriteOffAt !== undefined
+          ? patch.autoWriteOffAt
+          : debt.autoWriteOffAt;
+      const unpausesPastMoment =
+        debt.autoWriteOffPaused &&
+        patch.autoWriteOffPaused === false &&
+        momentAfter !== null &&
+        momentAfter <= new Date();
+
+      if (unpausesPastMoment) {
+        throw new ConflictException(
+          'The auto write-off moment has passed; give a new one to unpause',
+        );
+      }
+
       await manager.update(Debt, { id: debtId }, patch);
       await this.audit.record(
         {
@@ -239,12 +257,16 @@ export class DebtsService {
 
     if (where.length === 0) return toPage([[], 0], query);
 
+    if (query.sortBy === DebtSortField.User) {
+      return toPage(await this.pageByDebtorLogin(query, where), query);
+    }
+
     const direction = sortDirection(query.sortOrder);
 
     return toPage(
       await this.debts.findAndCount({
         where,
-        relations: { user: true, issuedBy: true },
+        relations: DEBT_ROW_RELATIONS,
         order: { [query.sortBy]: direction, id: direction },
         skip: (query.page - 1) * query.limit,
         take: query.limit,
@@ -296,7 +318,7 @@ export class DebtsService {
   async requireById(id: number): Promise<Debt> {
     const debt = await this.debts.findOne({
       where: { id },
-      relations: { user: true, issuedBy: true },
+      relations: DEBT_ROW_RELATIONS,
     });
 
     if (!debt) throw new NotFoundException(DEBT_NOT_FOUND);
@@ -341,6 +363,43 @@ export class DebtsService {
       },
       manager,
     );
+  }
+
+  private async pageByDebtorLogin(
+    query: DebtListQuery,
+    where: FindOptionsWhere<Debt>[],
+  ): Promise<[Debt[], number]> {
+    const matching = await this.debts.find({
+      where,
+      select: { id: true, userId: true },
+    });
+    const ranks = await this.directory.rankByLogin([
+      ...new Set(matching.map((debt) => debt.userId)),
+    ]);
+    const rankOf = (debt: Debt) =>
+      ranks.get(debt.userId) ?? Number.MAX_SAFE_INTEGER;
+    const sign = sortDirection(query.sortOrder) === 'ASC' ? 1 : -1;
+    const skip = (query.page - 1) * query.limit;
+    const pageIds = matching
+      .sort((a, b) => sign * (rankOf(a) - rankOf(b) || a.id - b.id))
+      .slice(skip, skip + query.limit)
+      .map((debt) => debt.id);
+
+    if (pageIds.length === 0) return [[], matching.length];
+
+    const rows = new Map(
+      (
+        await this.debts.find({
+          where: { id: In(pageIds) },
+          relations: DEBT_ROW_RELATIONS,
+        })
+      ).map((debt) => [debt.id, debt]),
+    );
+
+    return [
+      pageIds.flatMap((id) => (rows.has(id) ? [rows.get(id)] : [])),
+      matching.length,
+    ];
   }
 
   private async listWhere(

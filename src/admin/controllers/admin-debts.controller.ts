@@ -48,7 +48,7 @@ const assertDebtIdInRange = (id: number): void => {
 @ApiTags('Admin · Debts')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
-@Roles(Role.Superadmin)
+@Roles(Role.Admin, Role.Superadmin)
 @Controller('admin')
 export class AdminDebtsController {
   constructor(
@@ -57,10 +57,11 @@ export class AdminDebtsController {
   ) {}
 
   @Post('users/:id/debts')
+  @Roles(Role.Superadmin)
   @WriteAccess()
   @ApiOperation({
     summary:
-      'Lends USDT to an account: credits the main balance and opens a debt',
+      'Lends USDT to an account: credits the main balance and opens a debt (superadmin only)',
   })
   @ApiEnvelopeResponse(DebtDto, { status: HttpStatus.CREATED })
   async issue(
@@ -104,10 +105,11 @@ export class AdminDebtsController {
 
   @Post('debts/:id/write-off')
   @HttpCode(HttpStatus.OK)
+  @Roles(Role.Superadmin)
   @WriteAccess()
   @ApiOperation({
     summary:
-      'Withholds part or all of the remaining debt from the main balance, which may go negative',
+      'Withholds part or all of the remaining debt from the main balance, which may go negative (superadmin only)',
   })
   @ApiEnvelopeResponse(DebtDto)
   async writeOff(
@@ -121,9 +123,11 @@ export class AdminDebtsController {
   }
 
   @Patch('debts/:id')
+  @Roles(Role.Superadmin)
   @WriteAccess()
   @ApiOperation({
-    summary: 'Edits the comment and the auto write-off of a debt',
+    summary:
+      'Edits the comment and the auto write-off of a debt (superadmin only)',
   })
   @ApiEnvelopeResponse(DebtDto)
   async update(
