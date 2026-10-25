@@ -172,6 +172,15 @@ describe('AdminDebtsController', () => {
       expect(debts.issue).not.toHaveBeenCalled();
     });
 
+    it('passes the service refusal of a role that cannot borrow through', async () => {
+      directory.findById.mockResolvedValue({ ...debtor, role: Role.Merchant });
+      debts.issue.mockRejectedValue(new BadRequestException('role'));
+
+      await expect(
+        controller.issue(debtor.id, { amount: 1 }, superadmin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
     it('applies canIssueRole to the target', async () => {
       const admin = { ...superadmin, role: Role.Admin };
       directory.findById.mockResolvedValue({

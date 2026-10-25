@@ -43,8 +43,11 @@ export class LoginFootprintService {
 
       const ip = normalizeIp(context.ip);
 
-      await this.footprints.upsert(
-        {
+      await this.footprints
+        .createQueryBuilder()
+        .insert()
+        .into(LoginFootprint)
+        .values({
           userId,
           ip,
           country: this.geoIp.countryOf(ip),
@@ -53,10 +56,10 @@ export class LoginFootprintService {
             MAX_FINGERPRINT_LENGTH,
           ),
           userAgent: (context.userAgent ?? '').slice(0, MAX_USER_AGENT_LENGTH),
-          lastSeenAt: new Date(),
-        },
-        CONFLICT_PATHS,
-      );
+          lastSeenAt: () => 'now()',
+        })
+        .orUpdate(['country', 'lastSeenAt', 'updatedAt'], CONFLICT_PATHS)
+        .execute();
     } catch (error) {
       this.logger.error(
         `Login footprint of ${userId} was not recorded: ${String(error)}`,

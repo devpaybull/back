@@ -22,6 +22,7 @@ import { roundMoney } from '../../transactions/utils/round-money';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { DebtEvent } from '../entities/debt-event.entity';
 import { Debt } from '../entities/debt.entity';
+import { DEBT_BORROWER_ROLES } from '../types/debt-borrower-roles';
 import { DebtChanges } from '../types/debt-changes';
 import { DebtEventListQuery } from '../types/debt-event-list-query';
 import { DebtEventSortField } from '../types/debt-event-sort-field.enum';
@@ -59,6 +60,16 @@ export class DebtsService {
     amount: number,
     actorUserId: string,
   ): Promise<Debt> {
+    const debtor = await this.directory.findById(userId);
+
+    if (!debtor) throw new NotFoundException('User not found');
+
+    if (!DEBT_BORROWER_ROLES.includes(debtor.role)) {
+      throw new BadRequestException(
+        'A debt can only be issued to a trader or a lead trader',
+      );
+    }
+
     const id = await this.dataSource.transaction(async (manager) => {
       const operation = await this.wallets.creditDebtWithin(
         manager,

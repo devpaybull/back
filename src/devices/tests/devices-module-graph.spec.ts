@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuditInstallation } from '../../audit/entities/audit-installation.entity';
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
@@ -36,6 +37,8 @@ describe('the devices ↔ bank-details module graph', () => {
       .overrideProvider(getRepositoryToken(BankDetails))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(AuditLog))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(AuditInstallation))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Bank))
       .useValue(repository)

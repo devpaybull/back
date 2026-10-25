@@ -5,6 +5,7 @@ import { AuditLog } from '../entities/audit-log.entity';
 import { AuditRecord } from '../types/audit-record';
 import { AuditSource } from '../types/audit-source.enum';
 import { VictoriaAuditQuery } from '../types/victoria-audit-query';
+import { AuditInstallationService } from './audit-installation.service';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const FILTERED_FIELDS = [
@@ -23,7 +24,10 @@ type VictoriaLine = Record<string, string | undefined>;
 export class VictoriaLogsService {
   private readonly baseUrl: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly installation: AuditInstallationService,
+  ) {
     this.baseUrl = (config.get<string>('VICTORIA_LOGS_URL') ?? '').replace(
       /\/+$/,
       '',
@@ -35,12 +39,15 @@ export class VictoriaLogsService {
   }
 
   async insert(rows: AuditLog[]): Promise<void> {
+    const installationId = await this.installation.installationId();
     const params = new URLSearchParams({
-      _stream_fields: 'source',
+      _stream_fields: 'source,installationId',
       _time_field: 'createdAt',
       _msg_field: 'message',
     });
-    const body = rows.map((row) => JSON.stringify(toLine(row))).join('\n');
+    const body = rows
+      .map((row) => JSON.stringify(toLine(row, installationId)))
+      .join('\n');
 
     await this.request(`/insert/jsonline?${params.toString()}`, {
       headers: { 'Content-Type': 'application/stream+json' },
@@ -49,7 +56,7 @@ export class VictoriaLogsService {
   }
 
   async find(query: VictoriaAuditQuery): Promise<[AuditRecord[], number]> {
-    const filter = toFilter(query);
+    const filter = toFilter(query, await this.installation.installationId());
     const [counted] = await this.select(
       `${filter} | stats count_uniq(auditId) total`,
     );
@@ -101,8 +108,9 @@ export class VictoriaLogsService {
 const toActionsFilter = (actions: readonly string[]): string =>
   `action:in(${actions.map((action) => JSON.stringify(action)).join(',')})`;
 
-const toFilter = (query: VictoriaAuditQuery): string =>
+const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
   [
+    `installationId:=${JSON.stringify(installationId)}`,
     query.belowId === null ? 'auditId:>0' : `auditId:<${query.belowId}`,
     ...FILTERED_FIELDS.filter((field) => query[field] !== undefined).map(
       (field) => `${field}:=${JSON.stringify(String(query[field]))}`,
@@ -121,7 +129,11 @@ const fromJson = <T>(value: string | undefined): T | null =>
 const orNull = (value: string | undefined): string | null =>
   value === undefined || value === '' ? null : value;
 
-const toLine = (row: AuditLog): Record<string, unknown> => ({
+const toLine = (
+  row: AuditLog,
+  installationId: string,
+): Record<string, unknown> => ({
+  installationId,
   auditId: row.id,
   message: row.action,
   source: row.source,

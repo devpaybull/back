@@ -9,6 +9,14 @@ const configWith = (url: string) =>
     typeof VictoriaLogsService
   >[0];
 
+const INSTALLATION_ID = uuidOf(900);
+const SCOPE = `installationId:="${INSTALLATION_ID}"`;
+const installation = {
+  installationId: async () => INSTALLATION_ID,
+} as never as ConstructorParameters<typeof VictoriaLogsService>[1];
+const victoriaAt = (url: string) =>
+  new VictoriaLogsService(configWith(url), installation);
+
 const answer = (status: number, text = '') =>
   ({
     ok: status >= 200 && status < 300,
@@ -25,10 +33,8 @@ describe('VictoriaLogsService', () => {
   });
 
   it('is disabled when no URL is configured', () => {
-    expect(new VictoriaLogsService(configWith('')).enabled).toBe(false);
-    expect(
-      new VictoriaLogsService(configWith('http://localhost:9428')).enabled,
-    ).toBe(true);
+    expect(victoriaAt('').enabled).toBe(false);
+    expect(victoriaAt('http://localhost:9428').enabled).toBe(true);
   });
 
   describe('insert', () => {
@@ -54,8 +60,8 @@ describe('VictoriaLogsService', () => {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     } as AuditLog;
 
-    it('posts NDJSON to the jsonline endpoint with source as the stream and createdAt as the time', async () => {
-      await new VictoriaLogsService(configWith('http://vl:9428/')).insert([
+    it('posts NDJSON to the jsonline endpoint with source and the installation as the stream and createdAt as the time', async () => {
+      await victoriaAt('http://vl:9428/').insert([
         row,
         { ...row, id: 8 } as AuditLog,
       ]);
@@ -67,7 +73,7 @@ describe('VictoriaLogsService', () => {
         'http://vl:9428/insert/jsonline',
       );
       expect(Object.fromEntries(parsed.searchParams)).toEqual({
-        _stream_fields: 'source',
+        _stream_fields: 'source,installationId',
         _time_field: 'createdAt',
         _msg_field: 'message',
       });
@@ -80,6 +86,7 @@ describe('VictoriaLogsService', () => {
 
       expect(lines).toHaveLength(2);
       expect(lines[0]).toEqual({
+        installationId: INSTALLATION_ID,
         auditId: 7,
         message: 'POST /auth/login',
         source: 'http',
@@ -108,7 +115,7 @@ describe('VictoriaLogsService', () => {
         .mockResolvedValueOnce(answer(200))
         .mockResolvedValueOnce(answer(200, '{"total":"0"}'))
         .mockResolvedValueOnce(answer(200, '{"total":"0"}'));
-      const vl = new VictoriaLogsService(configWith('http://vl:9428'));
+      const vl = victoriaAt('http://vl:9428');
 
       await vl.insert([row]);
       await vl.find({
@@ -154,14 +161,14 @@ describe('VictoriaLogsService', () => {
     it('throws on anything but a 2xx', async () => {
       fetchMock.mockResolvedValue(answer(500, 'disk full'));
 
-      await expect(
-        new VictoriaLogsService(configWith('http://vl:9428')).insert([row]),
-      ).rejects.toThrow(/500/);
+      await expect(victoriaAt('http://vl:9428').insert([row])).rejects.toThrow(
+        /500/,
+      );
     });
   });
 
   describe('find', () => {
-    const service = () => new VictoriaLogsService(configWith('http://vl:9428'));
+    const service = () => victoriaAt('http://vl:9428');
     const queriesSent = (): string[] =>
       fetchMock.mock.calls.map(([, init]) =>
         (init.body as URLSearchParams).get('query'),
@@ -203,8 +210,8 @@ describe('VictoriaLogsService', () => {
         'http://vl:9428/select/logsql/query',
       );
       expect(queriesSent()).toEqual([
-        'auditId:<100 action:="POST /auth/login" statusCode:="401" | stats count_uniq(auditId) total',
-        'auditId:<100 action:="POST /auth/login" statusCode:="401" | sort by (auditId) partition by (auditId) limit 1 | sort by (auditId desc) offset 20 limit 10',
+        `${SCOPE} auditId:<100 action:="POST /auth/login" statusCode:="401" | stats count_uniq(auditId) total`,
+        `${SCOPE} auditId:<100 action:="POST /auth/login" statusCode:="401" | sort by (auditId) partition by (auditId) limit 1 | sort by (auditId desc) offset 20 limit 10`,
       ]);
       expect(total).toBe(42);
       expect(rows).toEqual([
@@ -243,7 +250,7 @@ describe('VictoriaLogsService', () => {
       });
 
       expect(queriesSent()[1]).toBe(
-        'auditId:>0 | sort by (auditId) partition by (auditId) limit 1 | sort by (auditId) offset 0 limit 5',
+        `${SCOPE} auditId:>0 | sort by (auditId) partition by (auditId) limit 1 | sort by (auditId) offset 0 limit 5`,
       );
     });
 
@@ -273,7 +280,7 @@ describe('VictoriaLogsService', () => {
       });
 
       expect(queriesSent()[0]).toBe(
-        'auditId:<10 action:="x\\" | delete" | stats count_uniq(auditId) total',
+        `${SCOPE} auditId:<10 action:="x\\" | delete" | stats count_uniq(auditId) total`,
       );
     });
 
@@ -290,7 +297,7 @@ describe('VictoriaLogsService', () => {
       });
 
       expect(queriesSent()[0]).toBe(
-        `auditId:<10 targetUserId:="${uuidOf(1)}" action:in("activity.device_added","x\\" | delete") | stats count_uniq(auditId) total`,
+        `${SCOPE} auditId:<10 targetUserId:="${uuidOf(1)}" action:in("activity.device_added","x\\" | delete") | stats count_uniq(auditId) total`,
       );
     });
 
@@ -320,7 +327,7 @@ describe('VictoriaLogsService', () => {
       });
 
       expect(queriesSent()[0]).toBe(
-        `auditId:<10 impersonatorUserId:="${uuidOf(5)}" | stats count_uniq(auditId) total`,
+        `${SCOPE} auditId:<10 impersonatorUserId:="${uuidOf(5)}" | stats count_uniq(auditId) total`,
       );
       expect(rows[0]).toMatchObject({
         actorUserId: uuidOf(7),
@@ -391,8 +398,55 @@ describe('VictoriaLogsService', () => {
       });
 
       expect(queriesSent()[0]).toBe(
-        'auditId:>0 action:="a.one" | stats count_uniq(auditId) total',
+        `${SCOPE} auditId:>0 action:="a.one" | stats count_uniq(auditId) total`,
       );
+    });
+
+    it('scopes every count and page query to this installation, so rows archived without one, or by another database, are never read', async () => {
+      fetchMock
+        .mockResolvedValueOnce(answer(200, '{"total":"1"}'))
+        .mockResolvedValueOnce(answer(200, ''))
+        .mockResolvedValueOnce(answer(200, '{"total":"1"}'))
+        .mockResolvedValueOnce(answer(200, ''));
+      const vl = service();
+
+      await vl.find({
+        belowId: 10,
+        sortOrder: SortOrder.Desc,
+        skip: 0,
+        take: 5,
+        targetUserId: uuidOf(1),
+      });
+      await vl.find({
+        belowId: null,
+        sortOrder: SortOrder.Asc,
+        skip: 0,
+        take: 5,
+        actions: ['activity.device_added'],
+      });
+
+      expect(queriesSent()).toHaveLength(4);
+      for (const query of queriesSent()) {
+        expect(query.startsWith(`${SCOPE} `)).toBe(true);
+      }
+    });
+
+    it('fails without querying when the installation cannot be read', async () => {
+      const failing = new VictoriaLogsService(configWith('http://vl:9428'), {
+        installationId: async () => {
+          throw new Error('database down');
+        },
+      } as never);
+
+      await expect(
+        failing.find({
+          belowId: 1,
+          sortOrder: SortOrder.Desc,
+          skip: 0,
+          take: 1,
+        }),
+      ).rejects.toThrow('database down');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws when VictoriaLogs answers with an error', async () => {

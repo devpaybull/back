@@ -76,11 +76,44 @@ const createFakeFootprints = () => {
     },
   );
 
+  const insertCalls: {
+    values: Record<string, unknown>;
+    updateColumns: string[];
+  }[] = [];
+
   const createQueryBuilder = jest.fn(() => {
-    queryBuilderCalls();
+    let pending: Record<string, unknown> = {};
+    let updateColumns: string[] = [];
+    let conflictPaths: string[] = [];
     const wanted: { ip: string; fingerprint: string; userAgent: string }[] = [];
     const builder = {
-      select: () => builder,
+      insert: () => builder,
+      into: () => builder,
+      values: (values: Record<string, unknown>) => {
+        pending = values;
+        return builder;
+      },
+      orUpdate: (columns: string[], paths: string[]) => {
+        updateColumns = columns;
+        conflictPaths = paths;
+        return builder;
+      },
+      execute: async () => {
+        insertCalls.push({ values: pending, updateColumns });
+        const lastSeenAt = (pending.lastSeenAt as () => string)();
+        expect(lastSeenAt).toBe('now()');
+        await upsert(
+          {
+            ...(pending as Parameters<typeof upsert>[0]),
+            lastSeenAt: new Date(),
+          },
+          conflictPaths,
+        );
+      },
+      select: () => {
+        queryBuilderCalls();
+        return builder;
+      },
       addSelect: () => builder,
       groupBy: () => builder,
       addGroupBy: () => builder,
@@ -125,7 +158,14 @@ const createFakeFootprints = () => {
     return builder;
   });
 
-  return { rows, upsert, findAndCount, createQueryBuilder, queryBuilderCalls };
+  return {
+    rows,
+    upsert,
+    findAndCount,
+    createQueryBuilder,
+    queryBuilderCalls,
+    insertCalls,
+  };
 };
 
 describe('LoginFootprintService', () => {
@@ -188,6 +228,17 @@ describe('LoginFootprintService', () => {
         'fingerprint',
         'userAgent',
       ]);
+    });
+
+    it('takes lastSeenAt from the database clock and refreshes it with the country on conflict', async () => {
+      await service.record(uuidOf(1), context);
+
+      expect(fake.insertCalls).toHaveLength(1);
+      const { values, updateColumns } = fake.insertCalls[0];
+      expect(typeof values.lastSeenAt).toBe('function');
+      expect((values.lastSeenAt as () => string)()).toBe('now()');
+      expect(values).not.toHaveProperty('firstSeenAt');
+      expect(updateColumns).toEqual(['country', 'lastSeenAt', 'updatedAt']);
     });
 
     it('moves lastSeenAt of a repeated combination and keeps firstSeenAt', async () => {

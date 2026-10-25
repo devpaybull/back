@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { In, LessThanOrEqual, MoreThan } from 'typeorm';
+import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
@@ -163,7 +164,10 @@ const build = () => {
     findAndCount: jest.fn(async () => [[], 0]),
     find: jest.fn(async () => [] as Partial<DebtEvent>[]),
   };
-  const directory = { findIdsMatching: jest.fn(async () => [] as string[]) };
+  const directory = {
+    findIdsMatching: jest.fn(async () => [] as string[]),
+    findById: jest.fn(async (id: string) => ({ id, role: Role.Trader })),
+  };
   const audit = { record: jest.fn(async () => ({})) };
 
   const wallets = new WalletService(
@@ -254,6 +258,46 @@ describe('DebtsService', () => {
 
       expect(t.rows<Debt>(Debt)).toHaveLength(2);
       expect(t.wallet().mainBalance).toBe(150);
+    });
+
+    it('lends to a lead trader too', async () => {
+      const t = build();
+      t.directory.findById.mockResolvedValue({
+        id: DEBTOR,
+        role: Role.LeadTrader,
+      });
+
+      await t.service.issue(DEBTOR, 100, ISSUER);
+
+      expect(t.rows(Debt)).toHaveLength(1);
+    });
+
+    it.each(
+      Object.values(Role).filter(
+        (role) => role !== Role.Trader && role !== Role.LeadTrader,
+      ),
+    )('refuses a %s with a 400 and writes nothing', async (role) => {
+      const t = build();
+      t.directory.findById.mockResolvedValue({ id: DEBTOR, role });
+
+      await expect(t.service.issue(DEBTOR, 100, ISSUER)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(t.dataSource.transaction).not.toHaveBeenCalled();
+      expect(t.wallet()).toBeUndefined();
+      expect(t.rows(Debt)).toHaveLength(0);
+      expect(t.rows(DebtEvent)).toHaveLength(0);
+      expect(t.audit.record).not.toHaveBeenCalled();
+    });
+
+    it('404 when the account is unknown', async () => {
+      const t = build();
+      t.directory.findById.mockResolvedValue(null as never);
+
+      await expect(t.service.issue(DEBTOR, 100, ISSUER)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(t.dataSource.transaction).not.toHaveBeenCalled();
     });
 
     it('writes nothing when the audit row fails', async () => {

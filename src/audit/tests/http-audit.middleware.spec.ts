@@ -26,6 +26,7 @@ import { AuthenticatedRequest } from '../../common/types/authenticated-request';
 import { Role } from '../../common/enums/role.enum';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AuditModule } from '../audit.module';
+import { AuditInstallation } from '../entities/audit-installation.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { HttpAuditMiddleware } from '../middleware/http-audit.middleware';
 import { AuditService } from '../services/audit.service';
@@ -126,6 +127,8 @@ describe('HttpAuditMiddleware', () => {
         providers: [{ provide: APP_GUARD, useClass: FakeBearerGuard }],
       })
         .overrideProvider(getRepositoryToken(AuditLog))
+        .useValue({})
+        .overrideProvider(getRepositoryToken(AuditInstallation))
         .useValue({})
         .overrideProvider(AuditService)
         .useValue({ recordHttp: (recordHttp = jest.fn(async () => ({}))) })

@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { AuditInstallation } from '../../audit/entities/audit-installation.entity';
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
 import { Country } from '../../countries/entities/country.entity';
@@ -77,6 +78,8 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(TraderSettings))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(AuditLog))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(AuditInstallation))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Bank))
       .useValue(repository)
