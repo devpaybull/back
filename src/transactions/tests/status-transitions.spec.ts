@@ -18,12 +18,6 @@ describe('status transitions', () => {
         TransactionStatus.Pending,
       );
     });
-
-    it('internal transfer starts active', () => {
-      expect(startStatus(TransactionKind.InternalTransfer)).toBe(
-        TransactionStatus.Active,
-      );
-    });
   });
 
   describe('isFinalStatus', () => {
@@ -113,32 +107,6 @@ describe('status transitions', () => {
           TransactionKind.PayOut,
           TransactionStatus.Active,
           TransactionStatus.Checking,
-        ),
-      ).toBe(false);
-    });
-  });
-
-  describe('internal transfer graph', () => {
-    it('goes active to success or canceled only', () => {
-      expect(
-        canTransition(
-          TransactionKind.InternalTransfer,
-          TransactionStatus.Active,
-          TransactionStatus.Success,
-        ),
-      ).toBe(true);
-      expect(
-        canTransition(
-          TransactionKind.InternalTransfer,
-          TransactionStatus.Active,
-          TransactionStatus.Canceled,
-        ),
-      ).toBe(true);
-      expect(
-        canTransition(
-          TransactionKind.InternalTransfer,
-          TransactionStatus.Active,
-          TransactionStatus.Dispute,
         ),
       ).toBe(false);
     });

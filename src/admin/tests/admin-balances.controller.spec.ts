@@ -1,3 +1,6 @@
+import { AccountTransaction } from '../../account-transactions/entities/account-transaction.entity';
+import { AccountTransactionStatus } from '../../account-transactions/types/account-transaction-status.enum';
+import { AccountTransactionType } from '../../account-transactions/types/account-transaction-type.enum';
 import {
   BadRequestException,
   ForbiddenException,
@@ -9,11 +12,7 @@ import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.
 import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AuthenticatedUser } from '../../common/types/token';
-import { Transaction } from '../../transactions/entities/transaction.entity';
 import { Wallet } from '../../transactions/entities/wallet.entity';
-import { StatusEventSource } from '../../transactions/types/status-event-source.enum';
-import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
-import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AdminBalancesController } from '../controllers/admin-balances.controller';
@@ -44,19 +43,19 @@ describe('AdminBalancesController', () => {
     }) as Wallet;
 
   let wallets: { findByUserId: jest.Mock };
-  let transactions: { createInternalTransfer: jest.Mock };
+  let transfers: { transfer: jest.Mock };
   let directory: { findById: jest.Mock; findByLogin: jest.Mock };
   let debts: { debtIdsByBalanceOperation: jest.Mock };
   let controller: AdminBalancesController;
 
   beforeEach(() => {
     wallets = { findByUserId: jest.fn() };
-    transactions = { createInternalTransfer: jest.fn() };
+    transfers = { transfer: jest.fn() };
     directory = { findById: jest.fn(), findByLogin: jest.fn() };
     debts = { debtIdsByBalanceOperation: jest.fn(async () => new Map()) };
     controller = new AdminBalancesController(
       wallets as never,
-      transactions as never,
+      transfers as never,
       directory as never,
       debts as never,
     );
@@ -150,36 +149,48 @@ describe('AdminBalancesController', () => {
       await expect(
         controller.transfer(uuidOf(1), dto, admin),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(transactions.createInternalTransfer).not.toHaveBeenCalled();
+      expect(transfers.transfer).not.toHaveBeenCalled();
     });
 
-    it('creates the transfer with source admin and the acting admin', async () => {
+    it('creates the transfer as an account transaction with the acting admin', async () => {
       directory.findById.mockResolvedValue(sender);
       directory.findByLogin.mockResolvedValue({
         id: uuidOf(2),
         role: Role.LeadTrader,
       } as User);
-      transactions.createInternalTransfer.mockResolvedValue({
-        id: uuidOf(100),
-        kind: TransactionKind.InternalTransfer,
-        status: TransactionStatus.Success,
-        traderUserId: uuidOf(1),
-        recipientUserId: uuidOf(2),
-        amountCrypto: toCrypto(50),
+      transfers.transfer.mockResolvedValue({
+        id: 100,
+        type: AccountTransactionType.Transfer,
+        status: AccountTransactionStatus.Completed,
+        statusReason: null,
+        userId: uuidOf(1),
+        counterpartyUserId: uuidOf(2),
+        amount: toCrypto(50),
+        comment: null,
+        actorUserId: admin.id,
+        completedAt: new Date(),
         createdAt: new Date(),
-      } as Transaction);
+      } as AccountTransaction);
 
       const result = await controller.transfer(uuidOf(1), dto, admin);
 
-      expect(transactions.createInternalTransfer).toHaveBeenCalledWith({
+      expect(transfers.transfer).toHaveBeenCalledWith({
         fromUserId: uuidOf(1),
         toUserId: uuidOf(2),
         amount: toCrypto(50),
-        source: StatusEventSource.Admin,
         actorUserId: admin.id,
         comment: undefined,
       });
-      expect(result.status).toBe(TransactionStatus.Success);
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 100,
+          type: AccountTransactionType.Transfer,
+          status: AccountTransactionStatus.Completed,
+          userId: uuidOf(1),
+          counterpartyUserId: uuidOf(2),
+          amount: '50.000000',
+        }),
+      );
     });
   });
 });

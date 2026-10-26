@@ -1,4 +1,7 @@
 import { Module } from '@nestjs/common';
+import { AdminDepositsController } from './controllers/admin-deposits.controller';
+import { AdminWithdrawalsController } from './controllers/admin-withdrawals.controller';
+import { AccountTransactionsModule } from '../account-transactions/account-transactions.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
@@ -47,6 +50,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     CountriesModule,
     CurrenciesModule,
     TransactionsModule,
+    AccountTransactionsModule,
     AuditModule,
     TraderSettingsModule,
     CounterpartiesModule,
@@ -56,6 +60,8 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     DebtsModule,
   ],
   controllers: [
+    AdminDepositsController,
+    AdminWithdrawalsController,
     AdminInvitesController,
     AdminUsersController,
     AdminLeadsController,

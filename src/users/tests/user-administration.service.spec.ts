@@ -424,6 +424,28 @@ describe('UserAdministrationService', () => {
     ).resolves.toBe(false);
   });
 
+  it('stamps passwordChangedAt when a password is set', async () => {
+    stored.push(activeUser({ passwordChangedAt: null }));
+    const before = Date.now();
+
+    const updated = await service.update(uuidOf(1), {
+      password: 'new-password',
+    });
+
+    expect(updated.passwordChangedAt).toBeInstanceOf(Date);
+    expect(updated.passwordChangedAt!.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('leaves passwordChangedAt alone when no password is set', async () => {
+    stored.push(activeUser({ passwordChangedAt: null }));
+
+    const updated = await service.update(uuidOf(1), {
+      telegramUsername: 'durov',
+    });
+
+    expect(updated.passwordChangedAt).toBeNull();
+  });
+
   it('does not put the password anywhere but the hash', async () => {
     stored.push(activeUser());
 

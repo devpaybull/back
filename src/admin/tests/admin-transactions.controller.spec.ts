@@ -37,7 +37,6 @@ describe('AdminTransactionsController', () => {
       traderUserId: uuidOf(1),
       bankDetailsId: null,
       counterpartyId: null,
-      recipientUserId: null,
       merchantId: null,
       amountFiat: toFiat(100),
       amountCrypto: toCrypto(1),
@@ -333,7 +332,6 @@ describe('AdminTransactionsController', () => {
       transactions.list.mockResolvedValue(
         page([
           transaction({
-            kind: TransactionKind.InternalTransfer,
             merchantId: null,
             bankDetailsId: null,
             counterpartyId: null,

@@ -855,35 +855,3 @@ describe('TransactionService.list', () => {
     });
   });
 });
-
-describe('TransactionService.createInternalTransfer, the audit row', () => {
-  it('records the amount as a six-decimal string, not as a decimal object', async () => {
-    const built = build();
-    const audit = { record: jest.fn(async () => undefined) };
-    const service = new TransactionService(
-      built.dataSource as never,
-      {} as never,
-      { transferWithin: jest.fn(async () => undefined) } as never,
-      audit as never,
-      built.rates as never,
-      built.team as never,
-      built.config as never,
-    );
-
-    await service.createInternalTransfer({
-      fromUserId: TRADER,
-      toUserId: LEAD_A,
-      amount: toCrypto('12.5'),
-      source: StatusEventSource.Admin,
-      actorUserId: uuidOf(9),
-    });
-
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'user.transfer',
-        metadata: expect.objectContaining({ amount: '12.500000' }),
-      }),
-      built.manager,
-    );
-  });
-});

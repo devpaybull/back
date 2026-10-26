@@ -45,22 +45,12 @@ const payOut: Partial<Record<TransactionStatus, TransactionStatus[]>> = {
   ],
 };
 
-const internalTransfer: Partial<
-  Record<TransactionStatus, TransactionStatus[]>
-> = {
-  [TransactionStatus.Active]: [
-    TransactionStatus.Success,
-    TransactionStatus.Canceled,
-  ],
-};
-
 const transitions: Record<
   TransactionKind,
   Partial<Record<TransactionStatus, TransactionStatus[]>>
 > = {
   [TransactionKind.PayIn]: payIn,
   [TransactionKind.PayOut]: payOut,
-  [TransactionKind.InternalTransfer]: internalTransfer,
 };
 
 export const FINAL_STATUSES: readonly TransactionStatus[] = [

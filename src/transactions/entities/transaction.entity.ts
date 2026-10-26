@@ -62,14 +62,6 @@ export class Transaction {
   @Column({ type: 'int', nullable: true })
   counterpartyId: number;
 
-  @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
-  @JoinColumn({ name: 'recipientUserId' })
-  recipient: User;
-
-  @Index()
-  @Column({ type: 'uuid', nullable: true })
-  recipientUserId: string;
-
   @ManyToOne(() => Merchant, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'merchantId' })
   merchant: Merchant;

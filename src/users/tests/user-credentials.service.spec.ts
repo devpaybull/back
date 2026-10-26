@@ -25,6 +25,7 @@ describe('UserCredentialsService', () => {
       providers: [
         UserCredentialsService,
         { provide: getRepositoryToken(UserBackupCode), useValue: backupCodes },
+        { provide: getRepositoryToken(User), useValue: {} },
       ],
     }).compile();
 
@@ -150,6 +151,155 @@ describe('UserCredentialsService', () => {
 
       expect(backupCodes.delete).toHaveBeenCalledWith({ userId: uuidOf(1) });
       expect(stored.map((code) => code.codeHash)).toEqual(['theirs']);
+    });
+  });
+
+  describe('spendWithdrawalTotp', () => {
+    const LIMITS = { maxFailures: 5, windowMinutes: 15 };
+    const NOW = new Date('2026-10-25T12:00:00Z');
+
+    const build = (affected = 1) => {
+      const query = {
+        update: jest.fn(),
+        set: jest.fn(),
+        where: jest.fn(),
+        andWhere: jest.fn(),
+        execute: jest.fn(async () => ({ affected })),
+      };
+      query.update.mockReturnValue(query);
+      query.set.mockReturnValue(query);
+      query.where.mockReturnValue(query);
+      query.andWhere.mockReturnValue(query);
+      const users = {
+        createQueryBuilder: jest.fn(() => query),
+        update: jest.fn(async () => undefined),
+      };
+      const credentials = new UserCredentialsService(
+        backupCodes as never,
+        users as never,
+      );
+
+      return { credentials, users, query };
+    };
+
+    const holder = (overrides: Partial<User> = {}): User =>
+      ({
+        id: uuidOf(1),
+        totpSecret: secret,
+        withdrawalTotpLastStep: null,
+        withdrawalTotpFailures: 0,
+        withdrawalTotpFailuresSince: null,
+        ...overrides,
+      }) as User;
+
+    it('accepts a valid code, stores its step and clears the failures', async () => {
+      const { credentials, query, users } = build(1);
+
+      await expect(
+        credentials.spendWithdrawalTotp(
+          holder(),
+          await generate({ secret }),
+          LIMITS,
+          NOW,
+        ),
+      ).resolves.toBe('accepted');
+      expect(query.set).toHaveBeenCalledWith({
+        withdrawalTotpLastStep: expect.any(Number),
+        withdrawalTotpFailures: 0,
+        withdrawalTotpFailuresSince: null,
+      });
+      expect(query.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('"withdrawalTotpLastStep" < :step'),
+        { step: expect.any(Number) },
+      );
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses and counts a replayed or older step — the conditional update changes nothing', async () => {
+      const { credentials, users } = build(0);
+
+      await expect(
+        credentials.spendWithdrawalTotp(
+          holder({ withdrawalTotpLastStep: 2_000_000_000 }),
+          await generate({ secret }),
+          LIMITS,
+          NOW,
+        ),
+      ).resolves.toBe('refused');
+      expect(users.update).toHaveBeenCalledWith(
+        { id: uuidOf(1) },
+        { withdrawalTotpFailures: 1, withdrawalTotpFailuresSince: NOW },
+      );
+    });
+
+    it('counts a wrong code and starts the window at the first failure', async () => {
+      const { credentials, users, query } = build();
+
+      await expect(
+        credentials.spendWithdrawalTotp(holder(), '000000', LIMITS, NOW),
+      ).resolves.toBe('refused');
+      expect(query.execute).not.toHaveBeenCalled();
+      expect(users.update).toHaveBeenCalledWith(
+        { id: uuidOf(1) },
+        { withdrawalTotpFailures: 1, withdrawalTotpFailuresSince: NOW },
+      );
+    });
+
+    it('adds to the failures inside the window', async () => {
+      const { credentials, users } = build();
+
+      await credentials.spendWithdrawalTotp(
+        holder({
+          withdrawalTotpFailures: 3,
+          withdrawalTotpFailuresSince: new Date(NOW.getTime() - 60_000),
+        }),
+        '000000',
+        LIMITS,
+        NOW,
+      );
+
+      expect(users.update).toHaveBeenCalledWith(
+        { id: uuidOf(1) },
+        { withdrawalTotpFailures: 4 },
+      );
+    });
+
+    it('locks at the maximum inside the window, before checking the code', async () => {
+      const { credentials, users, query } = build();
+
+      await expect(
+        credentials.spendWithdrawalTotp(
+          holder({
+            withdrawalTotpFailures: 5,
+            withdrawalTotpFailuresSince: new Date(NOW.getTime() - 60_000),
+          }),
+          await generate({ secret }),
+          LIMITS,
+          NOW,
+        ),
+      ).resolves.toBe('locked');
+      expect(query.execute).not.toHaveBeenCalled();
+      expect(users.update).not.toHaveBeenCalled();
+    });
+
+    it('restarts the count at one once the window has passed', async () => {
+      const { credentials, users } = build();
+
+      await expect(
+        credentials.spendWithdrawalTotp(
+          holder({
+            withdrawalTotpFailures: 5,
+            withdrawalTotpFailuresSince: new Date(NOW.getTime() - 16 * 60_000),
+          }),
+          '000000',
+          LIMITS,
+          NOW,
+        ),
+      ).resolves.toBe('refused');
+      expect(users.update).toHaveBeenCalledWith(
+        { id: uuidOf(1) },
+        { withdrawalTotpFailures: 1, withdrawalTotpFailuresSince: NOW },
+      );
     });
   });
 });

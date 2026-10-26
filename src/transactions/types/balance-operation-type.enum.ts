@@ -4,4 +4,7 @@ export enum BalanceOperationType {
   AdminAdjustment = 'admin_adjustment',
   DebtIssued = 'debt_issued',
   DebtWriteOff = 'debt_write_off',
+  Deposit = 'deposit',
+  Withdrawal = 'withdrawal',
+  WithdrawalFee = 'withdrawal_fee',
 }

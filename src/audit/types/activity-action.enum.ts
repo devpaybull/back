@@ -7,6 +7,8 @@ export enum ActivityAction {
   BankDetailsDeleted = 'activity.bank_details_deleted',
   DeviceAdded = 'activity.device_added',
   DeviceDeleted = 'activity.device_deleted',
+  DepositCredited = 'activity.deposit_credited',
+  WithdrawalCompleted = 'activity.withdrawal_completed',
 }
 
 export const ACTIVITY_ACTIONS: readonly ActivityAction[] =

@@ -314,10 +314,86 @@ describe('WalletService debt movements', () => {
         uuidOf(1),
         uuidOf(2),
         toCrypto(1),
-        uuidOf(50),
+        50,
       ),
     ).rejects.toThrow(ConflictException);
     expect(from.mainBalance).toEqual(toCrypto(-5));
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+
+  it('moves a transfer between main balances, creates a missing recipient wallet and ties both journal legs to the account transaction', async () => {
+    const from = {
+      id: 1,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(100),
+      mainReserved: toCrypto(30),
+    };
+    const to = {
+      id: 2,
+      userId: uuidOf(2),
+      mainBalance: toCrypto(5),
+      mainReserved: toCrypto(0),
+    };
+    const { service, manager, insert } = build([from, to]);
+
+    await service.transferWithin(
+      manager as never,
+      uuidOf(1),
+      uuidOf(2),
+      toCrypto('12.5'),
+      50,
+    );
+
+    expect(from.mainBalance).toEqual(toCrypto('87.5'));
+    expect(to.mainBalance).toEqual(toCrypto('17.5'));
+    expect(insert.values).toHaveBeenCalledWith([{ userId: uuidOf(2) }]);
+    expect(insert.orIgnore).toHaveBeenCalled();
+    const legs = manager.save.mock.calls[1][0] as unknown as Record<
+      string,
+      unknown
+    >[];
+    expect(legs).toEqual([
+      expect.objectContaining({
+        walletId: 1,
+        type: BalanceOperationType.Internal,
+        amount: toCrypto('-12.5'),
+        transactionId: null,
+        accountTransactionId: 50,
+      }),
+      expect.objectContaining({
+        walletId: 2,
+        type: BalanceOperationType.Internal,
+        amount: toCrypto('12.5'),
+        transactionId: null,
+        accountTransactionId: 50,
+      }),
+    ]);
+  });
+
+  it('refuses a transfer above the available main balance, reserved escrow excluded', async () => {
+    const from = {
+      id: 1,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(100),
+      mainReserved: toCrypto(30),
+    };
+    const to = {
+      id: 2,
+      userId: uuidOf(2),
+      mainBalance: toCrypto(0),
+      mainReserved: toCrypto(0),
+    };
+    const { service, manager } = build([from, to]);
+
+    await expect(
+      service.transferWithin(
+        manager as never,
+        uuidOf(1),
+        uuidOf(2),
+        toCrypto('70.000001'),
+        50,
+      ),
+    ).rejects.toThrow(ConflictException);
     expect(manager.save).not.toHaveBeenCalled();
   });
 });
@@ -415,7 +491,7 @@ describe('WalletService.lockWalletsWithin', () => {
         uuidOf(22),
         uuidOf(1),
         toCrypto(1),
-        uuidOf(50),
+        50,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(lockedIds()).toEqual([uuidOf(1), uuidOf(22)]);
@@ -559,5 +635,168 @@ describe('WalletService balance journal', () => {
     await expect(
       over.service.exportOperations({ userId }, 3),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('WalletService.creditDepositWithin', () => {
+  const build = (wallet: Partial<Wallet>) => {
+    const insert = {
+      insert: jest.fn(),
+      into: jest.fn(),
+      values: jest.fn(),
+      orIgnore: jest.fn(),
+      execute: jest.fn(async () => undefined),
+    };
+    insert.insert.mockReturnValue(insert);
+    insert.into.mockReturnValue(insert);
+    insert.values.mockReturnValue(insert);
+    insert.orIgnore.mockReturnValue(insert);
+    const manager = {
+      createQueryBuilder: jest.fn(() => insert),
+      findOne: jest.fn(async () => wallet as Wallet),
+      create: jest.fn((_entity: unknown, data: object) => ({ ...data })),
+      save: jest.fn(async (row: unknown) => row),
+    };
+    const service = new WalletService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    return { service, manager, insert };
+  };
+
+  it('creates the wallet if missing, then credits the main balance', async () => {
+    const wallet = { id: 4, userId: uuidOf(1), mainBalance: toCrypto(10) };
+    const { service, manager, insert } = build(wallet);
+
+    await service.creditDepositWithin(
+      manager as never,
+      uuidOf(1),
+      toCrypto('90.5'),
+      41,
+    );
+
+    expect(insert.into).toHaveBeenCalledWith(Wallet);
+    expect(insert.values).toHaveBeenCalledWith({ userId: uuidOf(1) });
+    expect(insert.orIgnore).toHaveBeenCalled();
+    expect(insert.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.findOne.mock.invocationCallOrder[0],
+    );
+    expect(wallet.mainBalance).toEqual(toCrypto('100.5'));
+  });
+
+  it('journals a deposit row tied to the account transaction, not to a deal', async () => {
+    const { service, manager } = build({
+      id: 4,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(0),
+    });
+
+    const operation = await service.creditDepositWithin(
+      manager as never,
+      uuidOf(1),
+      toCrypto(25),
+      41,
+    );
+
+    expect(operation).toEqual(
+      expect.objectContaining({
+        walletId: 4,
+        type: BalanceOperationType.Deposit,
+        balanceKind: BalanceKind.Main,
+        transactionId: null,
+        accountTransactionId: 41,
+        amount: toCrypto(25),
+        balanceBefore: toCrypto(0),
+        balanceAfter: toCrypto(25),
+      }),
+    );
+  });
+});
+
+describe('WalletService.settleWithdrawalWithin', () => {
+  const build = (wallet: Partial<Wallet>) => {
+    const manager = {
+      findOne: jest.fn(async () => wallet as Wallet),
+      create: jest.fn((_entity: unknown, data: object) => ({ ...data })),
+      save: jest.fn(async (row: unknown) => row),
+    };
+    const service = new WalletService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    return { service, manager };
+  };
+
+  it('releases amount plus fee from the reserve and journals both, tied to the withdrawal', async () => {
+    const wallet = {
+      id: 3,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(500),
+      mainReserved: toCrypto('100.5'),
+    };
+    const { service, manager } = build(wallet);
+
+    await service.settleWithdrawalWithin(
+      manager as never,
+      uuidOf(1),
+      toCrypto(100),
+      toCrypto('0.5'),
+      41,
+    );
+
+    expect(manager.findOne).toHaveBeenCalledWith(Wallet, {
+      where: { userId: uuidOf(1) },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(wallet.mainReserved).toEqual(toCrypto(0));
+    expect(wallet.mainBalance).toEqual(toCrypto('399.5'));
+    expect(manager.save).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        walletId: 3,
+        type: BalanceOperationType.Withdrawal,
+        amount: toCrypto(-100),
+        balanceBefore: toCrypto(500),
+        balanceAfter: toCrypto(400),
+        accountTransactionId: 41,
+      }),
+      expect.objectContaining({
+        walletId: 3,
+        type: BalanceOperationType.WithdrawalFee,
+        amount: toCrypto('-0.5'),
+        balanceBefore: toCrypto(400),
+        balanceAfter: toCrypto('399.5'),
+        accountTransactionId: 41,
+      }),
+    ]);
+  });
+
+  it('writes no fee row when the fee is zero', async () => {
+    const wallet = {
+      id: 3,
+      userId: uuidOf(1),
+      mainBalance: toCrypto(100),
+      mainReserved: toCrypto(100),
+    };
+    const { service, manager } = build(wallet);
+
+    await service.settleWithdrawalWithin(
+      manager as never,
+      uuidOf(1),
+      toCrypto(100),
+      toCrypto(0),
+      41,
+    );
+
+    const calls = manager.save.mock.calls;
+    const legs = calls[calls.length - 1][0] as unknown[];
+    expect(legs).toHaveLength(1);
+    expect(legs[0]).toMatchObject({ type: BalanceOperationType.Withdrawal });
+    expect(wallet.mainReserved).toEqual(toCrypto(0));
   });
 });

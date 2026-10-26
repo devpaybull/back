@@ -3,6 +3,32 @@ import { validateEnv } from '../config/env.validation';
 
 const SECRET = 'a-secret-that-is-at-least-32-characters';
 
+const TRON_ENV = {
+  TRON_NETWORK: 'nile',
+  TRON_API_URL: 'https://nile.trongrid.io',
+  TRON_API_KEY: 'api-key',
+  TRON_USDT_CONTRACT: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+  VAULT_ADDR: 'http://127.0.0.1:8200',
+  VAULT_ROLE_ID: 'role',
+  VAULT_SECRET_ID: 'secret',
+  VAULT_TRANSIT_KEY: 'paybull-tron',
+  TRON_DEPOSIT_SEED_CIPHERTEXT: 'vault:v1:seed',
+  TRON_HOT_KEY_CIPHERTEXT: 'vault:v1:hot',
+  TRON_ENERGY_KEY_CIPHERTEXT: 'vault:v1:energy',
+  TRON_MAX_TRX_BURN_PER_TX: '30',
+  SWEEP_MIN_USDT: '50',
+  SWEEP_BURN_WHEN_NO_ENERGY: 'true',
+  RAPIRA_TRX_RATE_SYMBOL: 'TRX/USDT',
+  DEPOSIT_WINDOW_MINUTES: '45',
+  DEPOSIT_MIN_USDT: '10',
+  DEPOSIT_MAX_ACTIVE_REQUESTS: '5',
+  WITHDRAWAL_MIN_USDT: '10',
+  WITHDRAWAL_DAILY_LIMIT_USDT: '50000',
+  WITHDRAWAL_SECURITY_HOLD_HOURS: '24',
+  WITHDRAWAL_QUOTE_TTL_SECONDS: '60',
+  PAYOUT_MODE: 'auto',
+};
+
 const baseEnv = (): Record<string, unknown> => ({
   DB_HOST: '127.0.0.1',
   DB_USERNAME: 'paybull',
@@ -14,6 +40,7 @@ const baseEnv = (): Record<string, unknown> => ({
   INSURANCE_PAY_OUT_MIN: '300',
   PLATFORM_MIN_PERCENT: '1',
   DEAL_TTL_MINUTES: '20',
+  ...TRON_ENV,
 });
 
 describe('validateEnv', () => {
@@ -444,6 +471,107 @@ describe('validateEnv', () => {
           DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS: value,
         }),
       ).toThrow(/DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS/);
+    });
+  });
+
+  describe('Tron, deposits and withdrawals', () => {
+    it('reads every engine variable with its type', () => {
+      const env = validateEnv(baseEnv());
+
+      expect(env.TRON_NETWORK).toBe('nile');
+      expect(env.SWEEP_BURN_WHEN_NO_ENERGY).toBe(true);
+      expect(env.DEPOSIT_MAX_ACTIVE_REQUESTS).toBe(5);
+      expect(env.WITHDRAWAL_SECURITY_HOLD_HOURS).toBe(24);
+      expect(env.PAYOUT_MODE).toBe('auto');
+      expect(env.TRON_SCAN_INTERVAL_SECONDS).toBe(3);
+      expect(env.PAYOUT_STALE_MINUTES).toBe(30);
+    });
+
+    it.each(Object.keys(TRON_ENV))(
+      'aborts startup without %s — the engine is required',
+      (name) => {
+        const env = baseEnv();
+        delete env[name];
+
+        expect(() => validateEnv(env)).toThrow(new RegExp(name));
+      },
+    );
+
+    it.each([
+      ['TRON_NETWORK', 'testnet'],
+      ['TRON_USDT_CONTRACT', '41a614f803b6fd780986a42c78ec9c7f77e6ded13c'],
+      ['TRON_DEPOSIT_SEED_CIPHERTEXT', 'plain mnemonic words'],
+      ['PAYOUT_MODE', 'semi'],
+      ['SWEEP_BURN_WHEN_NO_ENERGY', 'maybe'],
+      ['SWEEP_MIN_USDT', '0'],
+      ['TRON_MAX_TRX_BURN_PER_TX', '1.0000001'],
+      ['DEPOSIT_MAX_ACTIVE_REQUESTS', '0'],
+      ['WITHDRAWAL_QUOTE_TTL_SECONDS', ''],
+    ])('refuses %s=%p', (name, value) => {
+      expect(() => validateEnv({ ...baseEnv(), [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it('locks withdrawals after 5 wrong codes in 15 minutes by default', () => {
+      const env = validateEnv(baseEnv());
+
+      expect(env.WITHDRAWAL_TOTP_MAX_FAILURES).toBe(5);
+      expect(env.WITHDRAWAL_TOTP_LOCK_MINUTES).toBe(15);
+    });
+
+    it('takes typed withdrawal code limits and refuses zero', () => {
+      expect(
+        validateEnv({
+          ...baseEnv(),
+          WITHDRAWAL_TOTP_MAX_FAILURES: '3',
+          WITHDRAWAL_TOTP_LOCK_MINUTES: '30',
+        }),
+      ).toMatchObject({
+        WITHDRAWAL_TOTP_MAX_FAILURES: 3,
+        WITHDRAWAL_TOTP_LOCK_MINUTES: 30,
+      });
+      expect(() =>
+        validateEnv({ ...baseEnv(), WITHDRAWAL_TOTP_MAX_FAILURES: '0' }),
+      ).toThrow(/WITHDRAWAL_TOTP_MAX_FAILURES/);
+    });
+
+    it('reads SWEEP_BURN_WHEN_NO_ENERGY=false as a real false', () => {
+      expect(
+        validateEnv({ ...baseEnv(), SWEEP_BURN_WHEN_NO_ENERGY: 'false' })
+          .SWEEP_BURN_WHEN_NO_ENERGY,
+      ).toBe(false);
+    });
+  });
+
+  describe('transport and contract of the Tron engine', () => {
+    it('refuses a plain-http node or Vault that is not loopback', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv(), TRON_API_URL: 'http://nile.trongrid.io' }),
+      ).toThrow(/TRON_API_URL/);
+      expect(() =>
+        validateEnv({ ...baseEnv(), VAULT_ADDR: 'http://vault.internal:8200' }),
+      ).toThrow(/VAULT_ADDR/);
+    });
+
+    it('accepts plain http to loopback outside production only', () => {
+      expect(validateEnv(baseEnv()).VAULT_ADDR).toBe('http://127.0.0.1:8200');
+      expect(() =>
+        validateEnv({ ...baseEnv(), NODE_ENV: 'production' }),
+      ).toThrow(/VAULT_ADDR/);
+    });
+
+    it('pins the USDT contract on mainnet', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv(), TRON_NETWORK: 'mainnet' }),
+      ).toThrow(/TRON_USDT_CONTRACT/);
+      expect(
+        validateEnv({
+          ...baseEnv(),
+          TRON_NETWORK: 'mainnet',
+          TRON_USDT_CONTRACT: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        }).TRON_USDT_CONTRACT,
+      ).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
     });
   });
 });

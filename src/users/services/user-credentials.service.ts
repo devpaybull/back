@@ -7,6 +7,8 @@ import { IsNull, Repository } from 'typeorm';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { UserBackupCode } from '../entities/user-backup-code.entity';
 import { User } from '../entities/user.entity';
+import { OneTimeCodeCheck } from '../types/one-time-code-check';
+import { OneTimeCodeLimits } from '../types/one-time-code-limits';
 import { SecondFactor } from '../types/second-factor';
 import { normalizeCode } from '../utils/normalize-code';
 
@@ -21,6 +23,8 @@ export class UserCredentialsService {
   constructor(
     @InjectRepository(UserBackupCode)
     private readonly backupCodes: Repository<UserBackupCode>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
   ) {}
 
   hashPassword(password: string): Promise<string> {
@@ -29,6 +33,20 @@ export class UserCredentialsService {
 
   verifyPassword(user: User, password: string): Promise<boolean> {
     return compare(password, user.passwordHash);
+  }
+
+  private async totpStep(user: User, totp: string): Promise<number | null> {
+    try {
+      const result = await verify({
+        secret: user.totpSecret,
+        token: normalizeCode(totp),
+        epochTolerance: TOTP_EPOCH_TOLERANCE_SECONDS,
+      });
+
+      return result.valid && 'timeStep' in result ? result.timeStep : null;
+    } catch {
+      return null;
+    }
   }
 
   async verifyTotp(user: User, totp: string): Promise<boolean> {
@@ -43,6 +61,53 @@ export class UserCredentialsService {
     } catch {
       return false;
     }
+  }
+
+  async spendWithdrawalTotp(
+    user: User,
+    totp: string,
+    limits: OneTimeCodeLimits,
+    now = new Date(),
+  ): Promise<OneTimeCodeCheck> {
+    const windowStart = new Date(now.getTime() - limits.windowMinutes * 60_000);
+    const failuresCount =
+      user.withdrawalTotpFailuresSince &&
+      user.withdrawalTotpFailuresSince > windowStart
+        ? user.withdrawalTotpFailures
+        : 0;
+
+    if (failuresCount >= limits.maxFailures) return 'locked';
+
+    const step = await this.totpStep(user, totp);
+    const spent =
+      step !== null &&
+      (
+        await this.users
+          .createQueryBuilder()
+          .update(User)
+          .set({
+            withdrawalTotpLastStep: step,
+            withdrawalTotpFailures: 0,
+            withdrawalTotpFailuresSince: null,
+          })
+          .where('id = :id', { id: user.id })
+          .andWhere(
+            '("withdrawalTotpLastStep" IS NULL OR "withdrawalTotpLastStep" < :step)',
+            { step },
+          )
+          .execute()
+      ).affected === 1;
+
+    if (spent) return 'accepted';
+
+    await this.users.update(
+      { id: user.id },
+      failuresCount === 0
+        ? { withdrawalTotpFailures: 1, withdrawalTotpFailuresSince: now }
+        : { withdrawalTotpFailures: failuresCount + 1 },
+    );
+
+    return 'refused';
   }
 
   async verifySecondFactor(user: User, factor: SecondFactor): Promise<boolean> {

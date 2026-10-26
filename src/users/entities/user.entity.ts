@@ -64,6 +64,21 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   twoFactorConfirmedAt: Date;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  passwordChangedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  twoFactorResetAt: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  withdrawalTotpLastStep: number | null;
+
+  @Column({ type: 'int', default: 0 })
+  withdrawalTotpFailures: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  withdrawalTotpFailuresSince: Date | null;
+
   @OneToMany(() => UserBackupCode, (code) => code.user)
   backupCodes: UserBackupCode[];
 

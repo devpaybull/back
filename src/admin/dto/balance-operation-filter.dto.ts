@@ -1,19 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsDate, IsEnum, IsOptional } from 'class-validator';
+import { toQueryList } from '../../common/utils/to-query-list';
 import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
-
-const toList = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' || Array.isArray(value)
-    ? [value]
-        .flat()
-        .flatMap((item: unknown) =>
-          typeof item === 'string' ? item.split(',') : [item],
-        )
-        .map((item: unknown) => (typeof item === 'string' ? item.trim() : item))
-        .filter((item) => item !== '')
-    : value;
 
 export class BalanceOperationFilterDto {
   @ApiPropertyOptional({
@@ -42,7 +32,7 @@ export class BalanceOperationFilterDto {
     description: 'One or several types: repeated or comma-separated',
   })
   @IsOptional()
-  @Transform(toList)
+  @Transform(toQueryList)
   @IsEnum(BalanceOperationType, { each: true })
   type?: BalanceOperationType[];
 

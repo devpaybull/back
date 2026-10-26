@@ -1,0 +1,14 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": { "allowJs": true } }]
+  },
+  "testEnvironment": "node",
+  "transformIgnorePatterns": ["/node_modules/(?!.*(@scure|@noble)/)"],
+  "globalSetup": "<rootDir>/test/support/global-setup.ts",
+  "globalTeardown": "<rootDir>/test/support/global-teardown.ts",
+  "testTimeout": 120000,
+  "maxWorkers": 1
+}

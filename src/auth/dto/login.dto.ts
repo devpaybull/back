@@ -7,7 +7,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import { TOTP_PATTERN } from './confirm-registration.dto';
+import { TOTP_PATTERN } from '../../common/utils/totp-pattern';
 
 export class LoginDto {
   @ApiProperty({

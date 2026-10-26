@@ -22,6 +22,9 @@ import { UserStatus } from '../src/users/types/user-status.enum';
 import { Merchant } from '../src/merchants/entities/merchant.entity';
 import { MerchantApiKey } from '../src/merchants/entities/merchant-api-key.entity';
 import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
+import { AccountTransaction } from '../src/account-transactions/entities/account-transaction.entity';
+import { AccountTransactionStatus } from '../src/account-transactions/types/account-transaction-status.enum';
+import { AccountTransactionType } from '../src/account-transactions/types/account-transaction-type.enum';
 import { Wallet } from '../src/transactions/entities/wallet.entity';
 import { BalanceOperation } from '../src/transactions/entities/balance-operation.entity';
 import { BalanceKind } from '../src/transactions/types/balance-kind.enum';
@@ -154,6 +157,7 @@ async function recordBalanceMove(
   delta: Decimal.Value,
   type: BalanceOperationType,
   transactionId: string | null,
+  accountTransactionId: number | null = null,
 ): Promise<BalanceOperation> {
   const field =
     balanceKind === BalanceKind.Main
@@ -173,6 +177,7 @@ async function recordBalanceMove(
       type,
       balanceKind,
       transactionId,
+      accountTransactionId,
       amount: roundCrypto(delta),
       balanceBefore: before,
       balanceAfter: after,
@@ -897,44 +902,36 @@ async function main(): Promise<void> {
       ],
     });
 
+    const transferAmount = toCrypto(50);
     const transfer = await manager.save(
-      Transaction,
-      manager.create(Transaction, {
-        kind: TransactionKind.InternalTransfer,
-        status: TransactionStatus.Success,
-        traderUserId: trader1.user.id,
-        recipientUserId: lead1.user.id,
-        amountCrypto: 50,
+      AccountTransaction,
+      manager.create(AccountTransaction, {
+        type: AccountTransactionType.Transfer,
+        status: AccountTransactionStatus.Completed,
+        userId: trader1.user.id,
+        counterpartyUserId: lead1.user.id,
+        amount: transferAmount,
         comment: 'Комиссия лида за месяц',
-        resolvedAt: new Date(),
+        actorUserId: admin.user.id,
+        completedAt: new Date(),
       }),
     );
-    await writeStatusPath(manager, transfer.id, [
-      {
-        toStatus: TransactionStatus.Active,
-        source: StatusEventSource.Admin,
-        actorUserId: admin.user.id,
-      },
-      {
-        toStatus: TransactionStatus.Success,
-        source: StatusEventSource.Admin,
-        actorUserId: admin.user.id,
-      },
-    ]);
     await recordBalanceMove(
       manager,
       trader1Wallet,
       BalanceKind.Main,
-      -50,
+      transferAmount.neg(),
       BalanceOperationType.Internal,
+      null,
       transfer.id,
     );
     await recordBalanceMove(
       manager,
       lead1Wallet,
       BalanceKind.Main,
-      50,
+      transferAmount,
       BalanceOperationType.Internal,
+      null,
       transfer.id,
     );
 

@@ -5,11 +5,13 @@ import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
   IsString,
   IsUrl,
+  Matches,
   Max,
   Min,
   MinLength,
@@ -25,6 +27,29 @@ export enum NodeEnv {
 }
 
 const MIN_SECRET_LENGTH = 32;
+const TRON_ADDRESS_PATTERN = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+export const TRON_NETWORKS = ['mainnet', 'nile', 'shasta'] as const;
+export const PAYOUT_MODES = ['auto', 'manual'] as const;
+export const MAINNET_USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const SECURE_URL_VARIABLES = ['TRON_API_URL', 'VAULT_ADDR'] as const;
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+const isSecureUrl = (value: unknown, production: boolean): boolean => {
+  if (typeof value !== 'string') return true;
+
+  try {
+    const url = new URL(value);
+
+    return (
+      url.protocol === 'https:' ||
+      (!production &&
+        url.protocol === 'http:' &&
+        LOOPBACK_HOSTS.includes(url.hostname))
+    );
+  } catch {
+    return true;
+  }
+};
 const NIGHT_WINDOW_PREFIXES = ['NIGHT_STOP', 'INSURANCE_NIGHT'] as const;
 const TRUE_VALUES = ['true', '1', 'yes'];
 const FALSE_VALUES = ['false', '0', 'no'];
@@ -317,6 +342,174 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS: number = 60;
+
+  @IsIn(TRON_NETWORKS)
+  TRON_NETWORK: (typeof TRON_NETWORKS)[number];
+
+  @IsUrl({ require_tld: false, require_protocol: true })
+  TRON_API_URL: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  TRON_API_KEY: string;
+
+  @Matches(TRON_ADDRESS_PATTERN)
+  TRON_USDT_CONTRACT: string;
+
+  @IsUrl({ require_tld: false, require_protocol: true })
+  VAULT_ADDR: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  VAULT_ROLE_ID: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  VAULT_SECRET_ID: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  VAULT_TRANSIT_KEY: string;
+
+  @Matches(/^vault:v\d+:/)
+  TRON_DEPOSIT_SEED_CIPHERTEXT: string;
+
+  @Matches(/^vault:v\d+:/)
+  TRON_HOT_KEY_CIPHERTEXT: string;
+
+  @Matches(/^vault:v\d+:/)
+  TRON_ENERGY_KEY_CIPHERTEXT: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  TRON_SCAN_INTERVAL_SECONDS: number = 3;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  TRON_SCAN_BATCH_BLOCKS: number = 100;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  TRON_SCAN_MAX_LAG_BLOCKS: number = 200;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  TRON_CHAIN_PARAMS_TTL_SECONDS: number = 600;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  TRON_CONFIRM_INTERVAL_SECONDS: number = 10;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  TRON_MAX_TRX_BURN_PER_TX: string;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  SWEEP_MIN_USDT: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  SWEEP_MAX_IDLE_HOURS: number = 24;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  SWEEP_INTERVAL_SECONDS: number = 300;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  SWEEP_BATCH_SIZE: number = 20;
+
+  @ToBoolean()
+  @IsBoolean()
+  SWEEP_BURN_WHEN_NO_ENERGY: boolean;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  RAPIRA_TRX_RATE_SYMBOL: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  TRX_RATE_TTL_SECONDS: number = 60;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(1)
+  DEPOSIT_WINDOW_MINUTES: number;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  DEPOSIT_MIN_USDT: string;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(1)
+  DEPOSIT_MAX_ACTIVE_REQUESTS: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEPOSIT_EXPIRY_INTERVAL_SECONDS: number = 30;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  WITHDRAWAL_MIN_USDT: string;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  WITHDRAWAL_DAILY_LIMIT_USDT: string;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(0)
+  WITHDRAWAL_SECURITY_HOLD_HOURS: number;
+
+  @ToRequiredNumber()
+  @IsInt()
+  @Min(1)
+  WITHDRAWAL_QUOTE_TTL_SECONDS: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  WITHDRAWAL_TOTP_MAX_FAILURES: number = 5;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  WITHDRAWAL_TOTP_LOCK_MINUTES: number = 15;
+
+  @IsIn(PAYOUT_MODES)
+  PAYOUT_MODE: (typeof PAYOUT_MODES)[number];
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_INTERVAL_SECONDS: number = 15;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_BATCH_SIZE: number = 10;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_STALE_MINUTES: number = 30;
 }
 
 export function validateEnv(
@@ -341,6 +534,38 @@ export function validateEnv(
         }),
       );
     }
+  }
+
+  for (const variable of SECURE_URL_VARIABLES) {
+    if (
+      !isSecureUrl(
+        validated[variable],
+        validated.NODE_ENV === NodeEnv.Production,
+      )
+    ) {
+      errors.push(
+        Object.assign(new ValidationError(), {
+          property: variable,
+          constraints: {
+            secureUrl: `${variable} must be https (plain http only to loopback outside production)`,
+          },
+        }),
+      );
+    }
+  }
+
+  if (
+    validated.TRON_NETWORK === 'mainnet' &&
+    validated.TRON_USDT_CONTRACT !== MAINNET_USDT_CONTRACT
+  ) {
+    errors.push(
+      Object.assign(new ValidationError(), {
+        property: 'TRON_USDT_CONTRACT',
+        constraints: {
+          mainnetUsdt: `TRON_USDT_CONTRACT on mainnet must be ${MAINNET_USDT_CONTRACT}`,
+        },
+      }),
+    );
   }
 
   if (errors.length > 0) {

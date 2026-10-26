@@ -1,3 +1,4 @@
+import { TransfersService } from '../../account-transactions/services/transfers.service';
 import {
   BadRequestException,
   INestApplication,
@@ -21,7 +22,6 @@ import { WalletService } from '../../transactions/services/wallet.service';
 import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
-import { TransactionService } from '../../transactions/services/transaction.service';
 import {
   AdminBalancesController,
   BALANCE_EXPORT_MAX_ROWS,
@@ -39,6 +39,7 @@ const operation = (
     type: BalanceOperationType.Transaction,
     balanceKind: BalanceKind.Main,
     transactionId: null,
+    accountTransactionId: null,
     amount: toCrypto(10),
     balanceBefore: toCrypto(0),
     balanceAfter: toCrypto(10),
@@ -94,7 +95,7 @@ describe('AdminBalancesController balance journal', () => {
     expect(wallets.exportOperations).not.toHaveBeenCalled();
   });
 
-  it('passes the filters on and maps rows with deal and debt references', async () => {
+  it('passes the filters on and maps rows with deal, debt and account transaction references', async () => {
     const from = new Date('2026-10-01T00:00:00Z');
     wallets.listOperations.mockResolvedValue(
       toPage(
@@ -103,8 +104,12 @@ describe('AdminBalancesController balance journal', () => {
             operation(1, { transactionId: uuidOf(50) }),
             operation(2, { type: BalanceOperationType.DebtIssued }),
             operation(3, { type: BalanceOperationType.AdminAdjustment }),
+            operation(4, {
+              type: BalanceOperationType.Internal,
+              accountTransactionId: 41,
+            }),
           ],
-          3,
+          4,
         ],
         { page: 1, limit: 20 },
       ),
@@ -131,9 +136,10 @@ describe('AdminBalancesController balance journal', () => {
       sortOrder: 'desc',
     });
     expect(page.items.map((row) => row.reference)).toEqual([
-      { transactionId: uuidOf(50), debtId: null },
-      { transactionId: null, debtId: 9 },
+      { transactionId: uuidOf(50), debtId: null, accountTransactionId: null },
+      { transactionId: null, debtId: 9, accountTransactionId: null },
       null,
+      { transactionId: null, debtId: null, accountTransactionId: 41 },
     ]);
     expect(page.items[0]).toMatchObject({
       id: 1,
@@ -142,7 +148,7 @@ describe('AdminBalancesController balance journal', () => {
       balanceBefore: '0.000000',
       balanceAfter: '10.000000',
     });
-    expect(page.meta.total).toBe(3);
+    expect(page.meta.total).toBe(4);
   });
 
   it('resolves debts in one batched lookup over the debt rows only', async () => {
@@ -198,7 +204,7 @@ describe('balance journal over HTTP', () => {
       controllers: [AdminBalancesController],
       providers: [
         { provide: WalletService, useValue: wallets },
-        { provide: TransactionService, useValue: {} },
+        { provide: TransfersService, useValue: {} },
         {
           provide: UserDirectoryService,
           useValue: { findById: jest.fn(async () => ({ id: USER })) },

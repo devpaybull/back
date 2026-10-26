@@ -14,7 +14,11 @@ describe('balanceOperationsCsv', () => {
     amount: '-12.500000',
     balanceBefore: '100.000000',
     balanceAfter: '87.500000',
-    reference: { transactionId: 'tx-1', debtId: null },
+    reference: {
+      transactionId: 'tx-1',
+      debtId: null,
+      accountTransactionId: null,
+    },
     ...overrides,
   });
 
@@ -35,7 +39,11 @@ describe('balanceOperationsCsv', () => {
     const csv = balanceOperationsCsv([
       row({
         type: BalanceOperationType.DebtIssued,
-        reference: { transactionId: null, debtId: 7 },
+        reference: {
+          transactionId: null,
+          debtId: 7,
+          accountTransactionId: null,
+        },
       }),
       row({ reference: null }),
     ]);
@@ -44,9 +52,30 @@ describe('balanceOperationsCsv', () => {
     expect(csv.split('\r\n')[2]).toMatch(/,87\.500000,$/);
   });
 
+  it('names an account transaction reference', () => {
+    const csv = balanceOperationsCsv([
+      row({
+        type: BalanceOperationType.Internal,
+        reference: {
+          transactionId: null,
+          debtId: null,
+          accountTransactionId: 41,
+        },
+      }),
+    ]);
+
+    expect(csv).toContain(',account_transaction:41\r\n');
+  });
+
   it('quotes a field with a comma, a quote or a line break, doubling quotes', () => {
     const csv = balanceOperationsCsv([
-      row({ reference: { transactionId: 'a,"b"\nc', debtId: null } }),
+      row({
+        reference: {
+          transactionId: 'a,"b"\nc',
+          debtId: null,
+          accountTransactionId: null,
+        },
+      }),
     ]);
 
     expect(csv).toContain(',"transaction:a,""b""\nc"\r\n');

@@ -58,8 +58,21 @@ describe('ListBalanceOperationsQueryDto', () => {
     expect(single.dto.type).toEqual(['internal']);
   });
 
+  it('accepts the deposit and withdrawal journal types', async () => {
+    const parsed = await parse(BalanceOperationFilterDto, {
+      type: 'deposit,withdrawal,withdrawal_fee',
+    });
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.dto.type).toEqual([
+      'deposit',
+      'withdrawal',
+      'withdrawal_fee',
+    ]);
+  });
+
   it('rejects an unknown type, an unknown kind and a bad date', async () => {
-    const type = await parse(BalanceOperationFilterDto, { type: 'deposit' });
+    const type = await parse(BalanceOperationFilterDto, { type: 'bonus' });
     const kind = await parse(BalanceOperationFilterDto, { kind: 'bonus' });
     const date = await parse(BalanceOperationFilterDto, { from: 'yesterday' });
 

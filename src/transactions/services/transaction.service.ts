@@ -16,7 +16,6 @@ import {
 import { AuditService } from '../../audit/services/audit.service';
 import { Page, toPage } from '../../common/types/page';
 import { FIAT_SCALE } from '../../common/utils/fiat-scale';
-import { formatCrypto } from '../../common/utils/format-crypto';
 import { RATE_SCALE } from '../../common/utils/rate-scale';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { UserTeamService } from '../../users/services/user-team.service';
@@ -24,7 +23,6 @@ import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
 import { CreateDealInput } from '../types/create-deal-input';
-import { InternalTransferInput } from '../types/internal-transfer-input';
 import { StatusChange } from '../types/status-change';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
@@ -278,73 +276,6 @@ export class TransactionService {
     await manager.save(transaction);
     await this.writeEvent(manager, transaction.id, from, change);
     return transaction;
-  }
-
-  async createInternalTransfer(
-    input: InternalTransferInput,
-  ): Promise<Transaction> {
-    const created = await this.dataSource.transaction(async (manager) => {
-      const transaction = manager.create(Transaction, {
-        kind: TransactionKind.InternalTransfer,
-        status: TransactionStatus.Active,
-        traderUserId: input.fromUserId,
-        recipientUserId: input.toUserId,
-        amountCrypto: input.amount,
-        comment: input.comment ?? null,
-      });
-      await manager.save(transaction);
-      await this.writeEvent(manager, transaction.id, null, {
-        toStatus: TransactionStatus.Active,
-        source: input.source,
-        actorUserId: input.actorUserId,
-      });
-      return transaction;
-    });
-
-    try {
-      return await this.dataSource.transaction(async (manager) => {
-        await this.wallets.transferWithin(
-          manager,
-          input.fromUserId,
-          input.toUserId,
-          input.amount,
-          created.id,
-        );
-        created.status = TransactionStatus.Success;
-        created.resolvedAt = new Date();
-        await manager.save(created);
-        await this.writeEvent(manager, created.id, TransactionStatus.Active, {
-          toStatus: TransactionStatus.Success,
-          source: input.source,
-          actorUserId: input.actorUserId,
-        });
-        if (input.actorUserId) {
-          await this.audit.record(
-            {
-              actorUserId: input.actorUserId,
-              targetUserId: input.toUserId,
-              action: 'user.transfer',
-              metadata: {
-                transactionId: created.id,
-                fromUserId: input.fromUserId,
-                toUserId: input.toUserId,
-                amount: formatCrypto(input.amount),
-              },
-            },
-            manager,
-          );
-        }
-        return created;
-      });
-    } catch (error) {
-      await this.transition(created.id, {
-        toStatus: TransactionStatus.Canceled,
-        source: input.source,
-        actorUserId: input.actorUserId,
-        reason: 'Internal transfer failed',
-      });
-      throw error;
-    }
   }
 
   private async applySettlement(

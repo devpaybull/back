@@ -111,6 +111,7 @@ export class UserEnrolmentService {
       this.users.merge(user, {
         status: UserStatus.PendingTwoFactor,
         twoFactorConfirmedAt: null,
+        twoFactorResetAt: new Date(),
         totpSecret: generateSecret(),
       }),
     );

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AccountTransactionsModule } from './account-transactions/account-transactions.module';
 import { AdminModule } from './admin/admin.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuditModule } from './audit/audit.module';
@@ -19,6 +20,7 @@ import { InvitesModule } from './invites/invites.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { TraderSettingsModule } from './trader-settings/trader-settings.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { TronModule } from './tron/tron.module';
 import { UserNotesModule } from './user-notes/user-notes.module';
 import { UsersModule } from './users/users.module';
 
@@ -55,6 +57,8 @@ import { UsersModule } from './users/users.module';
     MerchantsModule,
     CounterpartiesModule,
     TransactionsModule,
+    TronModule,
+    AccountTransactionsModule,
     AuditModule,
     TraderSettingsModule,
     AnalyticsModule,

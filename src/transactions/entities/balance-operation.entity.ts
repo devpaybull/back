@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { AccountTransaction } from '../../account-transactions/entities/account-transaction.entity';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
 import { cryptoColumn } from '../../common/utils/crypto-column';
@@ -41,6 +42,14 @@ export class BalanceOperation {
   @Index()
   @Column({ type: 'uuid', nullable: true })
   transactionId: string;
+
+  @ManyToOne(() => AccountTransaction, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'accountTransactionId' })
+  accountTransaction: AccountTransaction | null;
+
+  @Index()
+  @Column({ type: 'int', nullable: true })
+  accountTransactionId: number | null;
 
   @Column(cryptoColumn())
   amount: Crypto;

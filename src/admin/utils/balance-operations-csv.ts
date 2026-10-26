@@ -1,3 +1,4 @@
+import { csvField } from './csv-field';
 import { BalanceOperationDto } from '../dto/balance-operation.dto';
 
 const HEADER = [
@@ -11,15 +12,12 @@ const HEADER = [
 ];
 const LINE_BREAK = '\r\n';
 
-const field = (value: string | number): string => {
-  const text = String(value);
-
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-};
-
 const referenceOf = ({ reference }: BalanceOperationDto): string => {
   if (reference?.debtId != null) return `debt:${reference.debtId}`;
   if (reference?.transactionId) return `transaction:${reference.transactionId}`;
+  if (reference?.accountTransactionId != null) {
+    return `account_transaction:${reference.accountTransactionId}`;
+  }
 
   return '';
 };
@@ -37,6 +35,6 @@ export const balanceOperationsCsv = (rows: BalanceOperationDto[]): string =>
       referenceOf(row),
     ]),
   ]
-    .map((line) => line.map(field).join(','))
+    .map((line) => line.map(csvField).join(','))
     .join(LINE_BREAK)
     .concat(LINE_BREAK);

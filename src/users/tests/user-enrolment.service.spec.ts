@@ -365,6 +365,16 @@ describe('UserEnrolmentService', () => {
       expect(reset.totpSecret).toEqual(expect.any(String));
     });
 
+    it('stamps twoFactorResetAt, which the withdrawal hold reads', async () => {
+      stored.push(confirmedUser());
+      const before = Date.now();
+
+      const reset = await service.resetTwoFactor(uuidOf(1));
+
+      expect(reset.twoFactorResetAt).toBeInstanceOf(Date);
+      expect(reset.twoFactorResetAt!.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
     it('reaches a blocked user', async () => {
       stored.push({ ...confirmedUser(), status: UserStatus.Blocked });
 

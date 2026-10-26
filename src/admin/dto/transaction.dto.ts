@@ -32,9 +32,6 @@ export class TransactionDto {
   counterpartyId: number;
 
   @ApiProperty({ nullable: true })
-  recipientUserId: string;
-
-  @ApiProperty({ nullable: true })
   merchantId: string;
 
   @ApiProperty({ type: String, example: '26262.00', nullable: true })
@@ -114,7 +111,6 @@ export const toTransactionDto = (row: Transaction): TransactionDto => ({
   traderUserId: row.traderUserId,
   bankDetailsId: row.bankDetailsId,
   counterpartyId: row.counterpartyId,
-  recipientUserId: row.recipientUserId,
   merchantId: row.merchantId,
   amountFiat: formatFiat(row.amountFiat),
   amountCrypto: formatCrypto(row.amountCrypto),

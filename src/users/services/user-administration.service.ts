@@ -99,6 +99,7 @@ export class UserAdministrationService {
               passwordHash: await this.credentials.hashPassword(
                 changes.password,
               ),
+              passwordChangedAt: new Date(),
             }
           : {}),
       }),

@@ -326,7 +326,7 @@ export class WalletService {
     fromUserId: string,
     toUserId: string,
     amount: Crypto,
-    transactionId: string,
+    accountTransactionId: number,
   ): Promise<void> {
     if (fromUserId === toUserId) {
       throw new ConflictException('Cannot transfer to the same wallet');
@@ -335,7 +335,7 @@ export class WalletService {
     const [first, second] = await this.lockWalletsWithin(
       manager,
       [fromUserId, toUserId],
-      [],
+      [toUserId],
     );
     const from = first.userId === fromUserId ? first : second;
     const to = first.userId === fromUserId ? second : first;
@@ -350,7 +350,7 @@ export class WalletService {
       BalanceKind.Main,
       amount.neg(),
       BalanceOperationType.Internal,
-      transactionId,
+      null,
     );
     const credit = this.journalMove(
       manager,
@@ -358,11 +358,78 @@ export class WalletService {
       BalanceKind.Main,
       amount,
       BalanceOperationType.Internal,
-      transactionId,
+      null,
     );
+    debit.accountTransactionId = accountTransactionId;
+    credit.accountTransactionId = accountTransactionId;
 
     await manager.save([from, to]);
     await manager.save([debit, credit]);
+  }
+
+  async creditDepositWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: Crypto,
+    accountTransactionId: number,
+  ): Promise<BalanceOperation> {
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(Wallet)
+      .values({ userId })
+      .orIgnore()
+      .execute();
+
+    return this.moveMainWithin(
+      manager,
+      userId,
+      amount,
+      BalanceOperationType.Deposit,
+      accountTransactionId,
+    );
+  }
+
+  async settleWithdrawalWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: Crypto,
+    fee: Crypto,
+    accountTransactionId: number,
+  ): Promise<void> {
+    const wallet = await this.lock(manager, userId);
+    wallet.mainReserved = roundCrypto(
+      wallet.mainReserved.minus(amount).minus(fee),
+    );
+    const operations = [
+      this.journalMove(
+        manager,
+        wallet,
+        BalanceKind.Main,
+        amount.neg(),
+        BalanceOperationType.Withdrawal,
+        null,
+      ),
+      ...(fee.gt(0)
+        ? [
+            this.journalMove(
+              manager,
+              wallet,
+              BalanceKind.Main,
+              fee.neg(),
+              BalanceOperationType.WithdrawalFee,
+              null,
+            ),
+          ]
+        : []),
+    ];
+
+    for (const operation of operations) {
+      operation.accountTransactionId = accountTransactionId;
+    }
+
+    await manager.save(wallet);
+    await manager.save(operations);
   }
 
   private async moveMainWithin(
@@ -370,6 +437,7 @@ export class WalletService {
     userId: string,
     delta: Decimal,
     type: BalanceOperationType,
+    accountTransactionId: number | null = null,
   ): Promise<BalanceOperation> {
     const wallet = await this.lock(manager, userId);
     const operation = this.journalMove(
@@ -380,6 +448,7 @@ export class WalletService {
       type,
       null,
     );
+    operation.accountTransactionId = accountTransactionId;
     await manager.save(wallet);
 
     return manager.save(operation);

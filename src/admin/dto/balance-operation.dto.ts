@@ -10,6 +10,9 @@ export class BalanceOperationReferenceDto {
 
   @ApiProperty({ type: Number, nullable: true })
   debtId: number | null;
+
+  @ApiProperty({ type: Number, nullable: true })
+  accountTransactionId: number | null;
 }
 
 export class BalanceOperationDto {
@@ -42,7 +45,7 @@ export class BalanceOperationDto {
     type: BalanceOperationReferenceDto,
     nullable: true,
     description:
-      'The reason: a deal (also for lead shares and transfers) or a debt; null when the row carries no link',
+      'The reason: a deal (also for lead shares), a debt or an account transaction (a transfer); null when the row carries no link',
   })
   reference: BalanceOperationReferenceDto | null;
 }
@@ -59,7 +62,13 @@ export const toBalanceOperationDto = (
   balanceBefore: formatCrypto(operation.balanceBefore),
   balanceAfter: formatCrypto(operation.balanceAfter),
   reference:
-    operation.transactionId || debtId !== null
-      ? { transactionId: operation.transactionId ?? null, debtId }
+    operation.transactionId ||
+    debtId !== null ||
+    operation.accountTransactionId != null
+      ? {
+          transactionId: operation.transactionId ?? null,
+          debtId,
+          accountTransactionId: operation.accountTransactionId ?? null,
+        }
       : null,
 });

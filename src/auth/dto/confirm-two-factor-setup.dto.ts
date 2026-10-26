@@ -6,7 +6,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import { TOTP_PATTERN } from './confirm-registration.dto';
+import { TOTP_PATTERN } from '../../common/utils/totp-pattern';
 
 export class ConfirmTwoFactorSetupDto {
   @ApiProperty()

@@ -282,16 +282,13 @@ describe('DealExpiryService', () => {
 
   it('leaves a deal whose deadline has not come yet, and one with no deadline', async () => {
     const early = deal(1, { expiresAt: FUTURE });
-    const transfer = deal(2, {
-      kind: TransactionKind.InternalTransfer,
-      expiresAt: null,
-    });
-    const { service } = build([early, transfer]);
+    const undated = deal(2, { expiresAt: null });
+    const { service } = build([early, undated]);
 
     await expect(service.run(NOW)).resolves.toBe(0);
 
     expect(early.status).toBe(TransactionStatus.Active);
-    expect(transfer.status).toBe(TransactionStatus.Active);
+    expect(undated.status).toBe(TransactionStatus.Active);
   });
 
   it('cancels a pay-out that went active → pending → active, from its original deadline', async () => {

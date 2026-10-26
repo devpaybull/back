@@ -19,6 +19,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { TransfersService } from '../../account-transactions/services/transfers.service';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -32,10 +33,8 @@ import { AuthenticatedUser } from '../../common/types/token';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { DebtsService } from '../../debts/services/debts.service';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
-import { TransactionService } from '../../transactions/services/transaction.service';
 import { WalletService } from '../../transactions/services/wallet.service';
 import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
-import { StatusEventSource } from '../../transactions/types/status-event-source.enum';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { BalanceOperationFilterDto } from '../dto/balance-operation-filter.dto';
 import {
@@ -44,9 +43,12 @@ import {
 } from '../dto/balance-operation.dto';
 import { ListBalanceOperationsQueryDto } from '../dto/list-balance-operations-query.dto';
 import { balanceOperationsCsv } from '../utils/balance-operations-csv';
+import {
+  AccountTransactionDto,
+  toAccountTransactionDto,
+} from '../dto/account-transaction.dto';
 import { AdminTransferDto } from '../dto/admin-transfer.dto';
 import { BalancesDto, toBalancesDto } from '../dto/balances.dto';
-import { toTransactionDto, TransactionDto } from '../dto/transaction.dto';
 import { canIssueRole } from '../utils/can-issue-role';
 
 export const BALANCE_EXPORT_MAX_ROWS = 100000;
@@ -61,7 +63,7 @@ const TRANSFER_RECIPIENT_ROLES: Role[] = [Role.Trader, Role.LeadTrader];
 export class AdminBalancesController {
   constructor(
     private readonly wallets: WalletService,
-    private readonly transactions: TransactionService,
+    private readonly transfers: TransfersService,
     private readonly directory: UserDirectoryService,
     private readonly debts: DebtsService,
   ) {}
@@ -152,12 +154,12 @@ export class AdminBalancesController {
   @Post('transfer')
   @WriteAccess()
   @ApiOperation({ summary: 'Transfers USDT from this account to another' })
-  @ApiEnvelopeResponse(TransactionDto, { status: HttpStatus.CREATED })
+  @ApiEnvelopeResponse(AccountTransactionDto, { status: HttpStatus.CREATED })
   async transfer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AdminTransferDto,
     @CurrentUser() admin: AuthenticatedUser,
-  ): Promise<TransactionDto> {
+  ): Promise<AccountTransactionDto> {
     if (admin.id === id) {
       throw new ForbiddenException('Cannot transfer from your own account');
     }
@@ -180,16 +182,15 @@ export class AdminBalancesController {
       );
     }
 
-    const transaction = await this.transactions.createInternalTransfer({
+    const transfer = await this.transfers.transfer({
       fromUserId: id,
       toUserId: recipient.id,
       amount: toCrypto(dto.amount),
-      source: StatusEventSource.Admin,
       actorUserId: admin.id,
       comment: dto.comment,
     });
 
-    return toTransactionDto(transaction);
+    return toAccountTransactionDto(transfer);
   }
 
   private async requireUser(id: string): Promise<void> {

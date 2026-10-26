@@ -6,8 +6,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-
-export const TOTP_PATTERN = /^\d{6}$/;
+import { TOTP_PATTERN } from '../../common/utils/totp-pattern';
 
 export class ConfirmRegistrationDto {
   @ApiProperty()
