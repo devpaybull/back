@@ -9,6 +9,7 @@ export const userListWhere = (
   const filters: FindOptionsWhere<User> = {
     ...(query.role?.length ? { role: In(query.role) } : {}),
     ...(query.status ? { status: query.status } : {}),
+    ...(query.merchantId ? { merchantId: query.merchantId } : {}),
   };
 
   if (!query.search) return filters;

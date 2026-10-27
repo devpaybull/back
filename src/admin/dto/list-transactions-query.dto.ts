@@ -1,14 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsDate,
-  IsEnum,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
@@ -17,6 +9,7 @@ import { TransactionSortField } from '../../transactions/types/transaction-sort-
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
 import { IsNotBelow } from '../utils/is-not-below';
+import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class ListTransactionsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ enum: TransactionKind })
@@ -46,25 +39,21 @@ export class ListTransactionsQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Created at or after this moment',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  createdFrom?: Date;
+  @IsDateFilter()
+  createdFrom?: string;
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description:
       'Created at or before this moment; earlier than createdFrom is a 400',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
+  @IsDateFilter()
   @IsNotBelow('createdFrom')
-  createdTo?: Date;
+  createdTo?: string;
 
   @ApiPropertyOptional({
     example: 1,

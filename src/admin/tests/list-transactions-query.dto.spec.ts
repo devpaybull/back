@@ -26,7 +26,7 @@ describe('ListTransactionsQueryDto — the deals tab filters', () => {
   const parsed = (query: Record<string, unknown>): ListTransactionsQueryDto =>
     plainToInstance(ListTransactionsQueryDto, query);
 
-  it('reads the period bounds as dates', () => {
+  it('keeps the period bounds as written, for the controller to place in the business timezone', () => {
     const query = parsed({
       createdFrom: '2026-10-01T00:00:00.000Z',
       createdTo: '2026-10-31T23:59:59.999Z',
@@ -38,8 +38,8 @@ describe('ListTransactionsQueryDto — the deals tab filters', () => {
         createdTo: '2026-10-31T23:59:59.999Z',
       }),
     ).toEqual([]);
-    expect(query.createdFrom).toEqual(new Date('2026-10-01T00:00:00.000Z'));
-    expect(query.createdTo).toEqual(new Date('2026-10-31T23:59:59.999Z'));
+    expect(query.createdFrom).toBe('2026-10-01T00:00:00.000Z');
+    expect(query.createdTo).toBe('2026-10-31T23:59:59.999Z');
   });
 
   it('accepts either bound of the period on its own', () => {

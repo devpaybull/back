@@ -1,10 +1,7 @@
-import { SortOrder } from '../../common/enums/sort-order.enum';
-import { MerchantSortField } from './merchant-sort-field.enum';
+import { MerchantStatus } from './merchant-status.enum';
 
 export interface MerchantListQuery {
-  page: number;
-  limit: number;
   search?: string;
-  sortBy: MerchantSortField;
-  sortOrder: SortOrder;
+  status?: MerchantStatus;
+  exclusiveTopUp?: boolean;
 }

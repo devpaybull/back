@@ -534,6 +534,7 @@ describe('UserDirectoryService', () => {
         telegramUsername: null,
         role: Role.Merchant,
         status: UserStatus.PendingTwoFactor,
+        merchantId: uuidOf(40),
         createdAt: dayOf(6),
       },
     ];
@@ -635,6 +636,12 @@ describe('UserDirectoryService', () => {
             sortBy: UserSortField.Id,
           }),
         ).resolves.toEqual([5, 1].map(uuidOf));
+      });
+
+      it('narrows to the accounts bound to one merchant', async () => {
+        await expect(
+          listedIds({ merchantId: uuidOf(40), sortBy: UserSortField.Id }),
+        ).resolves.toEqual([6].map(uuidOf));
       });
 
       it('counts only what the filter left', async () => {

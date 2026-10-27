@@ -30,6 +30,7 @@ describe('AdminRatesController', () => {
     replaceSubjectSet: jest.Mock;
   };
   let directory: { findById: jest.Mock };
+  let merchants: { findById: jest.Mock };
   let controller: AdminRatesController;
 
   beforeEach(() => {
@@ -40,7 +41,12 @@ describe('AdminRatesController', () => {
       replaceSubjectSet: jest.fn(async () => []),
     };
     directory = { findById: jest.fn() };
-    controller = new AdminRatesController(rates as never, directory as never);
+    merchants = { findById: jest.fn() };
+    controller = new AdminRatesController(
+      rates as never,
+      directory as never,
+      merchants as never,
+    );
   });
 
   it('is guarded for admin and superadmin only', () => {
@@ -202,18 +208,20 @@ describe('AdminRatesController', () => {
   });
 
   describe('GET /admin/methods', () => {
-    it('lists the registry as code, currency and rate kind', () => {
+    it('lists the registry as code, currency, rate kind and directions', () => {
       expect(controller.listMethods()).toEqual(
         TRANSACTION_METHODS.map((method) => ({
           code: method.code,
           currency: method.currency,
           rateKind: method.rateKind,
+          directions: [...method.directions],
         })),
       );
       expect(controller.listMethods()[0]).toEqual({
         code: 'sbp',
         currency: 'RUB',
         rateKind: 'by_amount',
+        directions: ['pay_in', 'pay_out'],
       });
     });
 
@@ -221,6 +229,72 @@ describe('AdminRatesController', () => {
       expect(
         Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, controller.listMethods),
       ).toBeUndefined();
+    });
+  });
+
+  describe('a merchant’s individual rates', () => {
+    const body = {
+      methods: [
+        {
+          method: 'sbp' as const,
+          general: { payInPercent: 10, payOutPercent: 3 },
+        },
+      ],
+    };
+
+    it('marks the replacement as a write and the read as a read', () => {
+      expect(
+        Reflect.getMetadata(
+          WRITE_ACCESS_METADATA_KEY,
+          controller.replaceMerchant,
+        ),
+      ).toBe(true);
+      expect(
+        Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, controller.readMerchant),
+      ).toBeUndefined();
+    });
+
+    it('reads the set by the merchant scope', async () => {
+      merchants.findById.mockResolvedValue({ id: uuidOf(5) });
+
+      await controller.readMerchant(uuidOf(5));
+
+      expect(rates.getSubjectSet).toHaveBeenCalledWith(
+        RateScope.Merchant,
+        uuidOf(5),
+      );
+    });
+
+    it('replaces the set as the admin, by the merchant scope', async () => {
+      merchants.findById.mockResolvedValue({ id: uuidOf(5) });
+
+      await controller.replaceMerchant(uuidOf(5), body as never, admin);
+
+      expect(rates.replaceSubjectSet).toHaveBeenCalledWith(
+        RateScope.Merchant,
+        uuidOf(5),
+        [
+          {
+            method: 'sbp',
+            general: { payInPercent: 10, payOutPercent: 3 },
+            bands: [],
+            banks: [],
+          },
+        ],
+        { actorUserId: admin.id },
+      );
+    });
+
+    it('answers 404 for an unknown merchant on both', async () => {
+      merchants.findById.mockResolvedValue(null);
+
+      await expect(controller.readMerchant(uuidOf(5))).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(
+        controller.replaceMerchant(uuidOf(5), body as never, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(rates.replaceSubjectSet).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,10 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsDate, IsEnum, IsIn, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsIn, IsOptional } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { toQueryList } from '../../common/utils/to-query-list';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
 import { AccountTransactionType } from '../types/account-transaction-type.enum';
+import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export const FINANCE_SORT_FIELDS = ['createdAt', 'amount'] as const;
 
@@ -31,23 +32,19 @@ export class ListFinanceOperationsQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Inclusive',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  from?: Date;
+  @IsDateFilter()
+  from?: string;
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Exclusive',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  to?: Date;
+  @IsDateFilter()
+  to?: string;
 
   @ApiPropertyOptional({ enum: FINANCE_SORT_FIELDS, default: 'createdAt' })
   @IsIn(FINANCE_SORT_FIELDS)

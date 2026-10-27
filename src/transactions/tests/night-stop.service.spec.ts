@@ -32,10 +32,9 @@ describe('NightStopService', () => {
       NIGHT_STOP_THRESHOLD: GLOBAL_THRESHOLD,
       NIGHT_STOP_START_HOUR: 0,
       NIGHT_STOP_END_HOUR: 10,
-      NIGHT_STOP_TIMEZONE: 'Europe/Moscow',
+      BUSINESS_TIMEZONE: 'Europe/Moscow',
       INSURANCE_NIGHT_START_HOUR: 5,
       INSURANCE_NIGHT_END_HOUR: 6,
-      INSURANCE_NIGHT_TIMEZONE: 'UTC',
       ...env,
     };
     const config = {
@@ -98,7 +97,7 @@ describe('NightStopService', () => {
       const { service } = build(0, null, {
         NIGHT_STOP_START_HOUR: 9,
         NIGHT_STOP_END_HOUR: 10,
-        NIGHT_STOP_TIMEZONE: 'UTC',
+        BUSINESS_TIMEZONE: 'UTC',
       });
 
       expect(service.isWithinNightStopWindow(midday)).toBe(true);
@@ -263,7 +262,7 @@ describe('NightStopService', () => {
       const { service } = build(2, null, {
         NIGHT_STOP_START_HOUR: 22,
         NIGHT_STOP_END_HOUR: 6,
-        NIGHT_STOP_TIMEZONE: 'UTC',
+        BUSINESS_TIMEZONE: 'UTC',
       });
 
       expect(

@@ -10,8 +10,10 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { toFiat } from '../../common/utils/to-fiat';
+import { toInstant } from '../../common/utils/to-instant';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -25,7 +27,7 @@ import { AuthenticatedUser } from '../../common/types/token';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { loginOf } from '../../common/utils/login-of';
 import { CounterpartiesService } from '../../counterparties/counterparties.service';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionService } from '../../transactions/services/transaction.service';
 import { TransactionSortField } from '../../transactions/types/transaction-sort-field.enum';
@@ -52,6 +54,7 @@ export class AdminTransactionsController {
     private readonly bankDetails: BankDetailsService,
     private readonly merchants: MerchantsService,
     private readonly counterparties: CounterpartiesService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get()
@@ -68,8 +71,11 @@ export class AdminTransactionsController {
         ? this.merchants.rankByName()
         : undefined,
     ]);
+    const timeZone = this.config.getOrThrow<string>('BUSINESS_TIMEZONE');
     const page = await this.transactions.list({
       ...query,
+      createdFrom: toInstant(query.createdFrom, timeZone),
+      createdTo: toInstant(query.createdTo, timeZone),
       amountFrom:
         query.amountFrom === undefined ? undefined : toFiat(query.amountFrom),
       amountTo:

@@ -32,7 +32,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { RateService } from '../../transactions/services/rate.service';
 import { WalletService } from '../../transactions/services/wallet.service';

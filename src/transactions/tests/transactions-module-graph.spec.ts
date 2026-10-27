@@ -7,6 +7,16 @@ import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
 import { Country } from '../../countries/entities/country.entity';
 import { Currency } from '../../currencies/entities/currency.entity';
+import { MerchantApiKey } from '../../merchants/entities/merchant-api-key.entity';
+import { MerchantAttachmentMethod } from '../../merchants/entities/merchant-attachment-method.entity';
+import { MerchantAttachment } from '../../merchants/entities/merchant-attachment.entity';
+import { MerchantCurrency } from '../../merchants/entities/merchant-currency.entity';
+import { MerchantGroup } from '../../merchants/entities/merchant-group.entity';
+import { MerchantIpAddress } from '../../merchants/entities/merchant-ip-address.entity';
+import { MerchantMethod } from '../../merchants/entities/merchant-method.entity';
+import { MerchantSettings } from '../../merchants/entities/merchant-settings.entity';
+import { Merchant } from '../../merchants/entities/merchant.entity';
+import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { EmailVerification } from '../../users/entities/email-verification.entity';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
@@ -15,6 +25,8 @@ import { User } from '../../users/entities/user.entity';
 import { UserTeamService } from '../../users/services/user-team.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { LeadRate } from '../entities/lead-rate.entity';
+import { MerchantBalanceOperation } from '../entities/merchant-balance-operation.entity';
+import { MerchantBalance } from '../entities/merchant-balance.entity';
 import { MethodRate } from '../entities/method-rate.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
@@ -67,6 +79,10 @@ describe('the transactions module graph', () => {
       .useValue(repository)
       .overrideProvider(getRepositoryToken(TransactionLeadShare))
       .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantBalance))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantBalanceOperation))
+      .useValue(repository)
       .overrideProvider(getRepositoryToken(User))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(UserBackupCode))
@@ -86,6 +102,24 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(Country))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Currency))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(Merchant))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantApiKey))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantGroup))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantMethod))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantAttachment))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantAttachmentMethod))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantSettings))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantCurrency))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantIpAddress))
       .useValue(repository)
       .overrideProvider(ConfigService)
       .useValue({
@@ -111,5 +145,13 @@ describe('the transactions module graph', () => {
     expect(module.get(UserTeamService, { strict: false })).toBeInstanceOf(
       UserTeamService,
     );
+  });
+
+  it('reads the merchant’s overdraft switch through the merchants module, which owns it', async () => {
+    const module = await compile();
+
+    expect(
+      module.get(MerchantSettingsService, { strict: false }),
+    ).toBeInstanceOf(MerchantSettingsService);
   });
 });

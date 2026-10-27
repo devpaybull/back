@@ -13,7 +13,7 @@ import { Role } from '../common/enums/role.enum';
 import { AccountIdentifier } from '../common/types/account-identifier';
 import { Page, toPage } from '../common/types/page';
 import { normalizeTelegramUsername } from '../common/utils/normalize-telegram-username';
-import { MerchantsService } from '../merchants/merchants.service';
+import { MerchantsService } from '../merchants/services/merchants.service';
 import { UserDirectoryService } from '../users/services/user-directory.service';
 import { Invite } from './entities/invite.entity';
 import { CreateInviteInput } from './types/create-invite-input';

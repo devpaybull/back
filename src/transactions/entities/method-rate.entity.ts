@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   Entity,
@@ -18,6 +19,8 @@ import { TransactionMethod } from '../types/transaction-method';
 import { percentColumn } from '../../common/utils/percent-column';
 
 @Entity('method_rates')
+@Check(`"scope" <> 'trader' OR "subjectMerchantId" IS NULL`)
+@Check(`"scope" <> 'merchant' OR "subjectUserId" IS NULL`)
 export class MethodRate {
   @PrimaryGeneratedColumn()
   id: number;

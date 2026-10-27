@@ -262,11 +262,6 @@ export class EnvironmentVariables {
   @Max(24)
   INSURANCE_NIGHT_END_HOUR: number = 10;
 
-  @IsString()
-  @IsNotEmpty()
-  @IsIanaTimeZone()
-  INSURANCE_NIGHT_TIMEZONE: string = 'Europe/Moscow';
-
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -284,11 +279,6 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(24)
   NIGHT_STOP_END_HOUR: number = 10;
-
-  @IsString()
-  @IsNotEmpty()
-  @IsIanaTimeZone()
-  NIGHT_STOP_TIMEZONE: string = 'Europe/Moscow';
 
   @IsString()
   @IsNotEmpty()

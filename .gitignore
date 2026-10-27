@@ -65,3 +65,7 @@ CLAUDE.md
 /scripts/*.js
 /scripts/*.d.ts
 /scripts/*.js.map
+
+# local dev secrets
+/.dev
+*-key.txt

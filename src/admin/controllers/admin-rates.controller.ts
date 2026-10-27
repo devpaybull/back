@@ -20,6 +20,7 @@ import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { AuthenticatedUser } from '../../common/types/token';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { RateService } from '../../transactions/services/rate.service';
 import { RateScope } from '../../transactions/types/rate-scope.enum';
 import { TRANSACTION_METHODS } from '../../transactions/utils/transaction-methods';
@@ -49,6 +50,7 @@ export class AdminRatesController {
   constructor(
     private readonly rates: RateService,
     private readonly directory: UserDirectoryService,
+    private readonly merchants: MerchantsService,
   ) {}
 
   @Get('admin/methods')
@@ -127,5 +129,48 @@ export class AdminRatesController {
         actorUserId: admin.id,
       }),
     );
+  }
+
+  @Get('admin/merchants/:id/rates')
+  @ApiOperation({
+    summary: 'Reads a merchant’s individual rates, set up like a trader’s',
+  })
+  @ApiEnvelopeResponse(RateSetDto)
+  async readMerchant(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RateSetDto> {
+    await this.requireMerchant(id);
+
+    return toRateSetDto(await this.rates.getSubjectSet(RateScope.Merchant, id));
+  }
+
+  @Put('admin/merchants/:id/rates')
+  @WriteAccess()
+  @ApiOperation({
+    summary:
+      'Replaces a merchant’s individual rates; they always apply over the base merchant set',
+  })
+  @ApiEnvelopeResponse(RateSetDto)
+  async replaceMerchant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RateSetDto,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<RateSetDto> {
+    await this.requireMerchant(id);
+
+    return toRateSetDto(
+      await this.rates.replaceSubjectSet(
+        RateScope.Merchant,
+        id,
+        toSubjectMethodRates(dto),
+        { actorUserId: admin.id },
+      ),
+    );
+  }
+
+  private async requireMerchant(id: string): Promise<void> {
+    if (!(await this.merchants.findById(id))) {
+      throw new NotFoundException('Merchant not found');
+    }
   }
 }

@@ -8,7 +8,7 @@ import { TokenType } from '../../common/types/token';
 import { renderQrCodeDataUrl } from '../../common/utils/render-qr-code-data-url';
 import { toAccountIdentifier } from '../../common/utils/to-account-identifier';
 import { InvitesService } from '../../invites/invites.service';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { UserCredentialsService } from '../../users/services/user-credentials.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { UserEnrolmentService } from '../../users/services/user-enrolment.service';

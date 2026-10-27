@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { toCrypto } from '../../common/utils/to-crypto';
@@ -61,6 +62,7 @@ describe('AdminBalancesController balance journal', () => {
       {} as never,
       directory as never,
       debts as never,
+      { getOrThrow: () => 'Europe/Moscow' } as never,
     );
   });
 
@@ -214,6 +216,10 @@ describe('balance journal over HTTP', () => {
           useValue: {
             debtIdsByBalanceOperation: jest.fn(async () => new Map([[2, 9]])),
           },
+        },
+        {
+          provide: ConfigService,
+          useValue: { getOrThrow: () => 'Europe/Moscow' },
         },
       ],
     })

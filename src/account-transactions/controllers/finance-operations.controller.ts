@@ -1,4 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
@@ -8,6 +9,7 @@ import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
+import { toInstant } from '../../common/utils/to-instant';
 import { FinanceHistoryFilterDto } from '../dto/finance-history-filter.dto';
 import { FinanceOperationCountsDto } from '../dto/finance-operation-counts.dto';
 import {
@@ -23,7 +25,10 @@ import { AccountTransactionsService } from '../services/account-transactions.ser
 @Roles(Role.Trader, Role.LeadTrader)
 @Controller('users/me/finance-operations')
 export class FinanceOperationsController {
-  constructor(private readonly operations: AccountTransactionsService) {}
+  constructor(
+    private readonly operations: AccountTransactionsService,
+    private readonly config: ConfigService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'The trader’s deposits, withdrawals and transfers' })
@@ -41,8 +46,8 @@ export class FinanceOperationsController {
         sortBy: query.sortBy,
         type: query.type,
         status: query.status,
-        from: query.from,
-        to: query.to,
+        from: toInstant(query.from, this.timeZone()),
+        to: toInstant(query.to, this.timeZone()),
       })
     ).map((row) => toFinanceOperationDto(row, user.id));
   }
@@ -57,13 +62,17 @@ export class FinanceOperationsController {
     const counts = await this.operations.historyCounts({
       userId: user.id,
       status: query.status,
-      from: query.from,
-      to: query.to,
+      from: toInstant(query.from, this.timeZone()),
+      to: toInstant(query.to, this.timeZone()),
     });
 
     return {
       all: counts.deposit + counts.withdrawal + counts.transfer,
       ...counts,
     };
+  }
+
+  private timeZone(): string {
+    return this.config.getOrThrow<string>('BUSINESS_TIMEZONE');
   }
 }

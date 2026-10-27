@@ -7,11 +7,22 @@ import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
 import { Country } from '../../countries/entities/country.entity';
 import { Currency } from '../../currencies/entities/currency.entity';
+import { MerchantApiKey } from '../../merchants/entities/merchant-api-key.entity';
+import { MerchantAttachmentMethod } from '../../merchants/entities/merchant-attachment-method.entity';
+import { MerchantAttachment } from '../../merchants/entities/merchant-attachment.entity';
+import { MerchantCurrency } from '../../merchants/entities/merchant-currency.entity';
+import { MerchantGroup } from '../../merchants/entities/merchant-group.entity';
+import { MerchantIpAddress } from '../../merchants/entities/merchant-ip-address.entity';
+import { MerchantMethod } from '../../merchants/entities/merchant-method.entity';
+import { MerchantSettings } from '../../merchants/entities/merchant-settings.entity';
+import { Merchant } from '../../merchants/entities/merchant.entity';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { LeadRate } from '../../transactions/entities/lead-rate.entity';
 import { MethodRate } from '../../transactions/entities/method-rate.entity';
 import { Transaction } from '../../transactions/entities/transaction.entity';
+import { MerchantBalanceOperation } from '../../transactions/entities/merchant-balance-operation.entity';
+import { MerchantBalance } from '../../transactions/entities/merchant-balance.entity';
 import { TransactionLeadShare } from '../../transactions/entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from '../../transactions/entities/transaction-status-event.entity';
 import { Wallet } from '../../transactions/entities/wallet.entity';
@@ -54,6 +65,8 @@ describe('the account transactions module graph', () => {
     MethodRate,
     LeadRate,
     TransactionLeadShare,
+    MerchantBalance,
+    MerchantBalanceOperation,
     User,
     UserBackupCode,
     EmailVerification,
@@ -64,6 +77,15 @@ describe('the account transactions module graph', () => {
     Bank,
     Country,
     Currency,
+    Merchant,
+    MerchantApiKey,
+    MerchantGroup,
+    MerchantMethod,
+    MerchantAttachment,
+    MerchantAttachmentMethod,
+    MerchantSettings,
+    MerchantCurrency,
+    MerchantIpAddress,
   ];
 
   @Global()

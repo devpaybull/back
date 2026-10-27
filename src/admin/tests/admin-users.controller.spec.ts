@@ -24,7 +24,7 @@ import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page, toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { Wallet } from '../../transactions/entities/wallet.entity';

@@ -30,6 +30,9 @@ import { BalanceOperation } from '../src/transactions/entities/balance-operation
 import { BalanceKind } from '../src/transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../src/transactions/types/balance-operation-type.enum';
 import { LeadRate } from '../src/transactions/entities/lead-rate.entity';
+import { MerchantBalance } from '../src/transactions/entities/merchant-balance.entity';
+import { MerchantBalanceOperation } from '../src/transactions/entities/merchant-balance-operation.entity';
+import { MerchantBalanceOperationType } from '../src/transactions/types/merchant-balance-operation-type.enum';
 import { MethodRate } from '../src/transactions/entities/method-rate.entity';
 import { TransactionLeadShare } from '../src/transactions/entities/transaction-lead-share.entity';
 import {
@@ -181,6 +184,39 @@ async function recordBalanceMove(
       amount: roundCrypto(delta),
       balanceBefore: before,
       balanceAfter: after,
+    }),
+  );
+}
+
+async function recordMerchantMove(
+  manager: EntityManager,
+  balance: MerchantBalance,
+  type: MerchantBalanceOperationType,
+  transactionId: string | null,
+  balanceDelta: Decimal.Value,
+  escrowDelta: Decimal.Value,
+  extra: { comment?: string; actorUserId?: string } = {},
+): Promise<MerchantBalanceOperation> {
+  const before = toCrypto(balance.balance ?? 0);
+  const after = roundCrypto(before.plus(balanceDelta));
+  const escrowBefore = toCrypto(balance.escrow ?? 0);
+  const escrowAfter = roundCrypto(escrowBefore.plus(escrowDelta));
+  balance.balance = after;
+  balance.escrow = escrowAfter;
+
+  return manager.save(
+    MerchantBalanceOperation,
+    manager.create(MerchantBalanceOperation, {
+      merchantBalanceId: balance.id,
+      type,
+      transactionId,
+      amount: roundCrypto(after.minus(before)),
+      balanceBefore: before,
+      balanceAfter: after,
+      escrowBefore,
+      escrowAfter,
+      comment: extra.comment ?? null,
+      actorUserId: extra.actorUserId ?? null,
     }),
   );
 }
@@ -595,6 +631,19 @@ async function main(): Promise<void> {
       Merchant,
       manager.create(Merchant, { name: 'Payzavr Store', active: false }),
     );
+    const merchant1Balance = await manager.save(
+      MerchantBalance,
+      manager.create(MerchantBalance, { merchantId: merchant1.id }),
+    );
+    await recordMerchantMove(
+      manager,
+      merchant1Balance,
+      MerchantBalanceOperationType.AdminAdjustment,
+      null,
+      1000,
+      0,
+      { comment: 'Стартовый баланс', actorUserId: superadmin.user.id },
+    );
 
     await manager.save(
       MerchantApiKey,
@@ -749,6 +798,14 @@ async function main(): Promise<void> {
       BalanceOperationType.Transaction,
       d1.id,
     );
+    await recordMerchantMove(
+      manager,
+      merchant1Balance,
+      MerchantBalanceOperationType.DealPayIn,
+      d1.id,
+      d1.merchantAmount,
+      0,
+    );
     for (const share of d1.leadShares) {
       await recordBalanceMove(
         manager,
@@ -881,8 +938,24 @@ async function main(): Promise<void> {
       BalanceOperationType.Transaction,
       d5.id,
     );
+    await recordMerchantMove(
+      manager,
+      merchant1Balance,
+      MerchantBalanceOperationType.DealPayOutEscrow,
+      d5.id,
+      d5.merchantAmount.neg(),
+      d5.merchantAmount,
+    );
+    await recordMerchantMove(
+      manager,
+      merchant1Balance,
+      MerchantBalanceOperationType.DealPayOut,
+      d5.id,
+      0,
+      d5.merchantAmount.neg(),
+    );
 
-    await createDeal(manager, {
+    const d6 = await createDeal(manager, {
       kind: TransactionKind.PayOut,
       method: 'sbp',
       traderUserId: trader1.user.id,
@@ -901,6 +974,15 @@ async function main(): Promise<void> {
         },
       ],
     });
+
+    await recordMerchantMove(
+      manager,
+      merchant1Balance,
+      MerchantBalanceOperationType.DealPayOutEscrow,
+      d6.id,
+      d6.merchantAmount.neg(),
+      d6.merchantAmount,
+    );
 
     const transferAmount = toCrypto(50);
     const transfer = await manager.save(
@@ -1013,6 +1095,7 @@ async function main(): Promise<void> {
       trader2Wallet,
       trader3Wallet,
     ]);
+    await manager.save(merchant1Balance);
 
     await manager.save(
       TraderSettings,
@@ -1063,12 +1146,12 @@ async function main(): Promise<void> {
           {
             method: 'counterparty',
             payInPercent: 6.0,
-            payOutPercent: 1.0,
+            payOutPercent: 0,
           },
           {
             method: 'mobile_commerce',
             payInPercent: 10.0,
-            payOutPercent: 3.0,
+            payOutPercent: 0,
           },
         ],
       },
@@ -1080,12 +1163,12 @@ async function main(): Promise<void> {
           {
             method: 'counterparty',
             payInPercent: 8.0,
-            payOutPercent: 2.0,
+            payOutPercent: 0,
           },
           {
             method: 'mobile_commerce',
             payInPercent: 12.0,
-            payOutPercent: 4.0,
+            payOutPercent: 0,
           },
         ],
       },

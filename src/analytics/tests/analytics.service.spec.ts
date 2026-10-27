@@ -8,6 +8,8 @@ import { TransactionKind } from '../../transactions/types/transaction-kind.enum'
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { AnalyticsService } from '../analytics.service';
 
+const zone = (timeZone: string) => ({ getOrThrow: () => timeZone });
+
 describe('AnalyticsService', () => {
   const row = (overrides: Partial<Transaction>): Transaction =>
     ({
@@ -49,7 +51,7 @@ describe('AnalyticsService', () => {
 
   beforeEach(() => {
     transactions = { findTraderWindow: jest.fn(async () => rows) };
-    service = new AnalyticsService(transactions as never);
+    service = new AnalyticsService(transactions as never, zone('UTC') as never);
   });
 
   it('returns a 14-point series', async () => {
@@ -104,9 +106,9 @@ describe('AnalyticsService', () => {
   describe('volume amounts per day', () => {
     const now = new Date('2026-10-24T12:00:00.000Z');
 
-    const serve = (list: Transaction[]): AnalyticsService => {
+    const serve = (list: Transaction[], timeZone = 'UTC'): AnalyticsService => {
       const fake = { findTraderWindow: jest.fn(async () => list) };
-      return new AnalyticsService(fake as never);
+      return new AnalyticsService(fake as never, zone(timeZone) as never);
     };
 
     beforeEach(() => {
@@ -227,6 +229,34 @@ describe('AnalyticsService', () => {
         toDecimal(0),
       );
       expect(formatCrypto(total)).toBe('2.000000');
+    });
+
+    it('buckets by the calendar day in the business timezone', async () => {
+      const analytics = await serve(
+        [
+          at('2026-10-23T21:30:00.000Z', { amountCrypto: toCrypto(4) }),
+          at('2026-10-23T20:30:00.000Z', { amountCrypto: toCrypto(1) }),
+        ],
+        'Europe/Moscow',
+      ).volume(uuidOf(1));
+
+      expect(analytics.series[13].date).toBe('2026-10-24');
+      expect(analytics.series[13].payInAmount).toBe('4.000000');
+      expect(analytics.series[12].payInAmount).toBe('1.000000');
+    });
+
+    it('starts the window at midnight of the first day in the business timezone', async () => {
+      const fake = { findTraderWindow: jest.fn(async () => []) };
+
+      await new AnalyticsService(
+        fake as never,
+        zone('Europe/Moscow') as never,
+      ).deals(uuidOf(1));
+
+      expect(fake.findTraderWindow).toHaveBeenCalledWith(
+        uuidOf(1),
+        new Date('2026-10-10T21:00:00.000Z'),
+      );
     });
 
     it('sums exactly to six decimals without float drift', async () => {

@@ -121,7 +121,7 @@ export class WalletService {
       now,
       this.config.get<number>('INSURANCE_NIGHT_START_HOUR', 0),
       this.config.get<number>('INSURANCE_NIGHT_END_HOUR', 10),
-      this.config.get<string>('INSURANCE_NIGHT_TIMEZONE', 'Europe/Moscow'),
+      this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
     );
   }
 

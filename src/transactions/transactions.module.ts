@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { BanksModule } from '../banks/banks.module';
+import { MerchantsModule } from '../merchants/merchants.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { UsersModule } from '../users/users.module';
 import { BalanceOperation } from './entities/balance-operation.entity';
 import { LeadRate } from './entities/lead-rate.entity';
+import { MerchantBalanceOperation } from './entities/merchant-balance-operation.entity';
+import { MerchantBalance } from './entities/merchant-balance.entity';
 import { MethodRate } from './entities/method-rate.entity';
 import { Transaction } from './entities/transaction.entity';
 import { TransactionLeadShare } from './entities/transaction-lead-share.entity';
@@ -13,6 +16,9 @@ import { TransactionStatusEvent } from './entities/transaction-status-event.enti
 import { Wallet } from './entities/wallet.entity';
 import { BankDetailsTurnoverService } from './services/bank-details-turnover.service';
 import { DealExpiryService } from './services/deal-expiry.service';
+import { MerchantBalanceService } from './services/merchant-balance.service';
+import { MerchantStatsService } from './services/merchant-stats.service';
+import { MerchantVolumeService } from './services/merchant-volume.service';
 import { NightStopService } from './services/night-stop.service';
 import { RapiraRateProvider } from './services/rapira-rate.provider';
 import { RateService } from './services/rate.service';
@@ -29,9 +35,12 @@ import { WalletService } from './services/wallet.service';
       MethodRate,
       LeadRate,
       TransactionLeadShare,
+      MerchantBalance,
+      MerchantBalanceOperation,
     ]),
     AuditModule,
     BanksModule,
+    MerchantsModule,
     TraderSettingsModule,
     UsersModule,
   ],
@@ -39,6 +48,9 @@ import { WalletService } from './services/wallet.service';
     RapiraRateProvider,
     RateService,
     WalletService,
+    MerchantBalanceService,
+    MerchantVolumeService,
+    MerchantStatsService,
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,
@@ -47,6 +59,9 @@ import { WalletService } from './services/wallet.service';
   exports: [
     RateService,
     WalletService,
+    MerchantBalanceService,
+    MerchantVolumeService,
+    MerchantStatsService,
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,

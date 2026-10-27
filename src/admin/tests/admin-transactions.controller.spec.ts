@@ -92,6 +92,7 @@ describe('AdminTransactionsController', () => {
       bankDetails as never,
       merchants as never,
       counterparties as never,
+      { getOrThrow: () => 'Europe/Moscow' } as never,
     );
   });
 
@@ -181,6 +182,24 @@ describe('AdminTransactionsController', () => {
         expect.objectContaining({
           amountFrom: toFiat('1000.50'),
           amountTo: toFiat('2500'),
+        }),
+      );
+    });
+
+    it('reads a bare day as midnight in the business timezone and a date-time as written', async () => {
+      transactions.list.mockResolvedValue(page([]));
+
+      await controller.list(
+        query({
+          createdFrom: '2026-10-24',
+          createdTo: '2026-10-24T18:00:00Z',
+        }),
+      );
+
+      expect(transactions.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdFrom: new Date('2026-10-23T21:00:00.000Z'),
+          createdTo: new Date('2026-10-24T18:00:00.000Z'),
         }),
       );
     });

@@ -26,6 +26,13 @@ class DateRange {
   to?: Date;
 }
 
+class DateFilterRange {
+  from?: string;
+
+  @IsNotBelow('from')
+  to?: string;
+}
+
 const errorsOf = (cls: new () => object, plain: Record<string, unknown>) =>
   validateSync(plainToInstance(cls, plain));
 
@@ -62,6 +69,41 @@ describe('IsNotBelow', () => {
   it('has nothing to compare when either bound is absent', () => {
     expect(errorsOf(NumberRange, { to: 2 })).toEqual([]);
     expect(errorsOf(NumberRange, { from: 3 })).toEqual([]);
+  });
+
+  it('compares two calendar days as days', () => {
+    expect(
+      errorsOf(DateFilterRange, { from: '2026-10-02', to: '2026-10-01' }).map(
+        (error) => error.property,
+      ),
+    ).toEqual(['to']);
+    expect(
+      errorsOf(DateFilterRange, { from: '2026-10-01', to: '2026-10-01' }),
+    ).toEqual([]);
+  });
+
+  it('compares two date-time strings by their instant', () => {
+    expect(
+      errorsOf(DateFilterRange, {
+        from: '2026-10-02T00:00:00+03:00',
+        to: '2026-10-01T22:00:00Z',
+      }),
+    ).toEqual([]);
+    expect(
+      errorsOf(DateFilterRange, {
+        from: '2026-10-02T00:00:00Z',
+        to: '2026-10-01T23:59:59Z',
+      }).map((error) => error.property),
+    ).toEqual(['to']);
+  });
+
+  it('leaves a day against a date-time alone: the day only becomes an instant in the business timezone', () => {
+    expect(
+      errorsOf(DateFilterRange, {
+        from: '2026-10-02',
+        to: '2026-10-01T22:00:00Z',
+      }),
+    ).toEqual([]);
   });
 
   it('compares dates by their instant', () => {

@@ -1,8 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsOptional } from 'class-validator';
 import { toQueryList } from '../../common/utils/to-query-list';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
+import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class FinanceHistoryFilterDto {
   @ApiPropertyOptional({
@@ -17,21 +18,17 @@ export class FinanceHistoryFilterDto {
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Inclusive',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  from?: Date;
+  @IsDateFilter()
+  from?: string;
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Exclusive',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  to?: Date;
+  @IsDateFilter()
+  to?: string;
 }

@@ -11,4 +11,5 @@ export interface UserListQuery {
   sortOrder: SortOrder;
   role?: Role[];
   status?: UserStatus;
+  merchantId?: string;
 }

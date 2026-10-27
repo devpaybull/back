@@ -26,7 +26,12 @@ jest.mock('../utils/find-transaction-method', () => {
   return {
     findTransactionMethod: (code: string) =>
       code.startsWith('mono_bank')
-        ? { code, currency: 'RUB', rateKind: 'by_bank' }
+        ? {
+            code,
+            currency: 'RUB',
+            rateKind: 'by_bank',
+            directions: ['pay_in', 'pay_out'],
+          }
         : actual.findTransactionMethod(code),
   };
 });
@@ -188,6 +193,37 @@ describe('RateService.getEffectiveGeneralRates', () => {
     expect(where.fromAmount).toBeDefined();
     expect(where.toAmount).toBeDefined();
     expect(where.bankId).toBeDefined();
+  });
+
+  it('gives every merchant its individual general rate over the base, always enabled', async () => {
+    repository.find.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) =>
+        (where.subjectMerchantId as FindOperator<string>).type === 'in'
+          ? [
+              {
+                ...row('sbp', 7, 2),
+                subjectUserId: null,
+                subjectMerchantId: uuidOf(5),
+              } as MethodRate,
+            ]
+          : baseRows,
+    );
+
+    const result = await service.getEffectiveMerchantGeneralRates([
+      uuidOf(5),
+      uuidOf(6),
+    ]);
+
+    expect(repository.find).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ scope: RateScope.Merchant }),
+      }),
+    );
+    expect(result.bySubject.get(uuidOf(5))).toEqual([
+      { method: 'sbp', payInPercent: 7, payOutPercent: 2 },
+      { method: 'card', payInPercent: 12, payOutPercent: 4 },
+    ]);
+    expect(result.bySubject.get(uuidOf(6))).toEqual(result.base);
   });
 
   it('runs a single query when there are no subjects', async () => {
@@ -434,6 +470,67 @@ describe('RateService rate sets', () => {
     });
   });
 
+  describe('replaceSubjectSet for a merchant', () => {
+    const replaceMerchant = (entries: SubjectMethodRates[]) =>
+      service.replaceSubjectSet(RateScope.Merchant, uuidOf(5), entries, actor);
+
+    it('keys every row by the merchant and never by a user', async () => {
+      await replaceMerchant([
+        entry({
+          bands: [{ fromAmount: toFiat(0), toAmount: toFiat(100), ...percent }],
+        }),
+      ]);
+
+      for (const saved of savedRows()) {
+        expect(saved).toEqual(
+          expect.objectContaining({
+            scope: RateScope.Merchant,
+            subjectMerchantId: uuidOf(5),
+            subjectUserId: null,
+          }),
+        );
+      }
+    });
+
+    it('replaces only that merchant’s rows', async () => {
+      await replaceMerchant([entry()]);
+
+      expect(manager.delete).toHaveBeenCalledWith(MethodRate, {
+        scope: RateScope.Merchant,
+        subjectMerchantId: uuidOf(5),
+      });
+    });
+
+    it('locks the merchant set first and audits without a target user', async () => {
+      await replaceMerchant([entry()]);
+
+      expect(manager.query.mock.calls[0]).toEqual([
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`method_rates:merchant:${uuidOf(5)}`],
+      ]);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'rates.updated',
+          targetUserId: null,
+          metadata: { scope: RateScope.Merchant, merchantId: uuidOf(5) },
+        }),
+        manager,
+      );
+    });
+
+    it('reads the merchant set by the merchant column', async () => {
+      repository.find.mockResolvedValue([]);
+
+      await service.getSubjectSet(RateScope.Merchant, uuidOf(5));
+
+      expect(repository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scope: RateScope.Merchant, subjectMerchantId: uuidOf(5) },
+        }),
+      );
+    });
+  });
+
   describe('the same method twice in one set', () => {
     it('is a 400 on a base set', async () => {
       await expect(
@@ -471,6 +568,76 @@ describe('RateService rate sets', () => {
       await replace([entry(), entry({ method: 'card' })]);
 
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('a pay-out percent on a pay-in-only method', () => {
+    const inOnly = { payInPercent: 5, payOutPercent: 0 };
+
+    it('is a 400 on a base set', async () => {
+      await expect(
+        service.replaceBaseSet(
+          RateScope.Merchant,
+          [{ method: 'counterparty', payInPercent: 5, payOutPercent: 1 }],
+          actor,
+        ),
+      ).rejects.toThrow(/counterparty has no pay-out/);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['general', { general: { payInPercent: 5, payOutPercent: 0.1 } }],
+      [
+        'band',
+        {
+          general: null,
+          bands: [
+            {
+              fromAmount: toFiat(0),
+              toAmount: toFiat(1000),
+              payInPercent: 5,
+              payOutPercent: 1,
+            },
+          ],
+        },
+      ],
+    ])('is a 400 on an individual %s row', async (_label, overrides) => {
+      await expect(
+        replace([
+          entry({
+            method: 'mobile_commerce',
+            ...(overrides as Partial<SubjectMethodRates>),
+          }),
+        ]),
+      ).rejects.toThrow(/mobile_commerce has no pay-out/);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('is a 400 on a lead detail set', async () => {
+      await expect(
+        service.replaceLeadSet(
+          [link()],
+          [entry({ method: 'counterparty' })],
+          leadAudit,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('takes a zero pay-out percent, and any pay-out percent on sbp and card', async () => {
+      await service.replaceBaseSet(
+        RateScope.Trader,
+        [
+          { method: 'counterparty', ...inOnly },
+          { method: 'mobile_commerce', ...inOnly },
+          { method: 'sbp', ...percent },
+          { method: 'card', ...percent },
+        ],
+        actor,
+      );
+      await replace([entry({ method: 'counterparty', general: inOnly })]);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
     });
   });
 

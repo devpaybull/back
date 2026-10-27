@@ -237,13 +237,12 @@ describe('validateEnv', () => {
   });
 
   describe('night stop', () => {
-    it('defaults to 2 open disputes and its own 00-10 Moscow window', () => {
+    it('defaults to 2 open disputes and its own 00-10 window', () => {
       const env = validateEnv(baseEnv());
 
       expect(env.NIGHT_STOP_THRESHOLD).toBe(2);
       expect(env.NIGHT_STOP_START_HOUR).toBe(0);
       expect(env.NIGHT_STOP_END_HOUR).toBe(10);
-      expect(env.NIGHT_STOP_TIMEZONE).toBe('Europe/Moscow');
     });
 
     it('accepts the threshold bounds 1 and 10', () => {
@@ -263,16 +262,13 @@ describe('validateEnv', () => {
       ).toThrow(/NIGHT_STOP_THRESHOLD/);
     });
 
-    it('refuses hours out of range and an empty timezone', () => {
+    it('refuses hours out of range', () => {
       expect(() =>
         validateEnv({ ...baseEnv(), NIGHT_STOP_START_HOUR: '24' }),
       ).toThrow(/NIGHT_STOP_START_HOUR/);
       expect(() =>
         validateEnv({ ...baseEnv(), NIGHT_STOP_END_HOUR: '25' }),
       ).toThrow(/NIGHT_STOP_END_HOUR/);
-      expect(() =>
-        validateEnv({ ...baseEnv(), NIGHT_STOP_TIMEZONE: '' }),
-      ).toThrow(/NIGHT_STOP_TIMEZONE/);
     });
   });
 
@@ -302,15 +298,17 @@ describe('validateEnv', () => {
     });
   });
 
-  describe('time zones', () => {
-    it.each([
-      'NIGHT_STOP_TIMEZONE',
-      'INSURANCE_NIGHT_TIMEZONE',
-      'BUSINESS_TIMEZONE',
-    ])('refuses a bogus %s', (name) => {
+  describe('the one timezone', () => {
+    it('refuses a bogus BUSINESS_TIMEZONE', () => {
       expect(() =>
-        validateEnv({ ...baseEnv(), [name]: 'Europe/Moskow' }),
-      ).toThrow(new RegExp(name));
+        validateEnv({ ...baseEnv(), BUSINESS_TIMEZONE: 'Europe/Moskow' }),
+      ).toThrow(/BUSINESS_TIMEZONE/);
+    });
+
+    it('refuses an empty BUSINESS_TIMEZONE', () => {
+      expect(() =>
+        validateEnv({ ...baseEnv(), BUSINESS_TIMEZONE: '' }),
+      ).toThrow(/BUSINESS_TIMEZONE/);
     });
 
     it('defaults the business timezone to Moscow', () => {
@@ -318,14 +316,18 @@ describe('validateEnv', () => {
     });
 
     it('takes a real IANA zone', () => {
-      const env = validateEnv({
-        ...baseEnv(),
-        NIGHT_STOP_TIMEZONE: 'Asia/Vladivostok',
-        INSURANCE_NIGHT_TIMEZONE: 'UTC',
-      });
-
-      expect(env.NIGHT_STOP_TIMEZONE).toBe('Asia/Vladivostok');
+      expect(
+        validateEnv({ ...baseEnv(), BUSINESS_TIMEZONE: 'Asia/Vladivostok' })
+          .BUSINESS_TIMEZONE,
+      ).toBe('Asia/Vladivostok');
     });
+
+    it.each(['NIGHT_STOP_TIMEZONE', 'INSURANCE_NIGHT_TIMEZONE'])(
+      'has no separate %s any more',
+      (name) => {
+        expect(validateEnv(baseEnv())).not.toHaveProperty(name);
+      },
+    );
   });
 
   it('boots with no mail configuration at all', () => {

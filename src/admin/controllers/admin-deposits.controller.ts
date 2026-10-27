@@ -77,6 +77,7 @@ export class AdminDepositsController {
         query,
         this.directory,
         this.operations,
+        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),
     );
     const details = await this.detailsOf(page.items);
@@ -129,6 +130,7 @@ export class AdminDepositsController {
         query,
         this.directory,
         this.operations,
+        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),
       ACCOUNT_TRANSACTIONS_EXPORT_MAX_ROWS,
     );

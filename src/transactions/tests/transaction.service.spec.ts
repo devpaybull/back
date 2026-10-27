@@ -17,6 +17,7 @@ import { TransactionService } from '../services/transaction.service';
 import { CreateDealInput } from '../types/create-deal-input';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
+import { TransactionMethod } from '../types/transaction-method';
 import { TransactionListQuery } from '../types/transaction-list-query';
 import { TransactionSortField } from '../types/transaction-sort-field.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
@@ -34,6 +35,7 @@ jest.mock('../utils/find-transaction-method', () => {
             currency: 'RUB',
             rateKind: 'by_amount',
             platformMinPercent: 2,
+            directions: ['pay_in', 'pay_out'],
           }
         : actual.findTransactionMethod(code),
   };
@@ -73,6 +75,15 @@ const build = () => {
     releaseEscrowWithin: jest.fn(async () => undefined),
     creditLeadShareWithin: jest.fn(async () => undefined),
   };
+  const merchantBalances = {
+    creditDealWithin: jest.fn(async () => undefined),
+    holdPayOutWithin: jest.fn(async () => undefined),
+    settlePayOutWithin: jest.fn(async () => undefined),
+    releasePayOutWithin: jest.fn(async () => null),
+  };
+  const merchantSettings = {
+    allowsOverdraftWithin: jest.fn(async () => false),
+  };
   const rates = {
     resolveLeadPercents: jest.fn(
       async (): Promise<{ leadUserId: string; percent: number }[]> => [],
@@ -94,9 +105,11 @@ const build = () => {
     dataSource as never,
     {} as never,
     wallets as never,
+    merchantBalances as never,
     {} as never,
     rates as never,
     team as never,
+    merchantSettings as never,
     config as never,
   );
 
@@ -105,6 +118,8 @@ const build = () => {
     manager,
     dataSource,
     wallets,
+    merchantBalances,
+    merchantSettings,
     rates,
     team,
     links,
@@ -160,11 +175,25 @@ describe('TransactionService.createDeal', () => {
     const { service } = build();
 
     const created = await service.createDeal(
-      input({ kind: TransactionKind.PayOut, method: 'mobile_commerce' }),
+      input({ kind: TransactionKind.PayIn, method: 'mobile_commerce' }),
     );
 
     expect(created.method).toBe('mobile_commerce');
   });
+
+  it.each<TransactionMethod>(['counterparty', 'mobile_commerce'])(
+    'refuses a pay-out through %s, a pay-in-only method, before any lookup or transaction',
+    async (method) => {
+      const { service, team, wallets, dataSource } = build();
+
+      await expect(
+        service.createDeal(input({ kind: TransactionKind.PayOut, method })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(team.assignmentsOf).not.toHaveBeenCalled();
+      expect(wallets.reserveMainEscrowWithin).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    },
+  );
 
   it('resolves the lead rates from the trader’s assignments, not from the caller', async () => {
     const { service, rates, team, links } = build();
@@ -543,6 +572,319 @@ describe('TransactionService.transition, settling lead shares', () => {
   });
 });
 
+describe('TransactionService.transition, the merchant balance', () => {
+  const MERCHANT = uuidOf(3);
+  const deal = (overrides: Partial<Transaction> = {}): Transaction =>
+    ({
+      id: uuidOf(50),
+      kind: TransactionKind.PayIn,
+      status: TransactionStatus.Active,
+      traderUserId: TRADER,
+      traderAmount: toCrypto(93.897),
+      merchantId: MERCHANT,
+      merchantAmount: toCrypto(90.5),
+      ...overrides,
+    }) as Transaction;
+
+  const settle = async (
+    transaction: Transaction,
+    toStatus: TransactionStatus,
+  ) => {
+    const built = build();
+    built.manager.findOne.mockResolvedValue(transaction);
+
+    await built.service.transition(transaction.id, {
+      toStatus,
+      source: StatusEventSource.System,
+    });
+
+    return built;
+  };
+
+  it.each([TransactionStatus.Success, TransactionStatus.SuccessChanged])(
+    'credits the merchant its merchant amount when a pay-in reaches %s',
+    async (toStatus) => {
+      const { merchantBalances, manager } = await settle(
+        deal({
+          status:
+            toStatus === TransactionStatus.SuccessChanged
+              ? TransactionStatus.ManualReview
+              : TransactionStatus.Active,
+        }),
+        toStatus,
+      );
+
+      expect(merchantBalances.creditDealWithin).toHaveBeenCalledWith(
+        manager,
+        MERCHANT,
+        toCrypto(90.5),
+        uuidOf(50),
+      );
+      expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('settles the merchant its merchant amount when a pay-out succeeds', async () => {
+    const { merchantBalances, manager } = await settle(
+      deal({ kind: TransactionKind.PayOut }),
+      TransactionStatus.Success,
+    );
+
+    expect(merchantBalances.settlePayOutWithin).toHaveBeenCalledWith(
+      manager,
+      MERCHANT,
+      toCrypto(90.5),
+      uuidOf(50),
+    );
+    expect(merchantBalances.creditDealWithin).not.toHaveBeenCalled();
+  });
+
+  it('moves the merchant balance only after every wallet movement', async () => {
+    const { merchantBalances, wallets } = await settle(
+      deal(),
+      TransactionStatus.Success,
+    );
+
+    const merchantAt =
+      merchantBalances.creditDealWithin.mock.invocationCallOrder[0];
+    const walletMoves = [
+      ...wallets.lockWalletsWithin.mock.invocationCallOrder,
+      ...wallets.debitMainWithin.mock.invocationCallOrder,
+    ];
+
+    expect(walletMoves.every((order) => order < merchantAt)).toBe(true);
+  });
+
+  it('leaves the merchant balance alone when a pay-in is canceled', async () => {
+    const { merchantBalances } = await settle(
+      deal(),
+      TransactionStatus.Canceled,
+    );
+
+    expect(merchantBalances.creditDealWithin).not.toHaveBeenCalled();
+    expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+    expect(merchantBalances.releasePayOutWithin).not.toHaveBeenCalled();
+  });
+
+  it('releases the merchant’s held amount when a pay-out is canceled', async () => {
+    const { merchantBalances, manager } = await settle(
+      deal({ kind: TransactionKind.PayOut }),
+      TransactionStatus.Canceled,
+    );
+
+    expect(merchantBalances.releasePayOutWithin).toHaveBeenCalledWith(
+      manager,
+      MERCHANT,
+      uuidOf(50),
+    );
+    expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+  });
+
+  it('releases nothing for a canceled pay-out without a merchant', async () => {
+    const { merchantBalances } = await settle(
+      deal({
+        kind: TransactionKind.PayOut,
+        merchantId: null as unknown as string,
+      }),
+      TransactionStatus.Canceled,
+    );
+
+    expect(merchantBalances.releasePayOutWithin).not.toHaveBeenCalled();
+  });
+
+  it('leaves it alone when a deal already success is settled again', async () => {
+    const { merchantBalances } = await settle(
+      deal({ status: TransactionStatus.Success }),
+      TransactionStatus.Success,
+    );
+
+    expect(merchantBalances.creditDealWithin).not.toHaveBeenCalled();
+  });
+
+  it('moves nothing for a deal without a merchant', async () => {
+    const { merchantBalances } = await settle(
+      deal({ merchantId: null as unknown as string }),
+      TransactionStatus.Success,
+    );
+
+    expect(merchantBalances.creditDealWithin).not.toHaveBeenCalled();
+  });
+
+  describe('a pay-out walked through its statuses', () => {
+    const walk = async (statuses: TransactionStatus[]) => {
+      const built = build();
+      const transaction = deal({ kind: TransactionKind.PayOut });
+      built.manager.findOne.mockResolvedValue(transaction);
+
+      for (const toStatus of statuses) {
+        await built.service.transition(transaction.id, {
+          toStatus,
+          source: StatusEventSource.System,
+        });
+      }
+
+      return { ...built, transaction };
+    };
+
+    it('settles once when a dispute ends in success_changed', async () => {
+      const { merchantBalances } = await walk([
+        TransactionStatus.Dispute,
+        TransactionStatus.ManualReview,
+        TransactionStatus.SuccessChanged,
+      ]);
+
+      expect(merchantBalances.settlePayOutWithin).toHaveBeenCalledTimes(1);
+      expect(merchantBalances.releasePayOutWithin).not.toHaveBeenCalled();
+    });
+
+    it('releases once when a dispute ends canceled', async () => {
+      const { merchantBalances } = await walk([
+        TransactionStatus.Dispute,
+        TransactionStatus.ManualReview,
+        TransactionStatus.Canceled,
+      ]);
+
+      expect(merchantBalances.releasePayOutWithin).toHaveBeenCalledTimes(1);
+      expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+    });
+
+    it('moves nothing on the active → pending → active round trip and releases once on the cancel after it', async () => {
+      const { merchantBalances } = await walk([
+        TransactionStatus.Pending,
+        TransactionStatus.Active,
+      ]);
+
+      expect(merchantBalances.releasePayOutWithin).not.toHaveBeenCalled();
+      expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+      expect(merchantBalances.holdPayOutWithin).not.toHaveBeenCalled();
+
+      const after = await walk([
+        TransactionStatus.Pending,
+        TransactionStatus.Active,
+        TransactionStatus.Canceled,
+      ]);
+
+      expect(after.merchantBalances.releasePayOutWithin).toHaveBeenCalledTimes(
+        1,
+      );
+    });
+
+    it('refuses success_changed → success with a 409 and moves nothing', async () => {
+      const built = build();
+      built.manager.findOne.mockResolvedValue(
+        deal({
+          kind: TransactionKind.PayOut,
+          status: TransactionStatus.SuccessChanged,
+        }),
+      );
+
+      await expect(
+        built.service.transition(uuidOf(50), {
+          toStatus: TransactionStatus.Success,
+          source: StatusEventSource.System,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(built.merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+      expect(built.merchantBalances.releasePayOutWithin).not.toHaveBeenCalled();
+    });
+
+    it('leaves it alone when a pay-out already success is settled again', async () => {
+      const { merchantBalances } = await settle(
+        deal({
+          kind: TransactionKind.PayOut,
+          status: TransactionStatus.Success,
+        }),
+        TransactionStatus.Success,
+      );
+
+      expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+    });
+
+    it('moves the merchant balance of a pay-out only after the trader is credited', async () => {
+      const { merchantBalances, wallets } = await settle(
+        deal({ kind: TransactionKind.PayOut }),
+        TransactionStatus.Success,
+      );
+
+      const merchantAt =
+        merchantBalances.settlePayOutWithin.mock.invocationCallOrder[0];
+
+      expect(
+        [
+          ...wallets.lockWalletsWithin.mock.invocationCallOrder,
+          ...wallets.creditMainWithin.mock.invocationCallOrder,
+        ].every((order) => order < merchantAt),
+      ).toBe(true);
+      expect(wallets.creditMainWithin).toHaveBeenCalled();
+    });
+  });
+});
+
+describe('TransactionService.createDeal, the merchant hold', () => {
+  it('holds the merchant amount of a pay-out in the transaction that inserts it, after the insert', async () => {
+    const { service, merchantBalances, manager } = build();
+
+    const created = await service.createDeal(
+      input({ kind: TransactionKind.PayOut }),
+    );
+
+    expect(merchantBalances.holdPayOutWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+      created.merchantAmount,
+      uuidOf(50),
+      expect.any(Function),
+    );
+    expect(manager.save.mock.invocationCallOrder[0]).toBeLessThan(
+      merchantBalances.holdPayOutWithin.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('reads the overdraft switch through the hold, inside the deal transaction, never before it', async () => {
+    const { service, merchantBalances, merchantSettings, manager } = build();
+    merchantSettings.allowsOverdraftWithin.mockResolvedValueOnce(true);
+
+    await service.createDeal(input({ kind: TransactionKind.PayOut }));
+
+    expect(merchantSettings.allowsOverdraftWithin).not.toHaveBeenCalled();
+
+    const [, , , , allowsOverdraft] = merchantBalances.holdPayOutWithin.mock
+      .calls[0] as unknown as [
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      () => Promise<boolean>,
+    ];
+
+    expect(await allowsOverdraft()).toBe(true);
+    expect(merchantSettings.allowsOverdraftWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+    );
+  });
+
+  it('lets a refused hold fail the whole deal', async () => {
+    const { service, merchantBalances } = build();
+    merchantBalances.holdPayOutWithin.mockRejectedValueOnce(
+      new ConflictException('The merchant balance does not cover the pay-out'),
+    );
+
+    await expect(
+      service.createDeal(input({ kind: TransactionKind.PayOut })),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('holds nothing for a pay-in and does not read the overdraft switch', async () => {
+    const { service, merchantBalances, merchantSettings } = build();
+
+    await service.createDeal(input());
+
+    expect(merchantBalances.holdPayOutWithin).not.toHaveBeenCalled();
+    expect(merchantSettings.allowsOverdraftWithin).not.toHaveBeenCalled();
+  });
+});
+
 describe('TransactionService.createDeal, the deadline', () => {
   const NOW = new Date('2026-10-24T12:00:00.000Z');
 
@@ -743,6 +1085,8 @@ describe('TransactionService.list', () => {
     const service = new TransactionService(
       {} as never,
       repository as never,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

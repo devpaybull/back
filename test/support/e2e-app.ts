@@ -157,8 +157,8 @@ export const startE2e = async (
     }),
   );
   app.useGlobalInterceptors(new ResponseEnvelopeInterceptor());
-  await app.init();
-  const http = request(app.getHttpServer());
+  await app.listen(0, '127.0.0.1');
+  const http = request(await app.getUrl());
   const dataSource = app.get(DataSource);
   let counter = 0;
 
@@ -184,7 +184,7 @@ export const startE2e = async (
           status: UserStatus.Active,
         }),
       );
-      const session = await request(app.getHttpServer())
+      const session = await http
         .post('/auth/login')
         .send({
           login,

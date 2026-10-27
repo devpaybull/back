@@ -18,6 +18,7 @@ import { Page, toPage } from '../../common/types/page';
 import { FIAT_SCALE } from '../../common/utils/fiat-scale';
 import { RATE_SCALE } from '../../common/utils/rate-scale';
 import { sortDirection } from '../../common/utils/sort-direction';
+import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
 import { UserTeamService } from '../../users/services/user-team.service';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
@@ -43,6 +44,7 @@ import {
 import { transactionListOrder } from '../utils/transaction-list-order';
 import { transactionListWhere } from '../utils/transaction-list-where';
 import { RateService } from './rate.service';
+import { MerchantBalanceService } from './merchant-balance.service';
 import { WalletService } from './wallet.service';
 
 const MINUTE_MS = 60_000;
@@ -57,9 +59,11 @@ export class TransactionService {
     @InjectRepository(Transaction)
     private readonly transactions: Repository<Transaction>,
     private readonly wallets: WalletService,
+    private readonly merchantBalances: MerchantBalanceService,
     private readonly audit: AuditService,
     private readonly rates: RateService,
     private readonly team: UserTeamService,
+    private readonly merchantSettings: MerchantSettingsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -133,6 +137,12 @@ export class TransactionService {
       throw new BadRequestException(`Unknown method ${input.method}`);
     }
 
+    if (!method.directions.includes(input.kind)) {
+      throw new BadRequestException(
+        `Method ${input.method} does not work for ${input.kind}`,
+      );
+    }
+
     if (input.amountFiat.decimalPlaces() > FIAT_SCALE) {
       throw new BadRequestException(
         `amountFiat must have at most ${FIAT_SCALE} decimal places`,
@@ -173,6 +183,8 @@ export class TransactionService {
       }
       throw error;
     }
+    const holdsMerchant =
+      input.kind === TransactionKind.PayOut && Boolean(input.merchantId);
     const status = startStatus(input.kind);
     const createdAt = new Date();
     const expiresAt = new Date(
@@ -214,6 +226,19 @@ export class TransactionService {
         expiresAt,
       });
       await manager.save(transaction);
+      if (holdsMerchant) {
+        await this.merchantBalances.holdPayOutWithin(
+          manager,
+          input.merchantId,
+          computation.merchantAmount,
+          transaction.id,
+          () =>
+            this.merchantSettings.allowsOverdraftWithin(
+              manager,
+              input.merchantId,
+            ),
+        );
+      }
       if (computation.leadShares.length) {
         await manager.save(
           computation.leadShares.map((share) =>
@@ -310,14 +335,46 @@ export class TransactionService {
           transaction.traderAmount,
         );
       }
-      return;
-    }
-
-    if (transaction.kind === TransactionKind.PayOut && settled) {
+    } else if (transaction.kind === TransactionKind.PayOut && settled) {
       await this.wallets.creditMainWithin(
         manager,
         transaction.traderUserId,
         transaction.traderAmount,
+        transaction.id,
+      );
+    }
+
+    if (settled && isDeal && transaction.merchantId) {
+      await this.settleMerchantBalance(manager, transaction);
+    } else if (
+      toStatus === TransactionStatus.Canceled &&
+      transaction.kind === TransactionKind.PayOut &&
+      transaction.merchantId
+    ) {
+      await this.merchantBalances.releasePayOutWithin(
+        manager,
+        transaction.merchantId,
+        transaction.id,
+      );
+    }
+  }
+
+  private async settleMerchantBalance(
+    manager: EntityManager,
+    transaction: Transaction,
+  ): Promise<void> {
+    if (transaction.kind === TransactionKind.PayIn) {
+      await this.merchantBalances.creditDealWithin(
+        manager,
+        transaction.merchantId,
+        transaction.merchantAmount,
+        transaction.id,
+      );
+    } else {
+      await this.merchantBalances.settlePayOutWithin(
+        manager,
+        transaction.merchantId,
+        transaction.merchantAmount,
         transaction.id,
       );
     }

@@ -1,8 +1,12 @@
 import Decimal from 'decimal.js';
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { addCalendarDays } from '../common/utils/add-calendar-days';
+import { calendarDateIn } from '../common/utils/calendar-date-in';
 import { formatCrypto } from '../common/utils/format-crypto';
 import { formatFiat } from '../common/utils/format-fiat';
 import { toDecimal } from '../common/utils/to-decimal';
+import { zonedMidnight } from '../common/utils/zoned-midnight';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransactionService } from '../transactions/services/transaction.service';
 import { TransactionKind } from '../transactions/types/transaction-kind.enum';
@@ -27,8 +31,6 @@ const isPayIn = (row: Transaction): boolean =>
 const isPayOut = (row: Transaction): boolean =>
   row.kind === TransactionKind.PayOut;
 
-const dayKey = (date: Date): string => date.toISOString().slice(0, 10);
-
 const percent = (numerator: number, denominator: number): number =>
   denominator === 0 ? 0 : Number(((numerator / denominator) * 100).toFixed(2));
 
@@ -40,13 +42,16 @@ const sumOf = (
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly transactions: TransactionService) {}
+  constructor(
+    private readonly transactions: TransactionService,
+    private readonly config: ConfigService,
+  ) {}
 
   async payIn(userId: string): Promise<PayInAnalyticsDto> {
     const rows = (await this.window(userId)).filter(isPayIn);
 
     const series = this.dayKeys().map((date) => {
-      const day = rows.filter((row) => dayKey(row.createdAt) === date);
+      const day = rows.filter((row) => this.dayOf(row) === date);
       const success = day.filter(isSuccess).length;
       const fail = day.filter(isFail).length;
       return {
@@ -70,7 +75,7 @@ export class AnalyticsService {
     const rows = await this.window(userId);
 
     const series = this.dayKeys().map((date) => {
-      const day = rows.filter((row) => dayKey(row.createdAt) === date);
+      const day = rows.filter((row) => this.dayOf(row) === date);
       return {
         date,
         total: day.length,
@@ -93,7 +98,7 @@ export class AnalyticsService {
     const rows = await this.window(userId);
 
     const series = this.dayKeys().map((date) => {
-      const day = rows.filter((row) => dayKey(row.createdAt) === date);
+      const day = rows.filter((row) => this.dayOf(row) === date);
       const successful = day.filter(isSuccess);
       return {
         date,
@@ -138,28 +143,25 @@ export class AnalyticsService {
   }
 
   private window(userId: string): Promise<Transaction[]> {
-    return this.transactions.findTraderWindow(userId, this.windowStart());
-  }
-
-  private windowStart(): Date {
-    const now = new Date();
-    return new Date(
-      Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() - (WINDOW_DAYS - 1),
-      ),
+    return this.transactions.findTraderWindow(
+      userId,
+      zonedMidnight(this.dayKeys()[0], this.timeZone()),
     );
   }
 
+  private dayOf(row: Transaction): string {
+    return calendarDateIn(row.createdAt, this.timeZone());
+  }
+
   private dayKeys(): string[] {
-    const start = this.windowStart();
-    const keys: string[] = [];
-    for (let offset = 0; offset < WINDOW_DAYS; offset += 1) {
-      const day = new Date(start);
-      day.setUTCDate(start.getUTCDate() + offset);
-      keys.push(dayKey(day));
-    }
-    return keys;
+    const today = calendarDateIn(new Date(), this.timeZone());
+
+    return Array.from({ length: WINDOW_DAYS }, (_, index) =>
+      addCalendarDays(today, index - (WINDOW_DAYS - 1)),
+    );
+  }
+
+  private timeZone(): string {
+    return this.config.getOrThrow<string>('BUSINESS_TIMEZONE');
   }
 }

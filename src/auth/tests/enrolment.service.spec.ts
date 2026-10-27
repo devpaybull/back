@@ -9,7 +9,7 @@ import { TokenType } from '../../common/types/token';
 import { renderQrCodeDataUrl } from '../../common/utils/render-qr-code-data-url';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { InvitesService } from '../../invites/invites.service';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { User } from '../../users/entities/user.entity';
 import { UserCredentialsService } from '../../users/services/user-credentials.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';

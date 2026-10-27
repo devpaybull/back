@@ -58,6 +58,7 @@ describe('AdminBalancesController', () => {
       transfers as never,
       directory as never,
       debts as never,
+      { getOrThrow: () => 'Europe/Moscow' } as never,
     );
   });
 

@@ -11,7 +11,7 @@ import { FindOperator } from 'typeorm';
 import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
-import { MerchantsService } from '../../merchants/merchants.service';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { Invite } from '../entities/invite.entity';

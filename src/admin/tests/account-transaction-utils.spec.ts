@@ -194,22 +194,26 @@ describe('toAccountTransactionListQuery', () => {
       ...overrides,
     });
 
-  it('copies the filters and fixes the type', async () => {
+  it('copies the filters, fixes the type and reads a bare day as midnight in the business timezone', async () => {
     const { directory, operations } = build();
-    const createdFrom = new Date(0);
-
     const query = await toAccountTransactionListQuery(
       AccountTransactionType.Withdrawal,
-      dto({ createdFrom, userId: uuidOf(3) }),
+      dto({
+        createdFrom: '2026-10-24',
+        createdTo: '2026-10-24T12:00:00Z',
+        userId: uuidOf(3),
+      }),
       directory as never,
       operations as never,
+      'Europe/Moscow',
     );
 
     expect(query).toMatchObject({
       type: AccountTransactionType.Withdrawal,
       page: 2,
       limit: 10,
-      createdFrom,
+      createdFrom: new Date('2026-10-23T21:00:00.000Z'),
+      createdTo: new Date('2026-10-24T12:00:00.000Z'),
       userId: uuidOf(3),
       matchedUserIds: undefined,
     });
@@ -225,12 +229,14 @@ describe('toAccountTransactionListQuery', () => {
       dto({ search: ' durov ' }),
       directory as never,
       operations as never,
+      'Europe/Moscow',
     );
     const digits = await toAccountTransactionListQuery(
       AccountTransactionType.Deposit,
       dto({ search: '41' }),
       directory as never,
       operations as never,
+      'Europe/Moscow',
     );
 
     expect(directory.findIdsMatching).toHaveBeenCalledTimes(1);
@@ -250,6 +256,7 @@ describe('toAccountTransactionListQuery', () => {
       dto({ sortBy: AccountTransactionSortField.User }),
       directory as never,
       operations as never,
+      'Europe/Moscow',
     );
 
     expect(operations.userIdsOf).toHaveBeenCalledWith(

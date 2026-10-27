@@ -1,4 +1,5 @@
 import { RateKind } from '../types/rate-kind.enum';
+import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { findTransactionMethod } from '../utils/find-transaction-method';
 import {
@@ -53,6 +54,29 @@ describe('the transaction method registry', () => {
         rateKind: RateKind.ByAmount,
       },
     ]);
+  });
+
+  it('gives every method at least one direction, each a deal kind and none twice', () => {
+    for (const method of TRANSACTION_METHODS as readonly TransactionMethodDefinition[]) {
+      expect(method.directions.length).toBeGreaterThan(0);
+      expect(new Set(method.directions).size).toBe(method.directions.length);
+      for (const direction of method.directions) {
+        expect(Object.values(TransactionKind)).toContain(direction);
+      }
+    }
+  });
+
+  it('pays out only through sbp and card; counterparty and mobile commerce take pay-in only', () => {
+    expect(
+      Object.fromEntries(
+        TRANSACTION_METHODS.map((method) => [method.code, method.directions]),
+      ),
+    ).toEqual({
+      sbp: [TransactionKind.PayIn, TransactionKind.PayOut],
+      card: [TransactionKind.PayIn, TransactionKind.PayOut],
+      counterparty: [TransactionKind.PayIn],
+      mobile_commerce: [TransactionKind.PayIn],
+    });
   });
 
   it('lists the codes in declaration order', () => {

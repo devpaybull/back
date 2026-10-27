@@ -100,15 +100,15 @@ describe('ListFinanceOperationsQueryDto', () => {
     expect(dto.sortBy).toBe('createdAt');
   });
 
-  it('reads the period as dates', async () => {
+  it('keeps the period as written, a bare day included', async () => {
     const { dto, errors } = await parse({
       from: '2026-10-01T00:00:00Z',
       to: '2026-11-01',
     });
 
     expect(errors).toEqual([]);
-    expect(dto.from).toEqual(new Date('2026-10-01T00:00:00Z'));
-    expect(dto.to).toBeInstanceOf(Date);
+    expect(dto.from).toBe('2026-10-01T00:00:00Z');
+    expect(dto.to).toBe('2026-11-01');
   });
 
   it.each([
@@ -159,7 +159,10 @@ describe('FinanceOperationsController', () => {
     };
 
     return {
-      controller: new FinanceOperationsController(operations as never),
+      controller: new FinanceOperationsController(
+        operations as never,
+        { getOrThrow: () => 'Europe/Moscow' } as never,
+      ),
       operations,
     };
   };

@@ -149,10 +149,15 @@ const build = (rows: Transaction[]) => {
     creditMainWithin: jest.fn(async () => undefined),
     creditLeadShareWithin: jest.fn(async () => undefined),
   };
+  const merchantBalances = {
+    releasePayOutWithin: jest.fn(async () => null),
+  };
   const transactions = new TransactionService(
     {} as never,
     {} as never,
     wallets as never,
+    merchantBalances as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -170,6 +175,7 @@ const build = (rows: Transaction[]) => {
     repository,
     manager,
     wallets,
+    merchantBalances,
     saved,
     lockCalls,
     lockedElsewhere,
@@ -259,6 +265,23 @@ describe('DealExpiryService', () => {
     expect(pending.status).toBe(TransactionStatus.Canceled);
     expect(active.status).toBe(TransactionStatus.Canceled);
     expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+  });
+
+  it('returns the merchant’s held amount when an expired pay-out is canceled', async () => {
+    const row = deal(1, {
+      kind: TransactionKind.PayOut,
+      merchantId: uuidOf(3),
+      merchantAmount: 7 as never,
+    });
+    const { service, merchantBalances, manager } = build([row]);
+
+    await expect(service.run(NOW)).resolves.toBe(1);
+
+    expect(merchantBalances.releasePayOutWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+      uuidOf(1),
+    );
   });
 
   it.each([

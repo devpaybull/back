@@ -1,30 +1,27 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsOptional } from 'class-validator';
 import { toQueryList } from '../../common/utils/to-query-list';
 import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { BalanceOperationType } from '../../transactions/types/balance-operation-type.enum';
+import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class BalanceOperationFilterDto {
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Start of the period, inclusive (createdAt >= from)',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  from?: Date;
+  @IsDateFilter()
+  from?: string;
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'End of the period, exclusive (createdAt < to)',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  to?: Date;
+  @IsDateFilter()
+  to?: string;
 
   @ApiPropertyOptional({
     enum: BalanceOperationType,

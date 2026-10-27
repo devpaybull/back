@@ -2,6 +2,7 @@ import { AccountTransactionsService } from '../../account-transactions/services/
 import { AccountTransactionListQuery } from '../../account-transactions/types/account-transaction-list-query';
 import { AccountTransactionSortField } from '../../account-transactions/types/account-transaction-sort-field.enum';
 import { AccountTransactionType } from '../../account-transactions/types/account-transaction-type.enum';
+import { toInstant } from '../../common/utils/to-instant';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { ListAccountTransactionsQueryDto } from '../dto/list-account-transactions-query.dto';
 
@@ -10,6 +11,7 @@ export const toAccountTransactionListQuery = async (
   query: ListAccountTransactionsQueryDto,
   directory: UserDirectoryService,
   operations: AccountTransactionsService,
+  timeZone: string,
 ): Promise<AccountTransactionListQuery> => {
   const search = query.search?.trim();
   const matchedUserIds =
@@ -25,8 +27,8 @@ export const toAccountTransactionListQuery = async (
     status: query.status,
     statusReason: query.statusReason,
     userId: query.userId,
-    createdFrom: query.createdFrom,
-    createdTo: query.createdTo,
+    createdFrom: toInstant(query.createdFrom, timeZone),
+    createdTo: toInstant(query.createdTo, timeZone),
     search,
     matchedUserIds,
   };

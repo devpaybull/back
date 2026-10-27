@@ -13,6 +13,7 @@ import {
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -50,6 +51,7 @@ import {
 import { AdminTransferDto } from '../dto/admin-transfer.dto';
 import { BalancesDto, toBalancesDto } from '../dto/balances.dto';
 import { canIssueRole } from '../utils/can-issue-role';
+import { toInstant } from '../../common/utils/to-instant';
 
 export const BALANCE_EXPORT_MAX_ROWS = 100000;
 
@@ -66,6 +68,7 @@ export class AdminBalancesController {
     private readonly transfers: TransfersService,
     private readonly directory: UserDirectoryService,
     private readonly debts: DebtsService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get('balances')
@@ -98,8 +101,8 @@ export class AdminBalancesController {
 
     const page = await this.wallets.listOperations({
       userId: id,
-      from: query.from,
-      to: query.to,
+      from: toInstant(query.from, this.timeZone()),
+      to: toInstant(query.to, this.timeZone()),
       types: query.type,
       kind: query.kind,
       page: query.page,
@@ -131,8 +134,8 @@ export class AdminBalancesController {
     const operations = await this.wallets.exportOperations(
       {
         userId: id,
-        from: query.from,
-        to: query.to,
+        from: toInstant(query.from, this.timeZone()),
+        to: toInstant(query.to, this.timeZone()),
         types: query.type,
         kind: query.kind,
       },
@@ -211,5 +214,9 @@ export class AdminBalancesController {
         )
         .map((operation) => operation.id),
     );
+  }
+
+  private timeZone(): string {
+    return this.config.getOrThrow<string>('BUSINESS_TIMEZONE');
   }
 }

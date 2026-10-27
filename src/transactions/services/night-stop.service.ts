@@ -21,7 +21,7 @@ export class NightStopService {
       now,
       this.config.getOrThrow<number>('NIGHT_STOP_START_HOUR'),
       this.config.getOrThrow<number>('NIGHT_STOP_END_HOUR'),
-      this.config.getOrThrow<string>('NIGHT_STOP_TIMEZONE'),
+      this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
     );
   }
 

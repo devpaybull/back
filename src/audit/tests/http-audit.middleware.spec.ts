@@ -334,6 +334,21 @@ describe('HttpAuditMiddleware', () => {
       });
     });
 
+    it('redacts the whitelisted address on the merchant IP route only', () => {
+      const whitelisted = run({
+        route: { path: '/admin/merchants/:id/ip-addresses' },
+        body: { ip: '203.0.113.47' },
+      });
+      const elsewhere = run({ body: { ip: '203.0.113.47' } });
+
+      expect(whitelisted.recordHttp.mock.calls[0][0].body).toEqual({
+        ip: '[REDACTED]',
+      });
+      expect(elsewhere.recordHttp.mock.calls[0][0].body).toEqual({
+        ip: '203.0.113.47',
+      });
+    });
+
     it('stores a missing body as null', () => {
       const { recordHttp } = run({ body: undefined });
 

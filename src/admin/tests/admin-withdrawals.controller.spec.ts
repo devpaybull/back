@@ -61,6 +61,7 @@ const build = (mode = 'auto') => {
     get: jest.fn((key: string, fallback?: unknown) =>
       key === 'PAYOUT_MODE' ? mode : fallback,
     ),
+    getOrThrow: jest.fn(() => 'Europe/Moscow'),
   };
   const operations = {
     list: jest.fn(async () =>

@@ -39,8 +39,8 @@ describe('ListBalanceOperationsQueryDto', () => {
     });
 
     expect(errors).toEqual([]);
-    expect(dto.from).toEqual(new Date('2026-10-01T00:00:00Z'));
-    expect(dto.to).toEqual(new Date('2026-11-01'));
+    expect(dto.from).toBe('2026-10-01T00:00:00Z');
+    expect(dto.to).toBe('2026-11-01');
     expect(dto.type).toEqual([
       BalanceOperationType.Transaction,
       BalanceOperationType.DebtIssued,

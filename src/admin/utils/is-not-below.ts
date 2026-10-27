@@ -1,8 +1,10 @@
 import {
+  isISO8601,
   ValidateBy,
   ValidationArguments,
   ValidationOptions,
 } from 'class-validator';
+import { CALENDAR_DAY_PATTERN } from '../../common/utils/calendar-day-pattern';
 import { toDecimal } from '../../common/utils/to-decimal';
 
 const DECIMAL_STRING = /^\d+(\.\d+)?$/;
@@ -12,6 +14,14 @@ const isComparable = (value: unknown): boolean =>
 
 const isDecimalString = (value: unknown): value is string =>
   typeof value === 'string' && DECIMAL_STRING.test(value);
+
+const isDateString = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  !isDecimalString(value) &&
+  isISO8601(value, { strict: true });
+
+const isCalendarDay = (value: string): boolean =>
+  CALENDAR_DAY_PATTERN.test(value);
 
 export const IsNotBelow = (
   lowerBoundProperty: string,
@@ -26,6 +36,14 @@ export const IsNotBelow = (
           const lowerBound = (args.object as Record<string, unknown>)[
             lowerBoundProperty
           ];
+
+          if (isDateString(value) && isDateString(lowerBound)) {
+            if (isCalendarDay(value) !== isCalendarDay(lowerBound)) return true;
+
+            return isCalendarDay(value)
+              ? value >= lowerBound
+              : Date.parse(value) >= Date.parse(lowerBound);
+          }
 
           if (!isComparable(value) || !isComparable(lowerBound)) return true;
 

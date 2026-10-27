@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { CountriesService } from '../countries/countries.service';
 import { Currency } from './entities/currency.entity';
 import { CreateCurrencyInput } from './types/create-currency-input';
@@ -52,6 +52,18 @@ export class CurrenciesService {
     if (ids.length === 0) return [];
 
     return this.currencies.find({ where: { id: In(ids) } });
+  }
+
+  async findByIdsWithin(
+    manager: EntityManager,
+    ids: number[],
+  ): Promise<Currency[]> {
+    if (ids.length === 0) return [];
+
+    return manager.find(Currency, {
+      where: { id: In(ids) },
+      lock: { mode: 'pessimistic_read' },
+    });
   }
 
   async update(id: number, changes: CurrencyChanges): Promise<Currency> {

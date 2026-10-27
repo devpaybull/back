@@ -25,6 +25,7 @@ import {
   RateAudit,
   SubjectMethodRates,
 } from '../types/rate-set';
+import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { bandsAreValid } from '../utils/bands-valid';
 import { findTransactionMethod } from '../utils/find-transaction-method';
@@ -38,6 +39,19 @@ const knownMethod = (code: string): TransactionMethodDefinition => {
   if (!method) throw new BadRequestException(`Unknown method ${code}`);
 
   return method;
+};
+
+const assertNoPayOutWhereUnsupported = (
+  method: TransactionMethodDefinition,
+  payOutPercents: number[],
+): void => {
+  if (method.directions.includes(TransactionKind.PayOut)) return;
+
+  if (payOutPercents.some((percent) => percent !== 0)) {
+    throw new BadRequestException(
+      `Method ${method.code} has no pay-out, so its payOutPercent must be 0`,
+    );
+  }
 };
 
 const assertMethodsUnique = (entries: { method: string }[]): void => {
@@ -59,6 +73,17 @@ const lockRateSet = async (
 ): Promise<void> => {
   await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
 };
+
+const subjectColumnsOf = (
+  scope: RateScope,
+  subjectId: string,
+): { subjectUserId: string | null; subjectMerchantId: string | null } =>
+  scope === RateScope.Merchant
+    ? { subjectUserId: null, subjectMerchantId: subjectId }
+    : { subjectUserId: subjectId, subjectMerchantId: null };
+
+const subjectIdOf = (scope: RateScope, row: MethodRate): string =>
+  scope === RateScope.Merchant ? row.subjectMerchantId : row.subjectUserId;
 
 const declarationRank = (code: string): number => {
   const index = TRANSACTION_METHOD_CODES.indexOf(code);
@@ -95,14 +120,26 @@ export class RateService {
     });
   }
 
-  getSubjectSet(
-    scope: RateScope,
-    subjectUserId: string,
-  ): Promise<MethodRate[]> {
+  getSubjectSet(scope: RateScope, subjectId: string): Promise<MethodRate[]> {
     return this.rates.find({
-      where: { scope, subjectUserId },
+      where:
+        scope === RateScope.Merchant
+          ? { scope, subjectMerchantId: subjectId }
+          : { scope, subjectUserId: subjectId },
       order: { method: 'ASC', bankId: 'ASC', fromAmount: 'ASC' },
     });
+  }
+
+  getEffectiveMerchantGeneralRates(
+    merchantIds: string[],
+  ): Promise<EffectiveGeneralRates> {
+    return this.getEffectiveGeneralRates(
+      RateScope.Merchant,
+      merchantIds.map((merchantId) => ({
+        userId: merchantId,
+        individualEnabled: true,
+      })),
+    );
   }
 
   async getEffectiveGeneralRates(
@@ -126,7 +163,9 @@ export class RateService {
       ? await this.rates.find({
           where: {
             scope,
-            subjectUserId: In(enabledIds),
+            ...(scope === RateScope.Merchant
+              ? { subjectMerchantId: In(enabledIds) }
+              : { subjectUserId: In(enabledIds) }),
             fromAmount: IsNull(),
             toAmount: IsNull(),
             bankId: IsNull(),
@@ -140,7 +179,7 @@ export class RateService {
 
       if (subject.individualEnabled) {
         for (const row of individualRows) {
-          if (row.subjectUserId === subject.userId) {
+          if (subjectIdOf(scope, row) === subject.userId) {
             merged.set(row.method, toPercent(row));
           }
         }
@@ -157,7 +196,11 @@ export class RateService {
     entries: BaseMethodRate[],
     audit: RateAudit,
   ): Promise<MethodRate[]> {
-    for (const entry of entries) knownMethod(entry.method);
+    for (const entry of entries) {
+      assertNoPayOutWhereUnsupported(knownMethod(entry.method), [
+        entry.payOutPercent,
+      ]);
+    }
     assertMethodsUnique(entries);
 
     return this.dataSource.transaction(async (manager) => {
@@ -198,15 +241,21 @@ export class RateService {
 
   async replaceSubjectSet(
     scope: RateScope,
-    subjectUserId: string,
+    subjectId: string,
     entries: SubjectMethodRates[],
     audit: RateAudit,
   ): Promise<MethodRate[]> {
     await this.assertSubjectSetFits(entries);
 
     return this.dataSource.transaction(async (manager) => {
-      await lockRateSet(manager, `method_rates:${scope}:${subjectUserId}`);
-      await manager.delete(MethodRate, { scope, subjectUserId });
+      await lockRateSet(manager, `method_rates:${scope}:${subjectId}`);
+      const subject = subjectColumnsOf(scope, subjectId);
+      await manager.delete(
+        MethodRate,
+        scope === RateScope.Merchant
+          ? { scope, subjectMerchantId: subjectId }
+          : { scope, subjectUserId: subjectId },
+      );
 
       const rows: MethodRate[] = [];
       for (const entry of entries) {
@@ -215,8 +264,7 @@ export class RateService {
             manager.create(MethodRate, {
               scope,
               method: entry.method,
-              subjectUserId,
-              subjectMerchantId: null,
+              ...subject,
               bankId: null,
               fromAmount: null,
               toAmount: null,
@@ -230,8 +278,7 @@ export class RateService {
             manager.create(MethodRate, {
               scope,
               method: entry.method,
-              subjectUserId,
-              subjectMerchantId: null,
+              ...subject,
               bankId: null,
               fromAmount: band.fromAmount,
               toAmount: band.toAmount,
@@ -245,8 +292,7 @@ export class RateService {
             manager.create(MethodRate, {
               scope,
               method: entry.method,
-              subjectUserId,
-              subjectMerchantId: null,
+              ...subject,
               bankId: bank.bankId,
               fromAmount: null,
               toAmount: null,
@@ -261,9 +307,12 @@ export class RateService {
       await this.audit.record(
         {
           actorUserId: audit.actorUserId,
-          targetUserId: subjectUserId,
+          targetUserId: subject.subjectUserId,
           action: 'rates.updated',
-          metadata: { scope },
+          metadata:
+            scope === RateScope.Merchant
+              ? { scope, merchantId: subjectId }
+              : { scope },
         },
         manager,
       );
@@ -489,6 +538,12 @@ export class RateService {
 
     for (const entry of entries) {
       const method = knownMethod(entry.method);
+
+      assertNoPayOutWhereUnsupported(method, [
+        ...(entry.general ? [entry.general.payOutPercent] : []),
+        ...entry.bands.map((band) => band.payOutPercent),
+        ...entry.banks.map((bank) => bank.payOutPercent),
+      ]);
 
       if (method.rateKind === RateKind.ByAmount && entry.banks.length) {
         throw new BadRequestException(

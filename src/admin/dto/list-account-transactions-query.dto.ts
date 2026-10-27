@@ -1,12 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { AccountTransactionSortField } from '../../account-transactions/types/account-transaction-sort-field.enum';
 import { AccountTransactionStatus } from '../../account-transactions/types/account-transaction-status.enum';
 import { AccountTransactionStatusReason } from '../../account-transactions/types/account-transaction-status-reason.enum';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { toQueryList } from '../../common/utils/to-query-list';
 import { IsNotBelow } from '../utils/is-not-below';
+import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class ListAccountTransactionsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -32,24 +33,20 @@ export class ListAccountTransactionsQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Inclusive',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  createdFrom?: Date;
+  @IsDateFilter()
+  createdFrom?: string;
 
   @ApiPropertyOptional({
     type: String,
-    format: 'date-time',
     description: 'Inclusive; earlier than createdFrom is a 400',
   })
   @IsOptional()
-  @Type(() => Date)
-  @IsDate()
+  @IsDateFilter()
   @IsNotBelow('createdFrom')
-  createdTo?: Date;
+  createdTo?: string;
 
   @ApiPropertyOptional({
     enum: AccountTransactionSortField,

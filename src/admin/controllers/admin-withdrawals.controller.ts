@@ -78,6 +78,7 @@ export class AdminWithdrawalsController {
         query,
         this.directory,
         this.operations,
+        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),
     );
 
@@ -130,6 +131,7 @@ export class AdminWithdrawalsController {
         query,
         this.directory,
         this.operations,
+        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),
       ACCOUNT_TRANSACTIONS_EXPORT_MAX_ROWS,
     );

@@ -19,6 +19,10 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { UserNotesModule } from '../user-notes/user-notes.module';
 import { UsersModule } from '../users/users.module';
 import { AdminAnalyticsController } from './controllers/admin-analytics.controller';
+import { AdminMerchantAttachmentsController } from './controllers/admin-merchant-attachments.controller';
+import { AdminMerchantBalanceController } from './controllers/admin-merchant-balance.controller';
+import { AdminMerchantIntegrationsController } from './controllers/admin-merchant-integrations.controller';
+import { AdminMerchantGroupsController } from './controllers/admin-merchant-groups.controller';
 import { AdminAuditController } from './controllers/admin-audit.controller';
 import { AdminBalancesController } from './controllers/admin-balances.controller';
 import { AdminBankDetailsController } from './controllers/admin-bank-details.controller';
@@ -75,6 +79,10 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     AdminCounterpartiesController,
     AdminAnalyticsController,
     AdminMerchantsController,
+    AdminMerchantIntegrationsController,
+    AdminMerchantBalanceController,
+    AdminMerchantGroupsController,
+    AdminMerchantAttachmentsController,
     AdminBanksController,
     AdminDevicesController,
     AdminBankDetailsController,
