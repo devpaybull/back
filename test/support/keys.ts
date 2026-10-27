@@ -18,6 +18,13 @@ export const CIPHERTEXTS = {
   TRON_ENERGY_KEY_CIPHERTEXT: 'vault:v1:energy',
 };
 
+export const PLAIN_KEYS = {
+  KEY_SOURCE: 'env',
+  TRON_DEPOSIT_MNEMONIC: DEPOSIT_MNEMONIC,
+  TRON_HOT_PRIVATE_KEY: HOT_KEY,
+  TRON_ENERGY_PRIVATE_KEY: ENERGY_KEY,
+};
+
 export const PLAINTEXTS: Record<string, string> = {
   'vault:v1:seed': DEPOSIT_MNEMONIC,
   'vault:v1:hot': HOT_KEY,

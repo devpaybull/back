@@ -1,13 +1,16 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { TronWeb, utils } from 'tronweb';
 import { DataSource, EntityManager } from 'typeorm';
 import { TronAddress } from '../entities/tron-address.entity';
 import { AddressPurpose } from '../types/address-purpose.enum';
+import { KeyKind } from '../types/key-kind';
+import {
+  KEY_MATERIAL_SOURCE,
+  KeyMaterialSource,
+} from '../types/key-material-source';
 import { addressFromExtendedKey } from '../utils/address-from-extended-key';
 import { DEPOSIT_ACCOUNT_PATH } from '../utils/deposit-account-path';
-import { VaultTransitClient } from './vault-transit.client';
 
 interface KeyringState {
   depositExtendedKey: string;
@@ -20,8 +23,7 @@ export class TronKeyring {
   private state: Promise<KeyringState> | null = null;
 
   constructor(
-    private readonly config: ConfigService,
-    private readonly vault: VaultTransitClient,
+    @Inject(KEY_MATERIAL_SOURCE) private readonly keys: KeyMaterialSource,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
@@ -78,9 +80,7 @@ export class TronKeyring {
   }
 
   private async load(): Promise<KeyringState> {
-    const seed = await this.vault.decrypt(
-      this.config.getOrThrow<string>('TRON_DEPOSIT_SEED_CIPHERTEXT'),
-    );
+    const seed = await this.keys.read('deposit');
     let depositExtendedKey: string;
 
     try {
@@ -97,8 +97,8 @@ export class TronKeyring {
 
     const state: KeyringState = {
       depositExtendedKey,
-      hotAddress: await this.addressOfKey('TRON_HOT_KEY_CIPHERTEXT'),
-      energyAddress: await this.addressOfKey('TRON_ENERGY_KEY_CIPHERTEXT'),
+      hotAddress: await this.addressOfKey('hot'),
+      energyAddress: await this.addressOfKey('energy'),
     };
     await this.registerWallet(state.hotAddress, AddressPurpose.Hot);
     await this.registerWallet(state.energyAddress, AddressPurpose.Energy);
@@ -106,17 +106,15 @@ export class TronKeyring {
     return state;
   }
 
-  private async addressOfKey(variable: string): Promise<string> {
-    const key = await this.vault.decrypt(
-      this.config.getOrThrow<string>(variable),
-    );
+  private async addressOfKey(kind: KeyKind): Promise<string> {
+    const key = await this.keys.read(kind);
 
     try {
       const address = TronWeb.address.fromPrivateKey(
         key.toString('utf8').trim().replace(/^0x/, ''),
       );
 
-      if (!address) throw new Error(`${variable} is not a private key`);
+      if (!address) throw new Error(`The ${kind} key is not a private key`);
 
       return address;
     } finally {

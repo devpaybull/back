@@ -140,6 +140,7 @@ export const startE2e = async (
     WITHDRAWAL_TOTP_LOCK_MINUTES: '15',
     PAYOUT_MODE: 'auto',
     PAYOUT_INTERVAL_SECONDS: '3600',
+    KEY_SOURCE: 'vault',
     ...env,
   });
 

@@ -1,5 +1,6 @@
 import { TronWeb, utils } from 'tronweb';
-import { VaultTransactionSigner } from '../services/vault-transaction.signer';
+import { LocalTransactionSigner } from '../services/local-transaction.signer';
+import { KeyKind } from '../types/key-kind';
 import { TronTransaction } from '../types/tron-transaction';
 import { serializedTransaction } from './serialized-transaction.spec';
 
@@ -7,15 +8,10 @@ const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const HOT_KEY = '0'.repeat(63) + '1';
 const ENERGY_KEY = '0x' + '0'.repeat(63) + '2';
-const CIPHERTEXTS: Record<string, string> = {
-  TRON_DEPOSIT_SEED_CIPHERTEXT: 'vault:v1:seed',
-  TRON_HOT_KEY_CIPHERTEXT: 'vault:v1:hot',
-  TRON_ENERGY_KEY_CIPHERTEXT: 'vault:v1:energy',
-};
-const PLAINTEXTS: Record<string, string> = {
-  'vault:v1:seed': MNEMONIC,
-  'vault:v1:hot': `${HOT_KEY}\n`,
-  'vault:v1:energy': ENERGY_KEY,
+const PLAINTEXTS: Record<KeyKind, string> = {
+  deposit: MNEMONIC,
+  hot: `${HOT_KEY}\n`,
+  energy: ENERGY_KEY,
 };
 
 const transaction = (): TronTransaction =>
@@ -32,34 +28,33 @@ const signerOf = (txID: string, signature: string): string =>
 
 const build = () => {
   const decrypted: Buffer[] = [];
-  const vault = {
-    decrypt: jest.fn(async (ciphertext: string) => {
-      const buffer = Buffer.from(PLAINTEXTS[ciphertext]);
+  const keys = {
+    read: jest.fn(async (kind: KeyKind) => {
+      const buffer = Buffer.from(PLAINTEXTS[kind]);
       decrypted.push(buffer);
       return buffer;
     }),
   };
-  const config = { getOrThrow: jest.fn((key: string) => CIPHERTEXTS[key]) };
 
   return {
-    signer: new VaultTransactionSigner(config as never, vault as never),
-    vault,
+    signer: new LocalTransactionSigner(keys),
+    keys,
     decrypted,
   };
 };
 
-describe('VaultTransactionSigner', () => {
+describe('LocalTransactionSigner', () => {
   it('refuses a transaction whose id is not the hash of its raw data', async () => {
-    const { signer, vault } = build();
+    const { signer, keys } = build();
 
     await expect(
       signer.sign({ ...transaction(), txID: 'ff'.repeat(32) }, { kind: 'hot' }),
     ).rejects.toThrow(/does not match/);
-    expect(vault.decrypt).not.toHaveBeenCalled();
+    expect(keys.read).not.toHaveBeenCalled();
   });
 
   it('refuses a raw_data that does not encode to its raw_data_hex', async () => {
-    const { signer, vault } = build();
+    const { signer, keys } = build();
     const honest = transaction();
     const forged = {
       ...honest,
@@ -69,36 +64,36 @@ describe('VaultTransactionSigner', () => {
     await expect(signer.sign(forged, { kind: 'hot' })).rejects.toThrow(
       /does not match/,
     );
-    expect(vault.decrypt).not.toHaveBeenCalled();
+    expect(keys.read).not.toHaveBeenCalled();
   });
 
   it('signs with the hot key so the signature recovers the hot address', async () => {
-    const { signer, vault } = build();
+    const { signer, keys } = build();
     const unsigned = transaction();
 
     const signed = await signer.sign(unsigned, { kind: 'hot' });
 
-    expect(vault.decrypt).toHaveBeenCalledWith('vault:v1:hot');
+    expect(keys.read).toHaveBeenCalledWith('hot');
     expect(signed.signature).toHaveLength(1);
     expect(signerOf(unsigned.txID, signed.signature![0])).toBe(
       TronWeb.address.fromPrivateKey(HOT_KEY),
     );
   });
 
-  it('signs with the energy key from its own ciphertext', async () => {
-    const { signer, vault } = build();
+  it('signs with the energy key', async () => {
+    const { signer, keys } = build();
     const unsigned = transaction();
 
     const signed = await signer.sign(unsigned, { kind: 'energy' });
 
-    expect(vault.decrypt).toHaveBeenCalledWith('vault:v1:energy');
+    expect(keys.read).toHaveBeenCalledWith('energy');
     expect(signerOf(unsigned.txID, signed.signature![0])).toBe(
       TronWeb.address.fromPrivateKey(ENERGY_KEY.slice(2)),
     );
   });
 
   it('signs a deposit address with the key derived from the seed at its index', async () => {
-    const { signer, vault } = build();
+    const { signer, keys } = build();
     const unsigned = transaction();
 
     const signed = await signer.sign(unsigned, {
@@ -106,7 +101,7 @@ describe('VaultTransactionSigner', () => {
       derivationIndex: 1,
     });
 
-    expect(vault.decrypt).toHaveBeenCalledWith('vault:v1:seed');
+    expect(keys.read).toHaveBeenCalledWith('deposit');
     expect(signerOf(unsigned.txID, signed.signature![0])).toBe(
       'TSeJkUh4Qv67VNFwY8LaAxERygNdy6NQZK',
     );

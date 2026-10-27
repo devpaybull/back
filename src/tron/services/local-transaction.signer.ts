@@ -1,18 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { utils } from 'tronweb';
+import {
+  KEY_MATERIAL_SOURCE,
+  KeyMaterialSource,
+} from '../types/key-material-source';
 import { SigningKeyRef } from '../types/signing-key-ref';
 import { TransactionSigner } from '../types/transaction-signer';
 import { TronTransaction } from '../types/tron-transaction';
 import { DEPOSIT_ACCOUNT_PATH } from '../utils/deposit-account-path';
-import { VaultTransitClient } from './vault-transit.client';
 
 @Injectable()
-export class VaultTransactionSigner implements TransactionSigner {
+export class LocalTransactionSigner implements TransactionSigner {
   constructor(
-    private readonly config: ConfigService,
-    private readonly vault: VaultTransitClient,
+    @Inject(KEY_MATERIAL_SOURCE) private readonly keys: KeyMaterialSource,
   ) {}
 
   async sign(
@@ -44,13 +45,7 @@ export class VaultTransactionSigner implements TransactionSigner {
 
   private async privateKeyOf(key: SigningKeyRef): Promise<Buffer> {
     if (key.kind !== 'deposit') {
-      const plaintext = await this.vault.decrypt(
-        this.config.getOrThrow<string>(
-          key.kind === 'hot'
-            ? 'TRON_HOT_KEY_CIPHERTEXT'
-            : 'TRON_ENERGY_KEY_CIPHERTEXT',
-        ),
-      );
+      const plaintext = await this.keys.read(key.kind);
       const normalized = Buffer.from(
         plaintext.toString('utf8').trim().replace(/^0x/, ''),
         'utf8',
@@ -60,9 +55,7 @@ export class VaultTransactionSigner implements TransactionSigner {
       return normalized;
     }
 
-    const seed = await this.vault.decrypt(
-      this.config.getOrThrow<string>('TRON_DEPOSIT_SEED_CIPHERTEXT'),
-    );
+    const seed = await this.keys.read('deposit');
 
     try {
       const wallet = utils.ethersUtils.ethersHDNodeWallet.fromPhrase(

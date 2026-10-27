@@ -576,4 +576,106 @@ describe('validateEnv', () => {
       ).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
     });
   });
+
+  describe('the source of the Tron keys', () => {
+    const MNEMONIC =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const VAULT_VARIABLES = [
+      'VAULT_ADDR',
+      'VAULT_ROLE_ID',
+      'VAULT_SECRET_ID',
+      'VAULT_TRANSIT_KEY',
+      'TRON_DEPOSIT_SEED_CIPHERTEXT',
+      'TRON_HOT_KEY_CIPHERTEXT',
+      'TRON_ENERGY_KEY_CIPHERTEXT',
+    ];
+    const envKeys = (): Record<string, unknown> => {
+      const env: Record<string, unknown> = {
+        ...baseEnv(),
+        KEY_SOURCE: 'env',
+        TRON_DEPOSIT_MNEMONIC: MNEMONIC,
+        TRON_HOT_PRIVATE_KEY: '0'.repeat(63) + '1',
+        TRON_ENERGY_PRIVATE_KEY: '0x' + '0'.repeat(63) + '2',
+      };
+      for (const name of VAULT_VARIABLES) delete env[name];
+
+      return env;
+    };
+
+    it('defaults to Vault and does not ask for plain keys', () => {
+      const validated = validateEnv(baseEnv());
+
+      expect(validated.KEY_SOURCE).toBe('vault');
+      expect(validated.TRON_HOT_PRIVATE_KEY).toBeUndefined();
+    });
+
+    it('needs no Vault variable with KEY_SOURCE=env', () => {
+      expect(validateEnv(envKeys()).KEY_SOURCE).toBe('env');
+    });
+
+    it('ignores a non-loopback http VAULT_ADDR left over with KEY_SOURCE=env', () => {
+      expect(() =>
+        validateEnv({ ...envKeys(), VAULT_ADDR: 'http://vault.internal:8200' }),
+      ).not.toThrow();
+    });
+
+    it.each([
+      'TRON_DEPOSIT_MNEMONIC',
+      'TRON_HOT_PRIVATE_KEY',
+      'TRON_ENERGY_PRIVATE_KEY',
+    ])('requires %s with KEY_SOURCE=env', (name) => {
+      const env = envKeys();
+      delete env[name];
+
+      expect(() => validateEnv(env)).toThrow(new RegExp(name));
+      expect(() => validateEnv({ ...envKeys(), [name]: ' ' })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it.each([
+      ['TRON_DEPOSIT_MNEMONIC', 'abandon abandon abandon'],
+      ['TRON_DEPOSIT_MNEMONIC', MNEMONIC.replace(/about$/, 'abandon')],
+      ['TRON_HOT_PRIVATE_KEY', '0'.repeat(63)],
+      ['TRON_HOT_PRIVATE_KEY', 'z'.repeat(64)],
+      ['TRON_ENERGY_PRIVATE_KEY', '0x' + '1'.repeat(65)],
+    ])('refuses %s=%p', (name, value) => {
+      expect(() => validateEnv({ ...envKeys(), [name]: value })).toThrow(
+        new RegExp(name),
+      );
+    });
+
+    it('never echoes a refused key in the error', () => {
+      const secret = 'f'.repeat(63) + 'g';
+
+      expect(() =>
+        validateEnv({ ...envKeys(), TRON_HOT_PRIVATE_KEY: secret }),
+      ).toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining(secret),
+        }),
+      );
+    });
+
+    it('refuses KEY_SOURCE=env in production', () => {
+      expect(() =>
+        validateEnv({ ...envKeys(), NODE_ENV: 'production' }),
+      ).toThrow(/KEY_SOURCE.*refused in production/);
+    });
+
+    it('refuses an unknown KEY_SOURCE', () => {
+      expect(() => validateEnv({ ...baseEnv(), KEY_SOURCE: 'file' })).toThrow(
+        /KEY_SOURCE/,
+      );
+    });
+
+    it('still requires every Vault variable with KEY_SOURCE=vault', () => {
+      for (const name of VAULT_VARIABLES) {
+        const env = baseEnv();
+        delete env[name];
+
+        expect(() => validateEnv(env)).toThrow(new RegExp(name));
+      }
+    });
+  });
 });

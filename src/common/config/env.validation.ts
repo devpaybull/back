@@ -2,6 +2,7 @@ import { IsCryptoAmount } from '../decorators/is-crypto-amount.decorator';
 import { IsFiatAmount } from '../decorators/is-fiat-amount.decorator';
 import { IsIanaTimeZone } from './is-iana-time-zone';
 import { plainToInstance, Transform, Type } from 'class-transformer';
+import { utils } from 'tronweb';
 import {
   IsBoolean,
   IsEnum,
@@ -30,6 +31,8 @@ const MIN_SECRET_LENGTH = 32;
 const TRON_ADDRESS_PATTERN = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
 export const TRON_NETWORKS = ['mainnet', 'nile', 'shasta'] as const;
 export const PAYOUT_MODES = ['auto', 'manual'] as const;
+export const KEY_SOURCES = ['vault', 'env'] as const;
+const PRIVATE_KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 export const MAINNET_USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 const SECURE_URL_VARIABLES = ['TRON_API_URL', 'VAULT_ADDR'] as const;
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -74,6 +77,11 @@ const ToRequiredString = () =>
 
     return trimmed === '' ? undefined : trimmed;
   });
+
+const usesVault = (env: EnvironmentVariables): boolean =>
+  env.KEY_SOURCE === 'vault';
+const usesEnvKeys = (env: EnvironmentVariables): boolean =>
+  env.KEY_SOURCE === 'env';
 
 const ToRequiredNumber = () =>
   Transform(({ value }) => {
@@ -347,32 +355,61 @@ export class EnvironmentVariables {
   @Matches(TRON_ADDRESS_PATTERN)
   TRON_USDT_CONTRACT: string;
 
+  @IsIn(KEY_SOURCES)
+  KEY_SOURCE: (typeof KEY_SOURCES)[number] = 'vault';
+
+  @ValidateIf(usesVault)
   @IsUrl({ require_tld: false, require_protocol: true })
   VAULT_ADDR: string;
 
+  @ValidateIf(usesVault)
   @ToRequiredString()
   @IsString()
   @IsNotEmpty()
   VAULT_ROLE_ID: string;
 
+  @ValidateIf(usesVault)
   @ToRequiredString()
   @IsString()
   @IsNotEmpty()
   VAULT_SECRET_ID: string;
 
+  @ValidateIf(usesVault)
   @ToRequiredString()
   @IsString()
   @IsNotEmpty()
   VAULT_TRANSIT_KEY: string;
 
+  @ValidateIf(usesVault)
   @Matches(/^vault:v\d+:/)
   TRON_DEPOSIT_SEED_CIPHERTEXT: string;
 
+  @ValidateIf(usesVault)
   @Matches(/^vault:v\d+:/)
   TRON_HOT_KEY_CIPHERTEXT: string;
 
+  @ValidateIf(usesVault)
   @Matches(/^vault:v\d+:/)
   TRON_ENERGY_KEY_CIPHERTEXT: string;
+
+  @ValidateIf(usesEnvKeys)
+  @ToRequiredString()
+  @IsString({ message: '$property must be a BIP-39 mnemonic' })
+  TRON_DEPOSIT_MNEMONIC: string;
+
+  @ValidateIf(usesEnvKeys)
+  @ToRequiredString()
+  @Matches(PRIVATE_KEY_PATTERN, {
+    message: '$property must be 64 hex characters',
+  })
+  TRON_HOT_PRIVATE_KEY: string;
+
+  @ValidateIf(usesEnvKeys)
+  @ToRequiredString()
+  @Matches(PRIVATE_KEY_PATTERN, {
+    message: '$property must be 64 hex characters',
+  })
+  TRON_ENERGY_PRIVATE_KEY: string;
 
   @Type(() => Number)
   @IsInt()
@@ -527,6 +564,8 @@ export function validateEnv(
   }
 
   for (const variable of SECURE_URL_VARIABLES) {
+    if (variable === 'VAULT_ADDR' && !usesVault(validated)) continue;
+
     if (
       !isSecureUrl(
         validated[variable],
@@ -553,6 +592,33 @@ export function validateEnv(
         property: 'TRON_USDT_CONTRACT',
         constraints: {
           mainnetUsdt: `TRON_USDT_CONTRACT on mainnet must be ${MAINNET_USDT_CONTRACT}`,
+        },
+      }),
+    );
+  }
+
+  if (
+    usesEnvKeys(validated) &&
+    typeof validated.TRON_DEPOSIT_MNEMONIC === 'string' &&
+    !utils.ethersUtils.isValidMnemonic(validated.TRON_DEPOSIT_MNEMONIC)
+  ) {
+    errors.push(
+      Object.assign(new ValidationError(), {
+        property: 'TRON_DEPOSIT_MNEMONIC',
+        constraints: {
+          mnemonic: 'TRON_DEPOSIT_MNEMONIC must be a BIP-39 mnemonic',
+        },
+      }),
+    );
+  }
+
+  if (usesEnvKeys(validated) && validated.NODE_ENV === NodeEnv.Production) {
+    errors.push(
+      Object.assign(new ValidationError(), {
+        property: 'KEY_SOURCE',
+        constraints: {
+          notInProduction:
+            'KEY_SOURCE=env keeps the keys in plain configuration and is refused in production',
         },
       }),
     );

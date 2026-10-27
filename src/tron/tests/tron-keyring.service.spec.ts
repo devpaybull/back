@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { TronAddress } from '../entities/tron-address.entity';
 import { TronKeyring } from '../services/tron-keyring.service';
 import { AddressPurpose } from '../types/address-purpose.enum';
+import { KeyKind } from '../types/key-kind';
 
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -10,22 +11,17 @@ const ENERGY_KEY = '0'.repeat(63) + '2';
 const HOT_ADDRESS = 'TMVQGm1qAQYVdetCeGRRkTWYYrLXuHK2HC';
 const ENERGY_ADDRESS = 'TDvSsdrNM5eeXNL3czpa6AxLDHZA9nwe9K';
 
-const CIPHERTEXTS: Record<string, string> = {
-  TRON_DEPOSIT_SEED_CIPHERTEXT: 'vault:v1:seed',
-  TRON_HOT_KEY_CIPHERTEXT: 'vault:v1:hot',
-  TRON_ENERGY_KEY_CIPHERTEXT: 'vault:v1:energy',
-};
-const PLAINTEXTS: Record<string, string> = {
-  'vault:v1:seed': `${MNEMONIC}\n`,
-  'vault:v1:hot': HOT_KEY,
-  'vault:v1:energy': ENERGY_KEY,
+const PLAINTEXTS: Record<KeyKind, string> = {
+  deposit: `${MNEMONIC}\n`,
+  hot: HOT_KEY,
+  energy: ENERGY_KEY,
 };
 
 const build = () => {
   const decrypted: Buffer[] = [];
-  const vault = {
-    decrypt: jest.fn(async (ciphertext: string) => {
-      const buffer = Buffer.from(PLAINTEXTS[ciphertext], 'utf8');
+  const keys = {
+    read: jest.fn(async (kind: KeyKind) => {
+      const buffer = Buffer.from(PLAINTEXTS[kind], 'utf8');
       decrypted.push(buffer);
       return buffer;
     }),
@@ -42,25 +38,20 @@ const build = () => {
   insert.values.mockReturnValue(insert);
   insert.orIgnore.mockReturnValue(insert);
   const dataSource = { createQueryBuilder: jest.fn(() => insert) };
-  const config = { getOrThrow: jest.fn((key: string) => CIPHERTEXTS[key]) };
-  const keyring = new TronKeyring(
-    config as never,
-    vault as never,
-    dataSource as never,
-  );
+  const keyring = new TronKeyring(keys, dataSource as never);
 
-  return { keyring, vault, insert, decrypted };
+  return { keyring, keys, insert, decrypted };
 };
 
 describe('TronKeyring', () => {
-  it('derives the hot and energy addresses from their decrypted keys', async () => {
+  it('derives the hot and energy addresses from their keys', async () => {
     const { keyring } = build();
 
     await expect(keyring.hotAddress()).resolves.toBe(HOT_ADDRESS);
     await expect(keyring.energyAddress()).resolves.toBe(ENERGY_ADDRESS);
   });
 
-  it('derives deposit addresses from the decrypted seed', async () => {
+  it('derives deposit addresses from the seed', async () => {
     const { keyring } = build();
 
     await expect(keyring.depositAddressAt(0)).resolves.toBe(
@@ -71,14 +62,14 @@ describe('TronKeyring', () => {
     );
   });
 
-  it('decrypts once, zeroes every decrypted buffer, and keeps only public data', async () => {
-    const { keyring, vault, decrypted } = build();
+  it('reads the keys once, zeroes every buffer, and keeps only public data', async () => {
+    const { keyring, keys, decrypted } = build();
 
     await keyring.hotAddress();
     await keyring.depositAddressAt(3);
     await keyring.energyAddress();
 
-    expect(vault.decrypt).toHaveBeenCalledTimes(3);
+    expect(keys.read).toHaveBeenCalledTimes(3);
     expect(decrypted).toHaveLength(3);
     for (const buffer of decrypted) {
       expect(buffer.every((byte) => byte === 0)).toBe(true);
@@ -106,19 +97,17 @@ describe('TronKeyring', () => {
   });
 
   it('tries the load again after a failure instead of caching the error', async () => {
-    const { keyring, vault } = build();
-    vault.decrypt.mockRejectedValueOnce(new Error('vault down'));
+    const { keyring, keys } = build();
+    keys.read.mockRejectedValueOnce(new Error('vault down'));
 
     await expect(keyring.hotAddress()).rejects.toThrow('vault down');
     await expect(keyring.hotAddress()).resolves.toBe(HOT_ADDRESS);
   });
 
-  it('refuses a key ciphertext that does not hold a private key', async () => {
-    const { keyring, vault } = build();
-    vault.decrypt.mockImplementation(async (ciphertext: string) =>
-      Buffer.from(
-        ciphertext === 'vault:v1:hot' ? 'not a key' : PLAINTEXTS[ciphertext],
-      ),
+  it('refuses key material that is not a private key', async () => {
+    const { keyring, keys } = build();
+    keys.read.mockImplementation(async (kind: KeyKind) =>
+      Buffer.from(kind === 'hot' ? 'not a key' : PLAINTEXTS[kind]),
     );
 
     await expect(keyring.hotAddress()).rejects.toThrow();
