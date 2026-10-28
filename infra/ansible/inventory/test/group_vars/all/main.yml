@@ -5,10 +5,11 @@ paybull_deploy_user: deploy
 paybull_deploy_authorized_keys:
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHJ0IGOdGOXNgX47LEf+7ubIF0GPJYqkvlBvpOTQHU+T digdef@MacBook-Pro-digdef.local"
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOYCaWhZCBdgbJjlH27sm5/pYnTmPJMPAB6v9JoP/Ck8 paybull ci deploy@187.126.19.161"
+  - 'command="/opt/paybull/deploy-front.sh",restrict ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMnknyFC9bZ92DWEW4w8eplOv8drgICo9TLc+uDZNjoM paybull front ci'
 
-paybull_api_domain: ""
-paybull_front_domain: ""
-paybull_acme_email: ""
+paybull_api_domain: api.paybull.tech
+paybull_front_domain: paybull.tech
+paybull_acme_email: paybull.admin@gmail.com
 
 paybull_backend_repo: git@github.com:devpaybull/back.git
 paybull_backend_version: dev

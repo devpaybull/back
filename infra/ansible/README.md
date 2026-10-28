@@ -85,7 +85,7 @@ Push в `dev` фронта → его workflow (шаблон — `infra/ci/front
 | --- | --- | --- |
 | `back` | `DEPLOY_SSH_KEY` | приватный ключ CI (`.secrets/ci_ssh`) |
 | `back` | `ANSIBLE_VAULT_PASSWORD` | пароль vault (`.vault-pass`) |
-| `front` | `DEPLOY_SSH_KEY` | тот же ключ CI |
+| `front` | `DEPLOY_SSH_KEY` | отдельный ключ (`.secrets/front_ci_ssh`): в `authorized_keys` он ограничен `command="/opt/paybull/deploy-front.sh",restrict` — ничего, кроме сборки фронта |
 
 Deploy keys (read-only): `.secrets/backend_deploy.pub` → `back`, `.secrets/front_deploy.pub` → `front`.
 `.vault-pass` и `.secrets/` лежат только локально (в `.gitignore`). Локальный запуск без ввода пароля:

@@ -16,8 +16,8 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -35,8 +35,8 @@ jobs:
     env:
       SERVER_HOST_KEY: 187.126.19.161 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpfg0GF9gJWFVHQcu3qHqymcjQHtpW3gFiU4DhESgdQ
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - run: pip install "ansible-core==2.21.2"
