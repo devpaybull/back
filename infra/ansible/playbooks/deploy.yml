@@ -1,0 +1,37 @@
+---
+- name: Deploy the Paybull test stand
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: Refuse to deploy with an unset setting
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.vars', item) | length > 0
+        fail_msg: "{{ item }} is empty; fill it in the inventory"
+        quiet: true
+      loop:
+        - paybull_api_domain
+        - paybull_front_domain
+        - paybull_acme_email
+        - paybull_front_repo
+        - paybull_front_version
+        - paybull_front_build_command
+        - paybull_front_dist_dir
+        - paybull_front_api_url_variable
+        - vault_postgres_password
+        - vault_seed_password
+        - vault_seed_totp_secret
+
+    - name: Refuse to deploy with an unset backend variable
+      ansible.builtin.assert:
+        that: item.value | string | length > 0
+        fail_msg: "{{ item.key }} is empty; fill it in main.yml or vault.yml"
+        quiet: true
+      loop: "{{ (paybull_backend_env | dict2items) + (vault_backend_env | dict2items) }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+
+  roles:
+    - sources
+    - frontend
+    - stack

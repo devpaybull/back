@@ -69,3 +69,6 @@ CLAUDE.md
 # local dev secrets
 /.dev
 *-key.txt
+
+# ansible collections installed locally
+/infra/ansible/collections

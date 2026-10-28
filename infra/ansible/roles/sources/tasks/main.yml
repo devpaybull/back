@@ -1,0 +1,56 @@
+---
+- name: Create the stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ paybull_deploy_user }}"
+    group: "{{ paybull_deploy_user }}"
+    mode: "0750"
+  loop:
+    - "{{ paybull_root }}"
+    - "{{ paybull_root }}/keys"
+    - "{{ paybull_root }}/front"
+
+- name: Install the read-only deploy keys
+  ansible.builtin.copy:
+    dest: "{{ paybull_root }}/keys/{{ item.name }}"
+    content: "{{ item.key }}"
+    owner: "{{ paybull_deploy_user }}"
+    group: "{{ paybull_deploy_user }}"
+    mode: "0600"
+  loop:
+    - { name: backend, key: "{{ vault_backend_deploy_key }}" }
+    - { name: front, key: "{{ vault_front_deploy_key }}" }
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: Trust GitHub's host key
+  ansible.builtin.known_hosts:
+    name: github.com
+    key: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+    path: "/home/{{ paybull_deploy_user }}/.ssh/known_hosts"
+  become: true
+  become_user: "{{ paybull_deploy_user }}"
+
+- name: Check out the backend
+  ansible.builtin.git:
+    repo: "{{ paybull_backend_repo }}"
+    version: "{{ paybull_backend_version }}"
+    dest: "{{ paybull_root }}/backend"
+    key_file: "{{ paybull_root }}/keys/backend"
+    force: true
+  become: true
+  become_user: "{{ paybull_deploy_user }}"
+  register: sources_backend_checkout
+
+- name: Check out the front
+  ansible.builtin.git:
+    repo: "{{ paybull_front_repo }}"
+    version: "{{ paybull_front_version }}"
+    dest: "{{ paybull_root }}/front-src"
+    key_file: "{{ paybull_root }}/keys/front"
+    force: true
+  become: true
+  become_user: "{{ paybull_deploy_user }}"
+  register: sources_front_checkout

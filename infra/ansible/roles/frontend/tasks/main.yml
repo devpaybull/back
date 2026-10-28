@@ -1,0 +1,46 @@
+---
+- name: Look up the deploy user's ids
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ paybull_deploy_user }}"
+
+- name: Check whether the front was built before
+  ansible.builtin.stat:
+    path: "{{ paybull_root }}/front/index.html"
+  register: frontend_index
+
+- name: Build the front in a throwaway Node container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --user
+      - "{{ ansible_facts.getent_passwd[paybull_deploy_user][1] }}:{{ ansible_facts.getent_passwd[paybull_deploy_user][2] }}"
+      - --env
+      - HOME=/tmp
+      - --env
+      - "{{ paybull_front_api_url_variable }}=https://{{ paybull_api_domain }}"
+      - --volume
+      - "{{ paybull_root }}/front-src:/src"
+      - --workdir
+      - /src
+      - "{{ paybull_front_node_image }}"
+      - sh
+      - -c
+      - "{{ paybull_front_build_command }}"
+  when: sources_front_checkout is changed or not frontend_index.stat.exists
+  changed_when: true
+
+- name: Publish the built front for Caddy
+  ansible.builtin.command:
+    argv:
+      - rsync
+      - --archive
+      - --delete
+      - --itemize-changes
+      - "{{ paybull_root }}/front-src/{{ paybull_front_dist_dir }}/"
+      - "{{ paybull_root }}/front/"
+  register: frontend_publish
+  changed_when: frontend_publish.stdout | length > 0
+  when: sources_front_checkout is changed or not frontend_index.stat.exists

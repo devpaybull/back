@@ -1,0 +1,28 @@
+---
+# Copy to vault.yml, fill in, then encrypt before committing:
+#   ansible-vault encrypt inventory/test/group_vars/all/vault.yml
+# Never commit vault.yml unencrypted.
+
+vault_postgres_password: ""
+
+vault_backend_deploy_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  -----END OPENSSH PRIVATE KEY-----
+vault_front_deploy_key: |
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  -----END OPENSSH PRIVATE KEY-----
+
+vault_seed_password: ""
+vault_seed_totp_secret: ""
+
+vault_backend_env:
+  JWT_ACCESS_SECRET: ""
+  JWT_REFRESH_SECRET: ""
+  JWT_REGISTRATION_SECRET: ""
+  TRON_API_KEY: ""
+  TRON_DEPOSIT_MNEMONIC: ""
+  TRON_HOT_PRIVATE_KEY: ""
+  TRON_ENERGY_PRIVATE_KEY: ""
+
+vault_backend_optional_env:
+  MAIL_PASSWORD: ""

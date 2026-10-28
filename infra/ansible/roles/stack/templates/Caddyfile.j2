@@ -1,0 +1,15 @@
+{
+	email {{ paybull_acme_email }}
+}
+
+{{ paybull_api_domain }} {
+	encode zstd gzip
+	reverse_proxy backend:3000
+}
+
+{{ paybull_front_domain }} {
+	encode zstd gzip
+	root * /srv/front
+	try_files {path} /index.html
+	file_server
+}

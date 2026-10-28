@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.git
+.env
+.env.*
+!.env.example
+.dev
+*-key.txt
+.omc
+.idea
+.claude
+docs
+test
+infra
+CLAUDE.md

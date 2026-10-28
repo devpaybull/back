@@ -1,0 +1,7 @@
+---
+- name: Prepare a fresh Ubuntu VPS
+  hosts: all
+  become: true
+  roles:
+    - base
+    - docker

@@ -1,0 +1,47 @@
+---
+paybull_root: /opt/paybull
+
+paybull_deploy_user: deploy
+paybull_deploy_authorized_keys: []
+
+paybull_api_domain: ""
+paybull_front_domain: ""
+paybull_acme_email: ""
+
+paybull_backend_repo: git@github.com:devpaybull/back.git
+paybull_backend_version: dev
+
+paybull_front_repo: ""
+paybull_front_version: ""
+paybull_front_build_command: ""
+paybull_front_dist_dir: ""
+paybull_front_api_url_variable: ""
+paybull_front_node_image: node:22-bookworm-slim
+
+paybull_postgres_image: postgres:16-alpine
+paybull_victoria_logs_image: victoriametrics/victoria-logs:v1.53.0
+paybull_caddy_image: caddy:2.10
+
+paybull_backend_env:
+  TRON_USDT_CONTRACT: ""
+  COUNTERPARTY_MIN_AMOUNT: ""
+  PLATFORM_MIN_PERCENT: ""
+  INSURANCE_PAY_OUT_MIN: ""
+  DEAL_TTL_MINUTES: ""
+  TRON_MAX_TRX_BURN_PER_TX: ""
+  SWEEP_MIN_USDT: ""
+  SWEEP_BURN_WHEN_NO_ENERGY: ""
+  RAPIRA_TRX_RATE_SYMBOL: ""
+  DEPOSIT_WINDOW_MINUTES: ""
+  DEPOSIT_MIN_USDT: ""
+  DEPOSIT_MAX_ACTIVE_REQUESTS: ""
+  WITHDRAWAL_MIN_USDT: ""
+  WITHDRAWAL_DAILY_LIMIT_USDT: ""
+  WITHDRAWAL_SECURITY_HOLD_HOURS: ""
+  WITHDRAWAL_QUOTE_TTL_SECONDS: ""
+  PAYOUT_MODE: ""
+
+paybull_backend_optional_env:
+  MAIL_HOST: ""
+  MAIL_FROM: ""
+  MAIL_USER: ""

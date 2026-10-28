@@ -1,0 +1,17 @@
+---
+stack_backend_env:
+  NODE_ENV: development
+  PORT: "3000"
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_USERNAME: paybull
+  DB_NAME: paybull
+  DB_SYNCHRONIZE: "true"
+  CORS_ORIGIN: "https://{{ paybull_front_domain }}"
+  CORS_CREDENTIALS: "true"
+  TRUST_PROXY: "1"
+  APP_URL: "https://{{ paybull_front_domain }}"
+  VICTORIA_LOGS_URL: http://victoria-logs:9428
+  KEY_SOURCE: env
+  TRON_NETWORK: nile
+  TRON_API_URL: https://nile.trongrid.io

@@ -1,0 +1,71 @@
+name: paybull
+
+services:
+  postgres:
+    image: {{ paybull_postgres_image }}
+    env_file: {{ paybull_root }}/postgres.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ stack_backend_env.DB_USERNAME }} -d {{ stack_backend_env.DB_NAME }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  victoria-logs:
+    image: {{ paybull_victoria_logs_image }}
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=1y
+    volumes:
+      - victoria-logs-data:/victoria-logs-data
+    ports:
+      - "127.0.0.1:9428:9428"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: {{ paybull_root }}/backend
+      target: runtime
+    image: paybull-backend:latest
+    env_file: {{ paybull_root }}/backend.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoria-logs:
+        condition: service_started
+    restart: unless-stopped
+
+  seed:
+    build:
+      context: {{ paybull_root }}/backend
+      target: build
+    image: paybull-backend-build:latest
+    env_file: {{ paybull_root }}/backend.env
+    command: ["npx", "ts-node", "scripts/seed.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["seed"]
+
+  caddy:
+    image: {{ paybull_caddy_image }}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - {{ paybull_root }}/Caddyfile:/etc/caddy/Caddyfile:ro
+      - {{ paybull_root }}/front:/srv/front:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  victoria-logs-data:
+  caddy-data:
+  caddy-config:

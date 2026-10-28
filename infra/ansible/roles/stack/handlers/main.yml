@@ -1,0 +1,5 @@
+---
+- name: Reload Caddy
+  ansible.builtin.command:
+    argv: [docker, compose, --project-directory, "{{ paybull_root }}", exec, caddy, caddy, reload, --config, /etc/caddy/Caddyfile]
+  changed_when: true

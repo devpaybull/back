@@ -1,0 +1,70 @@
+---
+- name: Assemble the backend environment
+  ansible.builtin.set_fact:
+    stack_env: >-
+      {{ stack_backend_env
+         | combine(paybull_backend_env, paybull_backend_optional_env,
+                   vault_backend_env, vault_backend_optional_env)
+         | combine({'DB_PASSWORD': vault_postgres_password,
+                    'SEED_PASSWORD': vault_seed_password,
+                    'SEED_TOTP_SECRET': vault_seed_totp_secret}) }}
+  no_log: true
+
+- name: Refuse a value the env file cannot hold
+  ansible.builtin.assert:
+    that:
+      - "\"'\" not in (item.value | string)"
+      - "'\n' not in (item.value | string)"
+    fail_msg: "{{ item.key }} contains a single quote or a newline"
+    quiet: true
+  loop: "{{ stack_env | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Write the env files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ paybull_root }}/{{ item }}"
+    owner: "{{ paybull_deploy_user }}"
+    group: "{{ paybull_deploy_user }}"
+    mode: "0600"
+  loop:
+    - backend.env
+    - postgres.env
+  no_log: true
+
+- name: Write the compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ paybull_root }}/compose.yml"
+    owner: "{{ paybull_deploy_user }}"
+    group: "{{ paybull_deploy_user }}"
+    mode: "0640"
+
+- name: Write the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ paybull_root }}/Caddyfile"
+    owner: "{{ paybull_deploy_user }}"
+    group: "{{ paybull_deploy_user }}"
+    mode: "0644"
+  notify: Reload Caddy
+
+- name: Build and start the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ paybull_root }}"
+    build: always
+    state: present
+    remove_orphans: true
+
+- name: Wait for the API behind HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ paybull_api_domain }}/api-json"
+    status_code: 200
+  register: stack_api_check
+  until: stack_api_check.status == 200
+  retries: 30
+  delay: 10
+  delegate_to: localhost
+  become: false

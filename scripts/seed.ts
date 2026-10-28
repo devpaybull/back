@@ -59,8 +59,25 @@ import { Debt } from '../src/debts/entities/debt.entity';
 import { DebtEvent } from '../src/debts/entities/debt-event.entity';
 import { DebtEventType } from '../src/debts/types/debt-event-type.enum';
 
-const SEED_PASSWORD = 'TestPass123!';
-const SEED_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+const BASE32_SECRET = /^[A-Z2-7]{16,}$/;
+
+const fromEnv = (name: string, fallback: string): string => {
+  const value = process.env[name]?.trim();
+
+  return value ? value : fallback;
+};
+
+const SEED_PASSWORD = fromEnv('SEED_PASSWORD', 'TestPass123!');
+const SEED_TOTP_SECRET = fromEnv(
+  'SEED_TOTP_SECRET',
+  'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+);
+
+if (!BASE32_SECRET.test(SEED_TOTP_SECRET)) {
+  throw new Error(
+    'SEED_TOTP_SECRET must be base32 (A-Z, 2-7), at least 16 characters',
+  );
+}
 const MARKER_EMAIL = 'superadmin@example.com';
 
 const platformMinPercent = (): number => {

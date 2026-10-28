@@ -1,0 +1,37 @@
+---
+- name: Seed the test database once
+  hosts: all
+  become: true
+  tasks:
+    - name: Run scripts/seed.ts in the build image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-directory
+          - "{{ paybull_root }}"
+          - --profile
+          - seed
+          - run
+          - --rm
+          - --build
+          - seed
+      register: paybull_seed
+      changed_when: "'Seed complete' in paybull_seed.stdout"
+      no_log: true
+
+    - name: Keep the seeded logins and backup codes on the server only
+      ansible.builtin.copy:
+        dest: "{{ paybull_root }}/seed-output.txt"
+        content: "{{ paybull_seed.stdout }}\n"
+        owner: "{{ paybull_deploy_user }}"
+        group: "{{ paybull_deploy_user }}"
+        mode: "0600"
+      when: "'Seed complete' in paybull_seed.stdout"
+      no_log: true
+
+    - name: Say where the output went
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Seeded' if paybull_seed is changed else 'Seed data was already present, nothing changed' }};
+          logins and backup codes are in {{ paybull_root }}/seed-output.txt on the server.
