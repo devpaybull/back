@@ -72,6 +72,27 @@ ansible-playbook playbooks/seed.yml -u deploy --ask-vault-pass
 `/opt/paybull/seed-output.txt` (`0600`), в вывод Ansible не попадают. Пароль и секрет TOTP — из
 `vault.yml`.
 
+## CI/CD
+
+`.github/workflows/deploy-test.yml`: push в `dev` бэкенда → lint, build, unit → `deploy.yml` на этот коммит.
+Push в `dev` фронта → его workflow (шаблон — `infra/ci/front-deploy-test.yml`, кладётся во фронт в
+`.github/workflows/`) заходит на сервер и запускает `/opt/paybull/deploy-front.sh`: git → сборка → публикация.
+Тот же скрипт вызывает и `deploy.yml`, так что фронт собирается одинаково.
+
+Секреты GitHub (заводятся руками):
+
+| Репозиторий | Секрет | Значение |
+| --- | --- | --- |
+| `back` | `DEPLOY_SSH_KEY` | приватный ключ CI (`.secrets/ci_ssh`) |
+| `back` | `ANSIBLE_VAULT_PASSWORD` | пароль vault (`.vault-pass`) |
+| `front` | `DEPLOY_SSH_KEY` | тот же ключ CI |
+
+Deploy keys (read-only): `.secrets/backend_deploy.pub` → `back`, `.secrets/front_deploy.pub` → `front`.
+`.vault-pass` и `.secrets/` лежат только локально (в `.gitignore`). Локальный запуск без ввода пароля:
+`--vault-password-file .vault-pass`.
+
+Пока домены пустые, джоба `deploy` падает на проверке настроек — это ожидаемо.
+
 ## Обслуживание
 
 ```sh

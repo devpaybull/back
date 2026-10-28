@@ -1,0 +1,59 @@
+name: Deploy the test stand
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx eslint "{src,apps,libs,test}/**/*.ts"
+      - run: npm run build
+      - run: npm test
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: infra/ansible
+    env:
+      SERVER_HOST_KEY: 187.126.19.161 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpfg0GF9gJWFVHQcu3qHqymcjQHtpW3gFiU4DhESgdQ
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install "ansible-core==2.21.2"
+      - run: ansible-galaxy collection install -r requirements.yml -p collections
+      - name: Write the SSH key, the host key and the vault password
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SERVER_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s' "$ANSIBLE_VAULT_PASSWORD" > "$RUNNER_TEMP/vault-pass"
+          chmod 600 "$RUNNER_TEMP/vault-pass"
+      - run: >-
+          ansible-playbook playbooks/deploy.yml -u deploy
+          --private-key ~/.ssh/id_ed25519
+          --vault-password-file "$RUNNER_TEMP/vault-pass"
+          -e paybull_backend_version=${{ github.sha }}

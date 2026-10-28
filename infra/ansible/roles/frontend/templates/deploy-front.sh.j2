@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+src={{ paybull_root }}/front-src
+out={{ paybull_root }}/front
+
+exec 9>"{{ paybull_root }}/.deploy-front.lock"
+flock 9
+
+export GIT_SSH_COMMAND="ssh -i {{ paybull_root }}/keys/front -o IdentitiesOnly=yes"
+git -C "$src" fetch --quiet origin {{ paybull_front_version | quote }}
+git -C "$src" reset --quiet --hard FETCH_HEAD
+git -C "$src" clean --quiet -fdx -e node_modules
+
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
+{% if paybull_front_api_url_variable %}
+  --env {{ (paybull_front_api_url_variable ~ '=https://' ~ paybull_api_domain) | quote }} \
+{% endif %}
+  --volume "$src:/src" \
+  --workdir /src \
+  {{ paybull_front_node_image | quote }} \
+  sh -c {{ paybull_front_build_command | quote }}
+
+rsync --archive --delete "$src/{{ paybull_front_dist_dir }}/" "$out/"
+echo "front deployed: $(git -C "$src" rev-parse --short HEAD)"

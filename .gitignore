@@ -59,8 +59,10 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+# agent tooling (kept local)
 .omc
 CLAUDE.md
+/.claude
 
 /scripts/*.js
 /scripts/*.d.ts
@@ -70,5 +72,10 @@ CLAUDE.md
 /.dev
 *-key.txt
 
-# ansible collections installed locally
+# ansible: collections installed locally, ansible-lint cache
 /infra/ansible/collections
+.ansible/
+
+# ansible: local vault password and generated keys
+/infra/ansible/.vault-pass
+/infra/ansible/.secrets

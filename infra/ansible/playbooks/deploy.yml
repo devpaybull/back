@@ -16,7 +16,6 @@
         - paybull_front_version
         - paybull_front_build_command
         - paybull_front_dist_dir
-        - paybull_front_api_url_variable
         - vault_postgres_password
         - vault_seed_password
         - vault_seed_totp_secret

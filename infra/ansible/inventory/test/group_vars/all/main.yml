@@ -2,7 +2,9 @@
 paybull_root: /opt/paybull
 
 paybull_deploy_user: deploy
-paybull_deploy_authorized_keys: []
+paybull_deploy_authorized_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHJ0IGOdGOXNgX47LEf+7ubIF0GPJYqkvlBvpOTQHU+T digdef@MacBook-Pro-digdef.local"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOYCaWhZCBdgbJjlH27sm5/pYnTmPJMPAB6v9JoP/Ck8 paybull ci deploy@187.126.19.161"
 
 paybull_api_domain: ""
 paybull_front_domain: ""
@@ -11,10 +13,10 @@ paybull_acme_email: ""
 paybull_backend_repo: git@github.com:devpaybull/back.git
 paybull_backend_version: dev
 
-paybull_front_repo: ""
-paybull_front_version: ""
-paybull_front_build_command: ""
-paybull_front_dist_dir: ""
+paybull_front_repo: git@github.com:devpaybull/front.git
+paybull_front_version: dev
+paybull_front_build_command: export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 && corepack pnpm install --frozen-lockfile && corepack pnpm build
+paybull_front_dist_dir: dist
 paybull_front_api_url_variable: ""
 paybull_front_node_image: node:22-bookworm-slim
 
@@ -23,23 +25,23 @@ paybull_victoria_logs_image: victoriametrics/victoria-logs:v1.53.0
 paybull_caddy_image: caddy:2.10
 
 paybull_backend_env:
-  TRON_USDT_CONTRACT: ""
-  COUNTERPARTY_MIN_AMOUNT: ""
-  PLATFORM_MIN_PERCENT: ""
-  INSURANCE_PAY_OUT_MIN: ""
-  DEAL_TTL_MINUTES: ""
-  TRON_MAX_TRX_BURN_PER_TX: ""
-  SWEEP_MIN_USDT: ""
-  SWEEP_BURN_WHEN_NO_ENERGY: ""
-  RAPIRA_TRX_RATE_SYMBOL: ""
-  DEPOSIT_WINDOW_MINUTES: ""
-  DEPOSIT_MIN_USDT: ""
-  DEPOSIT_MAX_ACTIVE_REQUESTS: ""
-  WITHDRAWAL_MIN_USDT: ""
-  WITHDRAWAL_DAILY_LIMIT_USDT: ""
-  WITHDRAWAL_SECURITY_HOLD_HOURS: ""
-  WITHDRAWAL_QUOTE_TTL_SECONDS: ""
-  PAYOUT_MODE: ""
+  TRON_USDT_CONTRACT: TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf
+  COUNTERPARTY_MIN_AMOUNT: "5000"
+  PLATFORM_MIN_PERCENT: "1"
+  INSURANCE_PAY_OUT_MIN: "300"
+  DEAL_TTL_MINUTES: "20"
+  TRON_MAX_TRX_BURN_PER_TX: "50"
+  SWEEP_MIN_USDT: "50"
+  SWEEP_BURN_WHEN_NO_ENERGY: "true"
+  RAPIRA_TRX_RATE_SYMBOL: TRX/USDT
+  DEPOSIT_WINDOW_MINUTES: "45"
+  DEPOSIT_MIN_USDT: "10"
+  DEPOSIT_MAX_ACTIVE_REQUESTS: "2"
+  WITHDRAWAL_MIN_USDT: "5"
+  WITHDRAWAL_DAILY_LIMIT_USDT: "1000"
+  WITHDRAWAL_SECURITY_HOLD_HOURS: "24"
+  WITHDRAWAL_QUOTE_TTL_SECONDS: "60"
+  PAYOUT_MODE: manual
 
 paybull_backend_optional_env:
   MAIL_HOST: ""

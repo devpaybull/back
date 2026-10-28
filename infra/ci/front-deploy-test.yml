@@ -1,0 +1,28 @@
+name: Deploy the test stand
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    env:
+      SERVER_HOST_KEY: 187.126.19.161 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpfg0GF9gJWFVHQcu3qHqymcjQHtpW3gFiU4DhESgdQ
+    steps:
+      - name: Build and publish the front on the server
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SERVER_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/id_ed25519 deploy@187.126.19.161 /opt/paybull/deploy-front.sh
