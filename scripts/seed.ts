@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import { loginOf } from '../src/common/utils/login-of';
 import { sha256Hex } from '../src/common/utils/sha256-hex';
@@ -22,6 +23,9 @@ import { UserStatus } from '../src/users/types/user-status.enum';
 import { Merchant } from '../src/merchants/entities/merchant.entity';
 import { MerchantApiKey } from '../src/merchants/entities/merchant-api-key.entity';
 import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
+import { CounterpartyStatsService } from '../src/counterparties/services/counterparty-stats.service';
+import { CounterpartyBindingType } from '../src/counterparties/types/counterparty-binding-type.enum';
+import { CounterpartyDealStatsService } from '../src/transactions/services/counterparty-deal-stats.service';
 import { AccountTransaction } from '../src/account-transactions/entities/account-transaction.entity';
 import { AccountTransactionStatus } from '../src/account-transactions/types/account-transaction-status.enum';
 import { AccountTransactionType } from '../src/account-transactions/types/account-transaction-type.enum';
@@ -614,7 +618,7 @@ async function main(): Promise<void> {
         active: true,
       }),
     );
-    await manager.save(
+    const counterpartyRequisite = await manager.save(
       BankDetails,
       manager.create(BankDetails, {
         userId: trader1.user.id,
@@ -689,6 +693,10 @@ async function main(): Promise<void> {
         externalId: 'cust-1001',
         name: 'Sergey K.',
         contact: '+79161112233',
+        bankDetailsId: counterpartyRequisite.id,
+        bindingType: CounterpartyBindingType.CardsOrSbp,
+        boundAt: daysAgo(10),
+        boundByUserId: superadmin.user.id,
       }),
     );
     const cp2 = await manager.save(
@@ -1295,6 +1303,17 @@ async function main(): Promise<void> {
   console.log(
     'Each account below also has 10 single-use backup codes; use one as `backupCode` in POST /auth/login instead of `totp`.\n',
   );
+
+  const timeZoneConfig = {
+    get: () => process.env.BUSINESS_TIMEZONE || 'Europe/Moscow',
+  } as unknown as ConfigService;
+  await new CounterpartyDealStatsService(
+    dataSource,
+    dataSource.getRepository(Transaction),
+    dataSource.getRepository(TransactionStatusEvent),
+    new CounterpartyStatsService(timeZoneConfig),
+    timeZoneConfig,
+  ).rebuildCounterpartyStats();
 
   for (const entry of credentials) {
     const login = loginOf(entry.user.user);

@@ -6,24 +6,38 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsRelations, In, Repository } from 'typeorm';
+import {
+  EntityManager,
+  FindOptionsRelations,
+  ILike,
+  In,
+  Repository,
+} from 'typeorm';
 import { AuditService } from '../audit/services/audit.service';
 import { ActivityAction } from '../audit/types/activity-action.enum';
 import { BanksService } from '../banks/banks.service';
 import { Fiat } from '../common/types/fiat';
 import { Page, toPage } from '../common/types/page';
+import { escapeLikePattern } from '../common/utils/escape-like-pattern';
 import { sortDirection } from '../common/utils/sort-direction';
 import { toFiat } from '../common/utils/to-fiat';
+import { Counterparty } from '../counterparties/entities/counterparty.entity';
+import { CounterpartiesService } from '../counterparties/services/counterparties.service';
+import { CounterpartyBindingType } from '../counterparties/types/counterparty-binding-type.enum';
+import { RequisiteEventReason } from '../counterparties/types/requisite-event-reason.enum';
 import { DevicesService } from '../devices/devices.service';
 import { BankDetails } from './entities/bank-details.entity';
 import { BankDetailsListQuery } from './types/bank-details-list-query';
 import { BankDetailsSupervision } from './types/bank-details-supervision';
+import { CounterpartyRequisiteQuery } from './types/counterparty-requisite-query';
 import { CreateBankDetailsInput } from './types/create-bank-details-input';
 import { OwnBankDetailsChanges } from './types/own-bank-details-changes';
 import { bankDetailsActivityMetadata } from './utils/bank-details-activity-metadata';
 import { bankDetailsListOrder } from './utils/bank-details-list-order';
 import { bankDetailsListWhere } from './utils/bank-details-list-where';
 import { toggledLimits } from './utils/toggled-limits';
+
+const MAX_SEARCH_MATCHED_REQUISITES = 1000;
 
 const RELATIONS: FindOptionsRelations<BankDetails> = {
   bank: { country: true, currency: true },
@@ -41,6 +55,7 @@ export class BankDetailsService {
     private readonly devices: DevicesService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly counterparties: CounterpartiesService,
   ) {}
 
   get counterpartyMinAmount(): Fiat {
@@ -118,6 +133,100 @@ export class BankDetailsService {
     return rows.map((row) => row.id);
   }
 
+  async listCounterpartyOnly(
+    query: CounterpartyRequisiteQuery,
+  ): Promise<Page<BankDetails>> {
+    const filters = {
+      counterpartyOnly: true,
+      ...(query.type ? { type: query.type } : {}),
+    };
+    const searched = query.search
+      ? ILike(`%${escapeLikePattern(query.search)}%`)
+      : undefined;
+    const direction = sortDirection(query.sortOrder);
+
+    return toPage(
+      await this.bankDetails.findAndCount({
+        where: searched
+          ? [
+              { ...filters, card: searched },
+              { ...filters, phone: searched },
+              { ...filters, cardholderName: searched },
+            ]
+          : filters,
+        order: { createdAt: direction, id: direction },
+        relations: RELATIONS,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      query,
+    );
+  }
+
+  async findIdsMatching(search: string): Promise<string[]> {
+    const searched = ILike(`%${escapeLikePattern(search)}%`);
+    const rows = await this.bankDetails.find({
+      select: { id: true },
+      take: MAX_SEARCH_MATCHED_REQUISITES + 1,
+      where: [
+        { card: searched },
+        { phone: searched },
+        { cardholderName: searched },
+      ],
+    });
+
+    if (rows.length > MAX_SEARCH_MATCHED_REQUISITES) {
+      throw new BadRequestException(
+        `Search matches more than ${MAX_SEARCH_MATCHED_REQUISITES} requisites; narrow it`,
+      );
+    }
+
+    return rows.map((row) => row.id);
+  }
+
+  async findIdsOfUsers(userIds: readonly string[]): Promise<string[]> {
+    if (userIds.length === 0) return [];
+
+    const rows = await this.bankDetails.find({
+      select: { id: true },
+      where: { userId: In([...userIds]) },
+    });
+
+    return rows.map((row) => row.id);
+  }
+
+  bindToCounterparty(
+    bankDetailsId: string,
+    counterpartyId: number,
+    bindingType: CounterpartyBindingType,
+    actorUserId: string,
+  ): Promise<Counterparty> {
+    return this.bankDetails.manager.transaction(async (manager) =>
+      this.counterparties.bindWithin(
+        manager,
+        counterpartyId,
+        await this.lockWithin(manager, bankDetailsId),
+        bindingType,
+        actorUserId,
+      ),
+    );
+  }
+
+  replaceCounterpartyRequisite(
+    bankDetailsId: string,
+    counterpartyId: number,
+    actorUserId: string,
+  ): Promise<Counterparty> {
+    return this.bankDetails.manager.transaction(async (manager) =>
+      this.counterparties.replaceWithin(
+        manager,
+        counterpartyId,
+        await this.lockWithin(manager, bankDetailsId),
+        actorUserId,
+      ),
+    );
+  }
+
   async findByIdsInOrder(ids: string[]): Promise<BankDetails[]> {
     if (ids.length === 0) return [];
 
@@ -192,12 +301,25 @@ export class BankDetailsService {
       changes,
     );
 
-    await this.bankDetails.save(
-      this.bankDetails.merge(owned, {
-        ...changes,
-        ...toggledLimits(owned, changes),
-      }),
-    );
+    const clearsCounterpartyOnly =
+      owned.counterpartyOnly && changes.counterpartyOnly === false;
+
+    await this.bankDetails.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(BankDetails);
+      await repository.save(
+        repository.merge(owned, {
+          ...changes,
+          ...toggledLimits(owned, changes),
+        }),
+      );
+      if (clearsCounterpartyOnly) {
+        await this.counterparties.unbindRequisiteWithin(
+          manager,
+          id,
+          RequisiteEventReason.CounterpartyOnlyCleared,
+        );
+      }
+    });
 
     return this.findById(id);
   }
@@ -287,6 +409,11 @@ export class BankDetailsService {
   ): Promise<void> {
     await this.bankDetails.manager.transaction(async (manager) => {
       await manager.getRepository(BankDetails).softDelete(details.id);
+      await this.counterparties.unbindRequisiteWithin(
+        manager,
+        details.id,
+        RequisiteEventReason.RequisiteDeleted,
+      );
 
       await this.audit.record(
         {
@@ -299,6 +426,20 @@ export class BankDetailsService {
         manager,
       );
     });
+  }
+
+  private async lockWithin(
+    manager: EntityManager,
+    id: string,
+  ): Promise<BankDetails> {
+    const details = await manager.findOne(BankDetails, {
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (!details) throw new NotFoundException('Bank details not found');
+
+    return details;
   }
 
   private async assertBankExists(bankId: number): Promise<void> {

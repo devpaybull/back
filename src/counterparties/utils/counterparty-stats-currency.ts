@@ -1,0 +1,1 @@
+export const COUNTERPARTY_STATS_CURRENCY = 'RUB';

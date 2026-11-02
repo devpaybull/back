@@ -89,6 +89,11 @@ const build = () => {
       async (): Promise<{ leadUserId: string; percent: number }[]> => [],
     ),
   };
+  const counterpartyStats = {
+    recordDealCreatedWithin: jest.fn(async () => undefined),
+    recordDisputeWithin: jest.fn(async () => undefined),
+    recordCompletedWithin: jest.fn(async () => undefined),
+  };
   const links = [{ id: 70, leadUserId: LEAD_A } as TraderLead];
   const team = { assignmentsOf: jest.fn(async () => links) };
   const config = {
@@ -111,10 +116,12 @@ const build = () => {
     team as never,
     merchantSettings as never,
     config as never,
+    counterpartyStats as never,
   );
 
   return {
     service,
+    counterpartyStats,
     manager,
     dataSource,
     wallets,
@@ -1092,6 +1099,7 @@ describe('TransactionService.list', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
 
     return { service, repository, builder, rows };
@@ -1196,6 +1204,157 @@ describe('TransactionService.list', () => {
     expect(builder.setParameters).toHaveBeenCalledWith({
       merchantRankIds: [],
       merchantRankValues: [],
+    });
+  });
+});
+
+describe('TransactionService, counterparty statistics', () => {
+  const lockedDeal = (overrides: Partial<Transaction> = {}): Transaction =>
+    ({
+      id: uuidOf(50),
+      kind: TransactionKind.PayIn,
+      method: 'sbp',
+      status: TransactionStatus.Active,
+      traderUserId: TRADER,
+      traderAmount: toCrypto(93.897),
+      amountFiat: toFiat('1500.50'),
+      counterpartyId: 8,
+      ...overrides,
+    }) as Transaction;
+
+  const moveTo = (
+    built: ReturnType<typeof build>,
+    deal: Transaction,
+    toStatus: TransactionStatus,
+  ) =>
+    built.service.transitionLocked(built.manager as never, deal, {
+      toStatus,
+      source: StatusEventSource.System,
+    });
+
+  describe('createDeal', () => {
+    it('records the new deal of a counterparty inside the same transaction', async () => {
+      const built = build();
+
+      await built.service.createDeal(input({ counterpartyId: 8 }));
+
+      expect(
+        built.counterpartyStats.recordDealCreatedWithin,
+      ).toHaveBeenCalledWith(built.manager, 8);
+    });
+
+    it('records nothing for a deal without a counterparty', async () => {
+      const built = build();
+
+      await built.service.createDeal(input());
+
+      expect(
+        built.counterpartyStats.recordDealCreatedWithin,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a pay-out even with a counterparty', async () => {
+      const built = build();
+
+      await built.service.createDeal(
+        input({ kind: TransactionKind.PayOut, counterpartyId: 8 }),
+      );
+
+      expect(
+        built.counterpartyStats.recordDealCreatedWithin,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('transitionLocked', () => {
+    it('records a dispute', async () => {
+      const built = build();
+
+      await moveTo(built, lockedDeal(), TransactionStatus.Dispute);
+
+      expect(built.counterpartyStats.recordDisputeWithin).toHaveBeenCalledWith(
+        built.manager,
+        8,
+      );
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('records a success as paid with the amount and the resolution time', async () => {
+      const built = build();
+
+      const result = await moveTo(
+        built,
+        lockedDeal(),
+        TransactionStatus.Success,
+      );
+
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).toHaveBeenCalledWith(built.manager, 8, {
+        paid: true,
+        amountFiat: toFiat('1500.50'),
+        resolvedAt: result.resolvedAt,
+      });
+    });
+
+    it('records a cancellation as not paid', async () => {
+      const built = build();
+
+      await moveTo(built, lockedDeal(), TransactionStatus.Canceled);
+
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).toHaveBeenCalledWith(
+        built.manager,
+        8,
+        expect.objectContaining({ paid: false }),
+      );
+    });
+
+    it('records nothing for a non-final, non-dispute step', async () => {
+      const built = build();
+
+      await moveTo(built, lockedDeal(), TransactionStatus.Checking);
+
+      expect(
+        built.counterpartyStats.recordDisputeWithin,
+      ).not.toHaveBeenCalled();
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('records nothing when a final status is repeated', async () => {
+      const built = build();
+
+      await moveTo(
+        built,
+        lockedDeal({ status: TransactionStatus.Success }),
+        TransactionStatus.Success,
+      );
+
+      expect(
+        built.counterpartyStats.recordDisputeWithin,
+      ).not.toHaveBeenCalled();
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('records nothing for a deal without a counterparty', async () => {
+      const built = build();
+
+      await moveTo(
+        built,
+        lockedDeal({ counterpartyId: null }),
+        TransactionStatus.Success,
+      );
+
+      expect(
+        built.counterpartyStats.recordCompletedWithin,
+      ).not.toHaveBeenCalled();
     });
   });
 });

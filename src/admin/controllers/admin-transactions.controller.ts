@@ -26,7 +26,7 @@ import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { loginOf } from '../../common/utils/login-of';
-import { CounterpartiesService } from '../../counterparties/counterparties.service';
+import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
 import { MerchantsService } from '../../merchants/services/merchants.service';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionService } from '../../transactions/services/transaction.service';

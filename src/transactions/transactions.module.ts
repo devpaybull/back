@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { BanksModule } from '../banks/banks.module';
+import { CounterpartiesModule } from '../counterparties/counterparties.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { UsersModule } from '../users/users.module';
@@ -15,6 +16,7 @@ import { TransactionLeadShare } from './entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from './entities/transaction-status-event.entity';
 import { Wallet } from './entities/wallet.entity';
 import { BankDetailsTurnoverService } from './services/bank-details-turnover.service';
+import { CounterpartyDealStatsService } from './services/counterparty-deal-stats.service';
 import { DealExpiryService } from './services/deal-expiry.service';
 import { MerchantBalanceService } from './services/merchant-balance.service';
 import { MerchantStatsService } from './services/merchant-stats.service';
@@ -40,6 +42,7 @@ import { WalletService } from './services/wallet.service';
     ]),
     AuditModule,
     BanksModule,
+    CounterpartiesModule,
     MerchantsModule,
     TraderSettingsModule,
     UsersModule,
@@ -54,6 +57,7 @@ import { WalletService } from './services/wallet.service';
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,
+    CounterpartyDealStatsService,
     DealExpiryService,
   ],
   exports: [
@@ -65,6 +69,7 @@ import { WalletService } from './services/wallet.service';
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,
+    CounterpartyDealStatsService,
   ],
 })
 export class TransactionsModule {}

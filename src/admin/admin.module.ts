@@ -28,6 +28,7 @@ import { AdminBalancesController } from './controllers/admin-balances.controller
 import { AdminBankDetailsController } from './controllers/admin-bank-details.controller';
 import { AdminBanksController } from './controllers/admin-banks.controller';
 import { AdminCounterpartiesController } from './controllers/admin-counterparties.controller';
+import { AdminCounterpartyRequisitesController } from './controllers/admin-counterparty-requisites.controller';
 import { AdminCountriesController } from './controllers/admin-countries.controller';
 import { AdminCurrenciesController } from './controllers/admin-currencies.controller';
 import { AdminDebtsController } from './controllers/admin-debts.controller';
@@ -77,6 +78,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     AdminTraderSettingsController,
     AdminRatesController,
     AdminCounterpartiesController,
+    AdminCounterpartyRequisitesController,
     AdminAnalyticsController,
     AdminMerchantsController,
     AdminMerchantIntegrationsController,

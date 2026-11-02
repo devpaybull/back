@@ -14,6 +14,9 @@ import { SortOrder } from '../../common/enums/sort-order.enum';
 import { DevicesService } from '../../devices/devices.service';
 import { TransactionType } from '../../common/enums/transaction-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
+import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
+import { CounterpartyBindingType } from '../../counterparties/types/counterparty-binding-type.enum';
+import { RequisiteEventReason } from '../../counterparties/types/requisite-event-reason.enum';
 import { BankDetailsService } from '../bank-details.service';
 import { BankDetails } from '../entities/bank-details.entity';
 import { BankDetailsSortField } from '../types/bank-details-sort-field';
@@ -93,6 +96,12 @@ describe('BankDetailsService', () => {
     }),
   };
 
+  const counterparties = {
+    unbindRequisiteWithin: jest.fn(async () => undefined),
+    bindWithin: jest.fn(async () => ({ id: 1 })),
+    replaceWithin: jest.fn(async () => ({ id: 1 })),
+  };
+
   const banks = { findById: jest.fn(async () => ({ id: 1 })) };
 
   const config = { get: jest.fn(() => 5000) };
@@ -155,6 +164,7 @@ describe('BankDetailsService', () => {
         { provide: DevicesService, useValue: devices },
         { provide: AuditService, useValue: audit },
         { provide: ConfigService, useValue: config },
+        { provide: CounterpartiesService, useValue: counterparties },
       ],
     }).compile();
 
@@ -915,6 +925,278 @@ describe('BankDetailsService', () => {
       );
 
       expect(supervised.userId).toBe(owner);
+    });
+  });
+
+  describe('the counterparty links', () => {
+    const lockedFind = jest.fn();
+
+    beforeEach(() => {
+      lockedFind.mockReset();
+      lockedFind.mockImplementation(
+        async (_entity, options) =>
+          stored.find((row) => row.id === options.where.id) ?? null,
+      );
+      Object.assign(manager, { findOne: lockedFind });
+    });
+
+    afterEach(() => {
+      delete (manager as Record<string, unknown>).findOne;
+    });
+
+    describe('deleting', () => {
+      it('unbinds the requisite from its counterparties when the owner deletes it', async () => {
+        await service.deleteOwn(uuidOf(100), owner);
+
+        expect(counterparties.unbindRequisiteWithin).toHaveBeenCalledWith(
+          manager,
+          uuidOf(100),
+          RequisiteEventReason.RequisiteDeleted,
+        );
+      });
+
+      it('unbinds the requisite from its counterparties when an administrator deletes it', async () => {
+        await service.delete(uuidOf(100), admin);
+
+        expect(counterparties.unbindRequisiteWithin).toHaveBeenCalledWith(
+          manager,
+          uuidOf(100),
+          RequisiteEventReason.RequisiteDeleted,
+        );
+      });
+
+      it('unbinds nothing when the delete is refused', async () => {
+        await expect(service.deleteOwn(uuidOf(100), stranger)).rejects.toThrow(
+          NotFoundException,
+        );
+
+        expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('updateOwn and counterpartyOnly', () => {
+      it('unbinds with the cleared reason when the flag goes from true to false', async () => {
+        stored = [card({ counterpartyOnly: true })];
+
+        await service.updateOwn(uuidOf(100), owner, {
+          counterpartyOnly: false,
+        });
+
+        expect(counterparties.unbindRequisiteWithin).toHaveBeenCalledWith(
+          manager,
+          uuidOf(100),
+          RequisiteEventReason.CounterpartyOnlyCleared,
+        );
+      });
+
+      it('does not unbind when the flag stays true', async () => {
+        stored = [card({ counterpartyOnly: true })];
+
+        await service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true });
+
+        expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
+      });
+
+      it('does not unbind when the flag goes from false to true', async () => {
+        await service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true });
+
+        expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
+      });
+
+      it('does not unbind when the flag is not part of the patch', async () => {
+        stored = [card({ counterpartyOnly: true })];
+
+        await service.updateOwn(uuidOf(100), owner, { active: false });
+
+        expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('bindToCounterparty', () => {
+      it('locks the requisite with a pessimistic write on the transaction manager', async () => {
+        await service.bindToCounterparty(
+          uuidOf(100),
+          5,
+          CounterpartyBindingType.Cards,
+          admin,
+        );
+
+        expect(lockedFind).toHaveBeenCalledWith(BankDetails, {
+          where: { id: uuidOf(100) },
+          lock: { mode: 'pessimistic_write' },
+        });
+      });
+
+      it('answers 404 for a missing requisite and binds nothing', async () => {
+        await expect(
+          service.bindToCounterparty(
+            uuidOf(404),
+            5,
+            CounterpartyBindingType.Cards,
+            admin,
+          ),
+        ).rejects.toThrow(NotFoundException);
+        expect(counterparties.bindWithin).not.toHaveBeenCalled();
+      });
+
+      it('hands the facts of the requisite to the counterparties service', async () => {
+        stored = [card({ counterpartyOnly: true })];
+
+        await service.bindToCounterparty(
+          uuidOf(100),
+          5,
+          CounterpartyBindingType.Sbp,
+          admin,
+        );
+
+        expect(counterparties.bindWithin).toHaveBeenCalledWith(
+          manager,
+          5,
+          expect.objectContaining({
+            id: uuidOf(100),
+            type: TransactionType.Card,
+            counterpartyOnly: true,
+            userId: owner,
+          }),
+          CounterpartyBindingType.Sbp,
+          admin,
+        );
+      });
+    });
+
+    describe('replaceCounterpartyRequisite', () => {
+      it('locks the requisite with a pessimistic write on the transaction manager', async () => {
+        await service.replaceCounterpartyRequisite(uuidOf(100), 5, admin);
+
+        expect(lockedFind).toHaveBeenCalledWith(BankDetails, {
+          where: { id: uuidOf(100) },
+          lock: { mode: 'pessimistic_write' },
+        });
+      });
+
+      it('answers 404 for a missing requisite and replaces nothing', async () => {
+        await expect(
+          service.replaceCounterpartyRequisite(uuidOf(404), 5, admin),
+        ).rejects.toThrow(NotFoundException);
+        expect(counterparties.replaceWithin).not.toHaveBeenCalled();
+      });
+
+      it('hands the facts of the requisite to the counterparties service', async () => {
+        stored = [card({ counterpartyOnly: true })];
+
+        await service.replaceCounterpartyRequisite(uuidOf(100), 5, admin);
+
+        expect(counterparties.replaceWithin).toHaveBeenCalledWith(
+          manager,
+          5,
+          expect.objectContaining({
+            id: uuidOf(100),
+            type: TransactionType.Card,
+            counterpartyOnly: true,
+            userId: owner,
+          }),
+          admin,
+        );
+      });
+    });
+
+    describe('listCounterpartyOnly', () => {
+      const query = { page: 2, limit: 10, sortOrder: SortOrder.Asc };
+
+      it('restricts the list to counterparty-only requisites', async () => {
+        await service.listCounterpartyOnly(query);
+
+        expect(bankDetails.findAndCount).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { counterpartyOnly: true },
+            skip: 10,
+            take: 10,
+            order: { createdAt: 'ASC', id: 'ASC' },
+          }),
+        );
+      });
+
+      it('adds the channel type when one is asked for', async () => {
+        await service.listCounterpartyOnly({
+          ...query,
+          type: TransactionType.Sbp,
+        });
+
+        expect(bankDetails.findAndCount).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { counterpartyOnly: true, type: TransactionType.Sbp },
+          }),
+        );
+      });
+
+      it('searches the card, the phone and the cardholder name', async () => {
+        await service.listCounterpartyOnly({ ...query, search: 'iv_n' });
+
+        const [{ where }] = bankDetails.findAndCount.mock
+          .calls[0] as unknown as [{ where: Record<string, unknown>[] }];
+        expect(where).toHaveLength(3);
+        expect(where.map((branch) => Object.keys(branch).sort())).toEqual(
+          [
+            ['card', 'counterpartyOnly'],
+            ['counterpartyOnly', 'phone'],
+            ['cardholderName', 'counterpartyOnly'],
+          ].map((keys) => keys.sort()),
+        );
+        expect(where[0].card).toMatchObject({ value: '%iv\\_n%' });
+      });
+    });
+
+    describe('findIdsMatching', () => {
+      const rows = (count: number) =>
+        Array.from({ length: count }, (_, index) => ({ id: uuidOf(index) }));
+
+      it('returns the ids of the matching requisites', async () => {
+        bankDetails.find.mockResolvedValueOnce(rows(2) as never);
+
+        await expect(service.findIdsMatching('44')).resolves.toEqual([
+          uuidOf(0),
+          uuidOf(1),
+        ]);
+      });
+
+      it('accepts exactly one thousand matches', async () => {
+        bankDetails.find.mockResolvedValueOnce(rows(1000) as never);
+
+        await expect(service.findIdsMatching('4')).resolves.toHaveLength(1000);
+      });
+
+      it('refuses with 400 when more than one thousand match', async () => {
+        bankDetails.find.mockResolvedValueOnce(rows(1001) as never);
+
+        await expect(service.findIdsMatching('4')).rejects.toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('reads one row more than the cap to notice an overflow', async () => {
+        bankDetails.find.mockResolvedValueOnce([] as never);
+
+        await service.findIdsMatching('4');
+
+        expect(bankDetails.find).toHaveBeenCalledWith(
+          expect.objectContaining({ take: 1001 }),
+        );
+      });
+    });
+
+    describe('findIdsOfUsers', () => {
+      it('does not query for no users', async () => {
+        await expect(service.findIdsOfUsers([])).resolves.toEqual([]);
+        expect(bankDetails.find).not.toHaveBeenCalled();
+      });
+
+      it('returns the ids of the requisites of the given users', async () => {
+        bankDetails.find.mockResolvedValueOnce([{ id: uuidOf(100) }] as never);
+
+        await expect(service.findIdsOfUsers([owner])).resolves.toEqual([
+          uuidOf(100),
+        ]);
+      });
     });
   });
 });

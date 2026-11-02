@@ -5,6 +5,9 @@ import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { AuditInstallation } from '../../audit/entities/audit-installation.entity';
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
+import { CounterpartyDailyVolume } from '../../counterparties/entities/counterparty-daily-volume.entity';
+import { CounterpartyRequisiteEvent } from '../../counterparties/entities/counterparty-requisite-event.entity';
+import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Country } from '../../countries/entities/country.entity';
 import { Currency } from '../../currencies/entities/currency.entity';
 import { MerchantApiKey } from '../../merchants/entities/merchant-api-key.entity';
@@ -51,6 +54,9 @@ describe('the account transactions module graph', () => {
   const dataSource = { transaction: jest.fn(), manager: {} };
   const entities = [
     AccountTransaction,
+    Counterparty,
+    CounterpartyDailyVolume,
+    CounterpartyRequisiteEvent,
     DepositAddress,
     DepositTransfer,
     WithdrawalAttempt,

@@ -5,7 +5,8 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, ILike, In, Repository } from 'typeorm';
+import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
 import { AuditService } from '../../audit/services/audit.service';
 import { Merchant } from '../entities/merchant.entity';
 import { MerchantApiKey } from '../entities/merchant-api-key.entity';
@@ -49,6 +50,16 @@ export class MerchantsService {
     if (ids.length === 0) return [];
 
     return this.merchants.find({ where: { id: In(ids) } });
+  }
+
+  async findIdsMatching(search: string): Promise<string[]> {
+    const searched = ILike(`%${escapeLikePattern(search)}%`);
+    const rows = await this.merchants.find({
+      select: { id: true },
+      where: [{ name: searched }, { internalName: searched }],
+    });
+
+    return rows.map((row) => row.id);
   }
 
   async rankByName(): Promise<Map<string, number>> {

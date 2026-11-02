@@ -18,6 +18,7 @@ import { Page, toPage } from '../../common/types/page';
 import { FIAT_SCALE } from '../../common/utils/fiat-scale';
 import { RATE_SCALE } from '../../common/utils/rate-scale';
 import { sortDirection } from '../../common/utils/sort-direction';
+import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
 import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
 import { UserTeamService } from '../../users/services/user-team.service';
 import { Transaction } from '../entities/transaction.entity';
@@ -35,6 +36,7 @@ import {
   computeDeal,
   PlatformMinimumUnreachableError,
 } from '../utils/compute-deal';
+import { countsTowardCounterpartyStats } from '../utils/counts-toward-counterparty-stats';
 import { findTransactionMethod } from '../utils/find-transaction-method';
 import {
   canTransition,
@@ -65,6 +67,7 @@ export class TransactionService {
     private readonly team: UserTeamService,
     private readonly merchantSettings: MerchantSettingsService,
     private readonly config: ConfigService,
+    private readonly counterpartyStats: CounterpartyStatsService,
   ) {}
 
   findById(id: string): Promise<Transaction | null> {
@@ -255,6 +258,12 @@ export class TransactionService {
         toStatus: status,
         source: StatusEventSource.System,
       });
+      if (countsTowardCounterpartyStats(transaction)) {
+        await this.counterpartyStats.recordDealCreatedWithin(
+          manager,
+          transaction.counterpartyId,
+        );
+      }
       return transaction;
     });
   }
@@ -300,7 +309,32 @@ export class TransactionService {
 
     await manager.save(transaction);
     await this.writeEvent(manager, transaction.id, from, change);
+    if (countsTowardCounterpartyStats(transaction)) {
+      await this.recordCounterpartyStatus(manager, transaction);
+    }
     return transaction;
+  }
+
+  private async recordCounterpartyStatus(
+    manager: EntityManager,
+    transaction: Transaction,
+  ): Promise<void> {
+    if (transaction.status === TransactionStatus.Dispute) {
+      await this.counterpartyStats.recordDisputeWithin(
+        manager,
+        transaction.counterpartyId,
+      );
+    } else if (isFinalStatus(transaction.status)) {
+      await this.counterpartyStats.recordCompletedWithin(
+        manager,
+        transaction.counterpartyId,
+        {
+          paid: transaction.status !== TransactionStatus.Canceled,
+          amountFiat: transaction.amountFiat,
+          resolvedAt: transaction.resolvedAt,
+        },
+      );
+    }
   }
 
   private async applySettlement(

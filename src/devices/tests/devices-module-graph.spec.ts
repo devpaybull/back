@@ -6,6 +6,9 @@ import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { Bank } from '../../banks/entities/bank.entity';
+import { CounterpartyDailyVolume } from '../../counterparties/entities/counterparty-daily-volume.entity';
+import { CounterpartyRequisiteEvent } from '../../counterparties/entities/counterparty-requisite-event.entity';
+import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Country } from '../../countries/entities/country.entity';
 import { Currency } from '../../currencies/entities/currency.entity';
 import { BankDetailsController } from '../../bank-details/bank-details.controller';
@@ -45,6 +48,12 @@ describe('the devices ↔ bank-details module graph', () => {
       .overrideProvider(getRepositoryToken(Country))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Currency))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(Counterparty))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(CounterpartyDailyVolume))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(CounterpartyRequisiteEvent))
       .useValue(repository)
       .overrideProvider(ConfigService)
       .useValue({

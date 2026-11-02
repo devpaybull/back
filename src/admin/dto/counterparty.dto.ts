@@ -1,35 +1,91 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Counterparty } from '../../counterparties/entities/counterparty.entity';
+import { CounterpartyHealth } from '../../counterparties/types/counterparty-health.enum';
+import { CounterpartyBindingDto } from './counterparty-binding.dto';
+import { UserMerchantDto } from './user-merchant.dto';
 
 export class CounterpartyDto {
   @ApiProperty()
   id: number;
 
-  @ApiProperty()
-  merchantId: string;
-
-  @ApiProperty()
+  @ApiProperty({ description: 'The client id the merchant knows it by' })
   externalId: string;
 
-  @ApiProperty({ nullable: true })
-  name: string;
+  @ApiProperty({ type: UserMerchantDto, nullable: true })
+  merchant: UserMerchantDto | null;
 
   @ApiProperty({ nullable: true })
-  contact: string;
+  name: string | null;
 
-  @ApiProperty({ nullable: true, type: Object })
-  payload: Record<string, unknown>;
+  @ApiProperty({ nullable: true })
+  contact: string | null;
+
+  @ApiProperty()
+  enabled: boolean;
+
+  @ApiProperty()
+  blacklisted: boolean;
+
+  @ApiProperty({ nullable: true })
+  blacklistedAt: Date | null;
+
+  @ApiProperty()
+  autoEnableForbidden: boolean;
+
+  @ApiProperty({ enum: CounterpartyHealth })
+  health: CounterpartyHealth;
+
+  @ApiProperty({ type: CounterpartyBindingDto, nullable: true })
+  binding: CounterpartyBindingDto | null;
+
+  @ApiProperty({ description: 'Pay-ins that have ever been in dispute' })
+  disputes: number;
+
+  @ApiProperty({ description: 'Pay-ins created' })
+  dealCount: number;
+
+  @ApiProperty({ description: 'Pay-ins that ended: paid or canceled' })
+  completedCount: number;
+
+  @ApiProperty({ description: 'Pay-ins paid: success or success_changed' })
+  paidCount: number;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Requests for a deal; null until the merchant API exists',
+  })
+  requestCount: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Paid of completed, percent with two decimals; null with none completed',
+  })
+  conversion: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'The client’s last login; null until the merchant API exists',
+  })
+  lastLoginAt: Date | null;
+
+  @ApiProperty({ nullable: true })
+  lastDepositAt: Date | null;
+
+  @ApiProperty({ type: String, nullable: true, example: '200000.00' })
+  averageCheck: string | null;
+
+  @ApiProperty({ type: String, example: '200000.00' })
+  volume7d: string;
+
+  @ApiProperty({ type: String, example: '1000000.00' })
+  volume30d: string;
+
+  @ApiProperty({ type: String, example: '15000000.00' })
+  volumeTotal: string;
+
+  @ApiProperty({ example: 'RUB' })
+  currency: string;
 
   @ApiProperty()
   createdAt: Date;
 }
-
-export const toCounterpartyDto = (row: Counterparty): CounterpartyDto => ({
-  id: row.id,
-  merchantId: row.merchantId,
-  externalId: row.externalId,
-  name: row.name,
-  contact: row.contact,
-  payload: row.payload,
-  createdAt: row.createdAt,
-});
