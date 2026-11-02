@@ -12,7 +12,7 @@ import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { CounterpartySortField } from '../../counterparties/types/counterparty-sort-field.enum';
 import { CounterpartyStatus } from '../../counterparties/types/counterparty-status.enum';
-import { IsNotBelow } from '../utils/is-not-below';
+import { IsNotBelow } from '../../common/decorators/is-not-below.decorator';
 
 const asBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true') return true;

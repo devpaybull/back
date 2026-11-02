@@ -28,6 +28,14 @@ export class AdminWithdrawalActionsDto {
   canReject: boolean;
 }
 
+export class WithdrawalMerchantDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  name: string;
+}
+
 export class AdminWithdrawalDto {
   @ApiProperty()
   id: number;
@@ -38,8 +46,21 @@ export class AdminWithdrawalDto {
   @ApiProperty({ enum: AccountTransactionStatusReason, nullable: true })
   statusReason: AccountTransactionStatusReason | null;
 
-  @ApiProperty({ type: AccountTransactionPartyDto, nullable: true })
+  @ApiProperty({
+    type: AccountTransactionPartyDto,
+    nullable: true,
+    description:
+      'the account the money belongs to; for a merchant request, the account that created it',
+  })
   user: AccountTransactionPartyDto | null;
+
+  @ApiProperty({
+    type: WithdrawalMerchantDto,
+    nullable: true,
+    description:
+      'set for a merchant’s withdrawal request: the money leaves the merchant balance, an admin pays it by hand',
+  })
+  merchant: WithdrawalMerchantDto | null;
 
   @ApiProperty()
   address: string;
@@ -80,11 +101,13 @@ export const toAdminWithdrawalDto = (
   attempts: WithdrawalAttempt[],
   parties: Map<string, AccountTransactionPartyDto>,
   payableByHand: AccountTransactionStatus[],
+  merchant: WithdrawalMerchantDto | null = null,
 ): AdminWithdrawalDto => ({
   id: row.id,
   status: row.status,
   statusReason: row.statusReason,
   user: parties.get(row.userId) ?? null,
+  merchant,
   address: row.address!,
   attempts: attempts.map((attempt) => ({
     txHash: attempt.txHash,

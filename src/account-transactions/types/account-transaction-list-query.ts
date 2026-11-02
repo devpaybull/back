@@ -13,9 +13,11 @@ export interface AccountTransactionListQuery {
   status?: AccountTransactionStatus[];
   statusReason?: AccountTransactionStatusReason;
   userId?: string;
+  merchantId?: string;
   createdFrom?: Date;
   createdTo?: Date;
   search?: string;
   matchedUserIds?: string[];
+  matchedMerchantIds?: string[];
   userRanks?: Map<string, number>;
 }

@@ -55,6 +55,17 @@ describe('MerchantBalanceService', () => {
           options: { where: { transactionId: string; type: unknown } },
         ) => matching(options.where).length,
       ),
+      find: jest.fn(
+        async (
+          _entity: unknown,
+          options: { where: { accountTransactionId: number; type: unknown } },
+        ) =>
+          journal.filter(
+            (row) =>
+              row.accountTransactionId === options.where.accountTransactionId &&
+              typesOf(options.where.type).includes(row.type),
+          ),
+      ),
       save: jest.fn(async (row: object) => {
         if (row === stored) return row;
 
@@ -105,6 +116,7 @@ describe('MerchantBalanceService', () => {
       merchantId: MERCHANT,
       balance: toCrypto(amount),
       escrow: toCrypto(escrow),
+      withdrawalReserved: toCrypto(0),
     }) as MerchantBalance;
 
   it('creates the row if missing, locks it and credits a pay-in with a journal row', async () => {
@@ -128,6 +140,7 @@ describe('MerchantBalanceService', () => {
       merchantBalanceId: 7,
       type: MerchantBalanceOperationType.DealPayIn,
       transactionId: DEAL,
+      accountTransactionId: null,
       amount: toCrypto(90.5),
       balanceBefore: toCrypto(10),
       balanceAfter: toCrypto(100.5),
@@ -530,6 +543,157 @@ describe('MerchantBalanceService', () => {
     });
   });
 
+  describe('withdrawal requests', () => {
+    const REQUEST = 77;
+
+    it('holds amount and fee out of the available balance into the withdrawal reserve', async () => {
+      const stored = balance(100);
+      const { manager, service } = build(stored);
+
+      const operation = await service.holdWithdrawalWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto('40.5'),
+        REQUEST,
+        ACTOR,
+        never,
+      );
+
+      expect(stored.balance).toEqual(toCrypto('59.5'));
+      expect(stored.withdrawalReserved).toEqual(toCrypto('40.5'));
+      expect(stored.escrow).toEqual(toCrypto(0));
+      expect(operation).toMatchObject({
+        type: MerchantBalanceOperationType.WithdrawalHold,
+        accountTransactionId: REQUEST,
+        transactionId: null,
+        amount: toCrypto('-40.5'),
+        actorUserId: ACTOR,
+      });
+    });
+
+    it('refuses a hold the balance does not cover without the overdraft, after locking', async () => {
+      const { manager, service } = build(balance(10));
+      const allowsOverdraft = jest.fn(never);
+
+      await expect(
+        service.holdWithdrawalWithin(
+          manager as never,
+          MERCHANT,
+          toCrypto(11),
+          REQUEST,
+          ACTOR,
+          allowsOverdraft,
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(allowsOverdraft).toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('takes the balance below zero with the overdraft on', async () => {
+      const stored = balance(10);
+      const { manager, service } = build(stored);
+
+      await service.holdWithdrawalWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto(15),
+        REQUEST,
+        ACTOR,
+        always,
+      );
+
+      expect(stored.balance).toEqual(toCrypto(-5));
+    });
+
+    it('settles out of the reserve once; the available balance does not move', async () => {
+      const stored = balance(100);
+      const built = build(stored);
+
+      await built.service.holdWithdrawalWithin(
+        built.manager as never,
+        MERCHANT,
+        toCrypto(30),
+        REQUEST,
+        ACTOR,
+        never,
+      );
+      const settled = await built.service.settleWithdrawalWithin(
+        built.manager as never,
+        MERCHANT,
+        REQUEST,
+      );
+
+      expect(settled).toMatchObject({
+        type: MerchantBalanceOperationType.Withdrawal,
+        amount: toCrypto(0),
+      });
+      expect(stored.balance).toEqual(toCrypto(70));
+      expect(stored.withdrawalReserved).toEqual(toCrypto(0));
+      expect(
+        await built.service.settleWithdrawalWithin(
+          built.manager as never,
+          MERCHANT,
+          REQUEST,
+        ),
+      ).toBeNull();
+      expect(
+        await built.service.releaseWithdrawalWithin(
+          built.manager as never,
+          MERCHANT,
+          REQUEST,
+          ACTOR,
+        ),
+      ).toBeNull();
+    });
+
+    it('releases the held amount back to the available balance once', async () => {
+      const stored = balance(100);
+      const built = build(stored);
+
+      await built.service.holdWithdrawalWithin(
+        built.manager as never,
+        MERCHANT,
+        toCrypto(30),
+        REQUEST,
+        ACTOR,
+        never,
+      );
+      const released = await built.service.releaseWithdrawalWithin(
+        built.manager as never,
+        MERCHANT,
+        REQUEST,
+        ACTOR,
+      );
+
+      expect(released).toMatchObject({
+        type: MerchantBalanceOperationType.WithdrawalRelease,
+        amount: toCrypto(30),
+      });
+      expect(stored.balance).toEqual(toCrypto(100));
+      expect(stored.withdrawalReserved).toEqual(toCrypto(0));
+      expect(
+        await built.service.releaseWithdrawalWithin(
+          built.manager as never,
+          MERCHANT,
+          REQUEST,
+          ACTOR,
+        ),
+      ).toBeNull();
+    });
+
+    it('moves nothing for a request that was never held', async () => {
+      const built = build(balance(100));
+
+      expect(
+        await built.service.settleWithdrawalWithin(
+          built.manager as never,
+          MERCHANT,
+          REQUEST,
+        ),
+      ).toBeNull();
+    });
+  });
+
   describe('reading', () => {
     it('reads every balance in one query and answers zero for a merchant without a row', async () => {
       const { repository, service } = build(balance(42, 3));
@@ -542,10 +706,12 @@ describe('MerchantBalanceService', () => {
       expect(result.get(MERCHANT)).toEqual({
         balance: toCrypto(42),
         escrow: toCrypto(3),
+        withdrawalReserved: toCrypto(0),
       });
       expect(result.get(uuidOf(4))).toEqual({
         balance: toCrypto(0),
         escrow: toCrypto(0),
+        withdrawalReserved: toCrypto(0),
       });
       expect(
         (await service.balancesByMerchant([MERCHANT])).get(MERCHANT),

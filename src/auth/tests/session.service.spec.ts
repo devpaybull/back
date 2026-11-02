@@ -90,6 +90,7 @@ describe('SessionService', () => {
   const userDirectory = {
     findAuthenticatableById: jest.fn(),
     findAuthenticatableByLogin: jest.fn(),
+    findById: jest.fn(),
   };
 
   const jwt = new JwtService({});
@@ -144,6 +145,23 @@ describe('SessionService', () => {
       await expect(service.login(credentials)).rejects.toThrow(
         'Invalid login, password or one-time code',
       );
+    });
+
+    it('writes a merchant-side sign-in into its activity feed, a trader’s not', async () => {
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userCredentials.verifySecondFactor.mockResolvedValue(true);
+
+      userDirectory.findAuthenticatableByLogin.mockResolvedValue(activeUser);
+      await service.login(credentials);
+      expect(audit.record).not.toHaveBeenCalled();
+
+      userDirectory.findAuthenticatableByLogin.mockResolvedValue(telegramUser);
+      await service.login(credentials);
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: telegramUser.id,
+        targetUserId: telegramUser.id,
+        action: 'merchant_activity.login',
+      });
     });
 
     it('rejects a wrong password before checking the second factor', async () => {
@@ -500,6 +518,62 @@ describe('SessionService', () => {
       await service.logout(undefined);
 
       expect(refreshTokens.update).not.toHaveBeenCalled();
+    });
+
+    it('writes the merchant’s own logout into its activity feed', async () => {
+      refreshTokens.findOne.mockResolvedValue({
+        id: 4,
+        userId: uuidOf(2),
+        impersonatedByUserId: null,
+      });
+      refreshTokens.update.mockResolvedValue({ affected: 1 });
+      userDirectory.findById.mockResolvedValue({
+        id: uuidOf(2),
+        role: Role.Merchant,
+      });
+
+      await service.logout('some-token');
+
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: uuidOf(2),
+        targetUserId: uuidOf(2),
+        action: 'merchant_activity.logout',
+      });
+    });
+
+    it('writes nothing for a trader, a link session or a token already revoked', async () => {
+      refreshTokens.update.mockResolvedValue({ affected: 1 });
+      userDirectory.findById.mockResolvedValue({
+        id: uuidOf(3),
+        role: Role.Trader,
+      });
+      refreshTokens.findOne.mockResolvedValue({
+        id: 4,
+        userId: uuidOf(3),
+        impersonatedByUserId: null,
+      });
+      await service.logout('trader-token');
+
+      userDirectory.findById.mockResolvedValue({
+        id: uuidOf(2),
+        role: Role.Merchant,
+      });
+      refreshTokens.findOne.mockResolvedValue({
+        id: 5,
+        userId: uuidOf(2),
+        impersonatedByUserId: uuidOf(9),
+      });
+      await service.logout('link-token');
+
+      refreshTokens.findOne.mockResolvedValue({
+        id: 6,
+        userId: uuidOf(2),
+        impersonatedByUserId: null,
+      });
+      refreshTokens.update.mockResolvedValue({ affected: 0 });
+      await service.logout('raced-token');
+
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

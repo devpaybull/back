@@ -113,6 +113,15 @@ export class MerchantSettingsService {
     );
   }
 
+  async payInWindowMinutesOf(merchantId: string): Promise<number | null> {
+    const row = await this.settings.findOne({
+      where: { merchantId },
+      select: { merchantId: true, payInWindowMinutes: true },
+    });
+
+    return row?.payInWindowMinutes ?? null;
+  }
+
   async allowsOverdraftWithin(
     manager: EntityManager,
     merchantId: string,
@@ -129,6 +138,7 @@ export class MerchantSettingsService {
     merchantId: string,
     changes: MerchantSettingsChanges,
     actorUserId: string,
+    activityAction?: string,
   ): Promise<MerchantSettingsView> {
     const written = Object.fromEntries(
       Object.entries(changes).filter(([, value]) => value !== undefined),
@@ -179,6 +189,18 @@ export class MerchantSettingsService {
         },
         manager,
       );
+
+      if (activityAction) {
+        await this.audit.record(
+          {
+            actorUserId,
+            targetUserId: actorUserId,
+            action: activityAction,
+            metadata: { merchantId, fields: Object.keys(written) },
+          },
+          manager,
+        );
+      }
     });
 
     return this.settingsOf(merchantId);

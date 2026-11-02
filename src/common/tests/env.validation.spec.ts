@@ -24,6 +24,8 @@ const TRON_ENV = {
   DEPOSIT_MAX_ACTIVE_REQUESTS: '5',
   WITHDRAWAL_MIN_USDT: '10',
   WITHDRAWAL_DAILY_LIMIT_USDT: '50000',
+  MERCHANT_WITHDRAWAL_MIN_USDT: '10',
+  MERCHANT_WITHDRAWAL_DAILY_LIMIT_USDT: '100000',
   WITHDRAWAL_SECURITY_HOLD_HOURS: '24',
   WITHDRAWAL_QUOTE_TTL_SECONDS: '60',
   PAYOUT_MODE: 'auto',
@@ -49,11 +51,11 @@ describe('validateEnv', () => {
       expect(validateEnv(baseEnv()).DEAL_TTL_MINUTES).toBe(20);
     });
 
-    it('aborts startup when it is missing — there is no default', () => {
+    it('gives a deal 15 minutes when it is not set', () => {
       const { DEAL_TTL_MINUTES, ...without } = baseEnv();
 
       expect(DEAL_TTL_MINUTES).toBe('20');
-      expect(() => validateEnv(without)).toThrow(/DEAL_TTL_MINUTES/);
+      expect(validateEnv(without).DEAL_TTL_MINUTES).toBe(15);
     });
 
     it('aborts startup on an empty value rather than reading it as zero', () => {
@@ -509,6 +511,8 @@ describe('validateEnv', () => {
       ['TRON_MAX_TRX_BURN_PER_TX', '1.0000001'],
       ['DEPOSIT_MAX_ACTIVE_REQUESTS', '0'],
       ['WITHDRAWAL_QUOTE_TTL_SECONDS', ''],
+      ['MERCHANT_WITHDRAWAL_MIN_USDT', '0'],
+      ['MERCHANT_WITHDRAWAL_DAILY_LIMIT_USDT', '10.1234567'],
     ])('refuses %s=%p', (name, value) => {
       expect(() => validateEnv({ ...baseEnv(), [name]: value })).toThrow(
         new RegExp(name),

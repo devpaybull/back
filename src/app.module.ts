@@ -17,6 +17,7 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { DebtsModule } from './debts/debts.module';
 import { DevicesModule } from './devices/devices.module';
 import { InvitesModule } from './invites/invites.module';
+import { MerchantCabinetModule } from './merchant-cabinet/merchant-cabinet.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { TraderSettingsModule } from './trader-settings/trader-settings.module';
 import { TransactionsModule } from './transactions/transactions.module';
@@ -65,6 +66,7 @@ import { UsersModule } from './users/users.module';
     UserNotesModule,
     DebtsModule,
     AdminModule,
+    MerchantCabinetModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],

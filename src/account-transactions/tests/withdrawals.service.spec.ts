@@ -42,7 +42,11 @@ const ENV: Record<string, unknown> = {
   WITHDRAWAL_SECURITY_HOLD_HOURS: 24,
   WITHDRAWAL_TOTP_MAX_FAILURES: 3,
   WITHDRAWAL_TOTP_LOCK_MINUTES: 10,
+  MERCHANT_WITHDRAWAL_MIN_USDT: '50',
+  MERCHANT_WITHDRAWAL_DAILY_LIMIT_USDT: '5000',
 };
+
+const MERCHANT = uuidOf(30);
 
 type Finder = (entity: unknown, options?: unknown) => unknown;
 
@@ -167,6 +171,27 @@ const build = () => {
     transfer: jest.fn(async () => ({ id: 77, type: 'transfer' })),
   };
   const tracker = { register: jest.fn() };
+  const merchantBalances = {
+    statesByMerchant: jest.fn(
+      async () =>
+        new Map([
+          [
+            MERCHANT,
+            {
+              balance: toCrypto(300),
+              escrow: toCrypto(0),
+              withdrawalReserved: toCrypto(0),
+            },
+          ],
+        ]),
+    ),
+    holdWithdrawalWithin: jest.fn(async () => ({ id: 5 })),
+    settleWithdrawalWithin: jest.fn(async () => ({ id: 6 })),
+    releaseWithdrawalWithin: jest.fn(async () => ({ id: 7 })),
+  };
+  const merchantSettings = {
+    allowsOverdraftWithin: jest.fn(async () => false),
+  };
   const service = new WithdrawalsService(
     config as never,
     wallets as never,
@@ -178,12 +203,16 @@ const build = () => {
     credentials as never,
     directory as never,
     transfers as never,
+    merchantBalances as never,
+    merchantSettings as never,
     tracker as never,
     dataSource as never,
   );
 
   return {
     service,
+    merchantBalances,
+    merchantSettings,
     manager,
     dataSource,
     quoteRepository,
@@ -1074,7 +1103,7 @@ describe('WithdrawalsService.payableByHand', () => {
       ) => WithdrawalsService
     )(
       { get: jest.fn(() => mode), getOrThrow: jest.fn() },
-      ...Array.from({ length: 9 }, () => ({})),
+      ...Array.from({ length: 11 }, () => ({})),
       { register: jest.fn() },
       {},
     );
@@ -1090,5 +1119,219 @@ describe('WithdrawalsService.payableByHand', () => {
       AccountTransactionStatus.Pending,
       AccountTransactionStatus.Failed,
     ]);
+  });
+
+  describe('merchant withdrawal requests', () => {
+    const merchantQuote = (amount: Crypto): WithdrawalQuote =>
+      ({ ...liveQuote(amount), userId: TRADER }) as WithdrawalQuote;
+
+    const requestInput = (amount = toCrypto(100), address = EXTERNAL) => ({
+      merchantId: MERCHANT,
+      userId: TRADER,
+      address,
+      amount,
+      totp: '123456',
+    });
+
+    it('quotes against the merchant’s available balance', async () => {
+      const { service, wallets } = build();
+
+      const quote = await service.quoteForMerchant(
+        MERCHANT,
+        TRADER,
+        EXTERNAL,
+        toCrypto(100),
+        NOW,
+      );
+
+      expect(quote.available).toEqual(toCrypto(300));
+      expect(quote.maxAmount).toEqual(toCrypto('299.5'));
+      expect(quote.internal).toBe(false);
+      expect(wallets.findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('accepts another trader’s deposit address as an ordinary address', async () => {
+      const { service, repoFindOne, quoteRepository } = build();
+      repoFindOne.set(TronAddress, () => ({
+        id: 8,
+        address: DEPOSIT_OF_OTHER,
+        purpose: AddressPurpose.Deposit,
+      }));
+      quoteRepository.find.mockResolvedValue([
+        { ...merchantQuote(toCrypto(100)), address: DEPOSIT_OF_OTHER },
+      ] as never);
+
+      const row = await service.requestForMerchant(
+        requestInput(toCrypto(100), DEPOSIT_OF_OTHER),
+        NOW,
+      );
+
+      expect(row).toMatchObject({
+        merchantId: MERCHANT,
+        address: DEPOSIT_OF_OTHER,
+      });
+    });
+
+    it('refuses a platform wallet that is not a deposit address', async () => {
+      const { service, repoFindOne } = build();
+      repoFindOne.set(TronAddress, () => ({
+        id: 8,
+        address: HOT,
+        purpose: AddressPurpose.Hot,
+      }));
+
+      await expect(
+        service.requestForMerchant(requestInput(toCrypto(100), HOT), NOW),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses an amount below the merchant minimum', async () => {
+      const { service } = build();
+
+      await expect(
+        service.requestForMerchant(requestInput(toCrypto(49)), NOW),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('answers 409 with the new fee when no live quote matches', async () => {
+      const { service } = build();
+
+      await expect(
+        service.requestForMerchant(requestInput(), NOW),
+      ).rejects.toThrow(FeeChangedException);
+    });
+
+    it('writes a pending row owned by the merchant and holds amount plus fee under the merchant lock', async () => {
+      const {
+        service,
+        quoteRepository,
+        manager,
+        merchantBalances,
+        audit,
+        wallets,
+      } = build();
+      quoteRepository.find.mockResolvedValue([merchantQuote(toCrypto(100))]);
+
+      const row = await service.requestForMerchant(requestInput(), NOW);
+
+      expect(manager.query).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`merchant-withdrawals:${MERCHANT}`],
+      );
+      expect(row).toMatchObject({
+        status: AccountTransactionStatus.Pending,
+        userId: TRADER,
+        merchantId: MERCHANT,
+        amount: toCrypto(100),
+        fee: toCrypto('0.5'),
+      });
+      expect(merchantBalances.holdWithdrawalWithin).toHaveBeenCalledWith(
+        manager,
+        MERCHANT,
+        toCrypto('100.5'),
+        41,
+        TRADER,
+        expect.any(Function),
+      );
+      expect(wallets.reserveMainEscrowWithin).not.toHaveBeenCalled();
+      expect(audit.record.mock.calls.map(([entry]) => entry.action)).toEqual([
+        'withdrawal.requested',
+        'merchant_activity.withdrawal_requested',
+      ]);
+    });
+
+    it('asks the merchant’s overdraft switch in the same transaction', async () => {
+      const {
+        service,
+        quoteRepository,
+        manager,
+        merchantBalances,
+        merchantSettings,
+      } = build();
+      quoteRepository.find.mockResolvedValue([merchantQuote(toCrypto(100))]);
+      merchantBalances.holdWithdrawalWithin.mockImplementation(
+        async (...args: unknown[]) => {
+          await (args[5] as () => Promise<boolean>)();
+
+          return { id: 5 };
+        },
+      );
+
+      await service.requestForMerchant(requestInput(), NOW);
+
+      expect(merchantSettings.allowsOverdraftWithin).toHaveBeenCalledWith(
+        manager,
+        MERCHANT,
+      );
+    });
+
+    it('refuses passing the merchant’s 24-hour limit, counting every account of the merchant', async () => {
+      const { service, quoteRepository, findBy } = build();
+      quoteRepository.find.mockResolvedValue([merchantQuote(toCrypto(100))]);
+      findBy.set(AccountTransaction, () => [
+        withdrawal({
+          amount: toCrypto(4950),
+          userId: OTHER,
+          merchantId: MERCHANT,
+        }),
+      ]);
+
+      await expect(
+        service.requestForMerchant(requestInput(), NOW),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('cancels only the merchant’s own pending request and releases its hold', async () => {
+      const { service, findOneBy, merchantBalances, wallets } = build();
+      const row = withdrawal({ merchantId: MERCHANT });
+      findOneBy.set(AccountTransaction, (_entity, options) => {
+        expect((options as { where: object }).where).toMatchObject({
+          id: 41,
+          merchantId: MERCHANT,
+        });
+
+        return row;
+      });
+
+      const canceled = await service.cancelOwnForMerchant(41, MERCHANT, TRADER);
+
+      expect(canceled.statusReason).toBe(
+        AccountTransactionStatusReason.CanceledByUser,
+      );
+      expect(merchantBalances.releaseWithdrawalWithin).toHaveBeenCalledWith(
+        expect.anything(),
+        MERCHANT,
+        41,
+        TRADER,
+      );
+      expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+    });
+
+    it('a rejected merchant request returns its hold and tells the merchant’s feed', async () => {
+      const { service, findOneBy, merchantBalances, audit } = build();
+      findOneBy.set(AccountTransaction, () =>
+        withdrawal({ merchantId: MERCHANT }),
+      );
+
+      await service.reject(41, ADMIN, 'wrong address');
+
+      expect(merchantBalances.releaseWithdrawalWithin).toHaveBeenCalled();
+      expect(audit.record.mock.calls.map(([entry]) => entry.action)).toEqual([
+        'withdrawal.rejected',
+        'merchant_activity.withdrawal_rejected',
+      ]);
+    });
+
+    it('may be paid by hand from pending in any payout mode', () => {
+      const { service } = build();
+
+      expect(service.payableByHand({ merchantId: MERCHANT })).toEqual([
+        AccountTransactionStatus.Pending,
+        AccountTransactionStatus.Failed,
+      ]);
+      expect(service.payableByHand({ merchantId: null })).toEqual([
+        AccountTransactionStatus.Failed,
+      ]);
+    });
   });
 });

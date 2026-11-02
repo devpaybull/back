@@ -116,6 +116,13 @@ export class MerchantsService {
     });
   }
 
+  newestActiveKey(merchantId: string): Promise<MerchantApiKey | null> {
+    return this.keys.findOne({
+      where: { merchantId, active: true },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  }
+
   listKeys(merchantId: string): Promise<MerchantApiKey[]> {
     return this.keys.find({
       where: { merchantId },

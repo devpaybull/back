@@ -33,6 +33,8 @@ import { resolveRate } from '../utils/resolve-rate';
 import { TRANSACTION_METHOD_CODES } from '../utils/transaction-methods';
 import { RapiraRateProvider } from './rapira-rate.provider';
 
+const RAPIRA_PLUS_ONE_SOURCE_MARKUP = 0.01;
+
 const knownMethod = (code: string): TransactionMethodDefinition => {
   const method = findTransactionMethod(code);
 
@@ -469,6 +471,63 @@ export class RateService {
         }),
       };
     });
+  }
+
+  async getEffectiveMerchantSet(
+    merchantId: string,
+  ): Promise<SubjectMethodRates[]> {
+    const [base, individual] = await Promise.all([
+      this.getBaseSet(RateScope.Merchant),
+      this.getSubjectSet(RateScope.Merchant, merchantId),
+    ]);
+    const isGeneral = (row: MethodRate) =>
+      row.bankId === null &&
+      (row.fromAmount === null || row.fromAmount === undefined) &&
+      (row.toAmount === null || row.toAmount === undefined);
+    const methods = [
+      ...new Set([...base, ...individual].map((row) => row.method)),
+    ].sort((one, other) => declarationRank(one) - declarationRank(other));
+
+    return methods.map((method) => {
+      const own = individual.filter((row) => row.method === method);
+      const general =
+        own.find(isGeneral) ?? base.find((row) => row.method === method);
+
+      return {
+        method,
+        general: general
+          ? {
+              payInPercent: general.payInPercent,
+              payOutPercent: general.payOutPercent,
+            }
+          : null,
+        bands: own
+          .filter((row) => row.bankId === null && !isGeneral(row))
+          .map((row) => ({
+            fromAmount: row.fromAmount,
+            toAmount: row.toAmount,
+            payInPercent: row.payInPercent,
+            payOutPercent: row.payOutPercent,
+          })),
+        banks: own
+          .filter((row) => row.bankId !== null)
+          .map((row) => ({
+            bankId: row.bankId,
+            payInPercent: row.payInPercent,
+            payOutPercent: row.payOutPercent,
+          })),
+      };
+    });
+  }
+
+  async merchantSourceRate(payInMarkupPercent: number): Promise<Rate> {
+    const fiatPerUsdt = await this.rapira.getFiatPerUsdt();
+
+    return roundRate(
+      fiatPerUsdt
+        .times(toDecimal(RAPIRA_PLUS_ONE_SOURCE_MARKUP).plus(1))
+        .times(toDecimal(payInMarkupPercent).div(100).plus(1)),
+    );
   }
 
   async getBaseRate(): Promise<Rate> {

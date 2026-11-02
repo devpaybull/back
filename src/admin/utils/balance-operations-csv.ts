@@ -1,4 +1,4 @@
-import { csvField } from './csv-field';
+import { csvField } from '../../common/utils/csv-field';
 import { BalanceOperationDto } from '../dto/balance-operation.dto';
 
 const HEADER = [

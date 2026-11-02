@@ -96,6 +96,27 @@ describe('MerchantSettingsService', () => {
     });
   });
 
+  it('answers the stored payment window of a merchant', async () => {
+    const { service, repository } = build({
+      stored: { payInWindowMinutes: 25 },
+    });
+
+    expect(await service.payInWindowMinutesOf(MERCHANT)).toBe(25);
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { merchantId: MERCHANT },
+      select: { merchantId: true, payInWindowMinutes: true },
+    });
+  });
+
+  it.each([
+    ['no settings row', null],
+    ['a row without a window', { payInWindowMinutes: null }],
+  ])('answers no payment window for %s', async (_case, stored) => {
+    const { service } = build({ stored });
+
+    expect(await service.payInWindowMinutesOf(MERCHANT)).toBeNull();
+  });
+
   it('reads the overdraft switch inside the caller’s transaction with a share lock, off without a row', async () => {
     const manager = {
       findOne: jest
@@ -165,6 +186,27 @@ describe('MerchantSettingsService', () => {
           withdrawalFee: '1.500000',
           randomizationWindow: 20,
         },
+      },
+      manager,
+    );
+  });
+
+  it('writes the caller’s activity row in the same transaction when asked', async () => {
+    const { service, manager, audit } = build();
+
+    await service.update(
+      MERCHANT,
+      { callbackUrl: 'https://shop.example/cb' },
+      ACTOR,
+      'merchant_activity.links_updated',
+    );
+
+    expect(audit.record).toHaveBeenLastCalledWith(
+      {
+        actorUserId: ACTOR,
+        targetUserId: ACTOR,
+        action: 'merchant_activity.links_updated',
+        metadata: { merchantId: MERCHANT, fields: ['callbackUrl'] },
       },
       manager,
     );

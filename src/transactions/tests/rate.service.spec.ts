@@ -1119,3 +1119,82 @@ describe('RateService.getBaseRate', () => {
     await expect(service.getBaseRate()).resolves.toEqual(toRate('89.8092'));
   });
 });
+
+describe('RateService — the merchant cabinet', () => {
+  const MERCHANT = uuidOf(30);
+
+  const build = (base: object[], individual: object[], fiatPerUsdt = '80') => {
+    const repository = {
+      find: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        where.subjectMerchantId === MERCHANT ? individual : base,
+      ),
+    };
+    const rapira = { getFiatPerUsdt: jest.fn(async () => toRate(fiatPerUsdt)) };
+
+    return new RateService(
+      repository as never,
+      {} as never,
+      {} as never,
+      rapira as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+  };
+
+  const general = (method: string, payInPercent: number, extra = {}) => ({
+    method,
+    payInPercent,
+    payOutPercent: 0,
+    bankId: null,
+    fromAmount: null,
+    toAmount: null,
+    ...extra,
+  });
+
+  it('takes the individual general row where one exists, else the base one, with bands and banks', async () => {
+    const service = build(
+      [general('sbp', 7), general('counterparty', 9)],
+      [
+        general('sbp', 6.5),
+        general('sbp', 5, { fromAmount: toFiat(1000), toAmount: toFiat(5000) }),
+        general('mobile_commerce', 0, { bankId: 4, payInPercent: 3 }),
+      ],
+    );
+
+    expect(await service.getEffectiveMerchantSet(MERCHANT)).toEqual([
+      {
+        method: 'sbp',
+        general: { payInPercent: 6.5, payOutPercent: 0 },
+        bands: [
+          {
+            fromAmount: toFiat(1000),
+            toAmount: toFiat(5000),
+            payInPercent: 5,
+            payOutPercent: 0,
+          },
+        ],
+        banks: [],
+      },
+      {
+        method: 'counterparty',
+        general: { payInPercent: 9, payOutPercent: 0 },
+        bands: [],
+        banks: [],
+      },
+      {
+        method: 'mobile_commerce',
+        general: null,
+        bands: [],
+        banks: [{ bankId: 4, payInPercent: 3, payOutPercent: 0 }],
+      },
+    ]);
+  });
+
+  it('prices the merchant source rate as Rapira plus 1% plus the pay-in markup', async () => {
+    const service = build([], [], '80');
+
+    expect(await service.merchantSourceRate(0)).toEqual(toRate('80.8'));
+    expect(await service.merchantSourceRate(2.5)).toEqual(toRate('82.82'));
+  });
+});

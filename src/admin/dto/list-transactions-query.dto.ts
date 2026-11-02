@@ -8,7 +8,7 @@ import { TransactionMethod } from '../../transactions/types/transaction-method';
 import { TransactionSortField } from '../../transactions/types/transaction-sort-field.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
-import { IsNotBelow } from '../utils/is-not-below';
+import { IsNotBelow } from '../../common/decorators/is-not-below.decorator';
 import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class ListTransactionsQueryDto extends PaginationQueryDto {

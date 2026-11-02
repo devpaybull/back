@@ -42,7 +42,9 @@ import {
   AdminWithdrawalDto,
   toAdminWithdrawalDto,
 } from '../dto/admin-withdrawal.dto';
-import { ListAccountTransactionsQueryDto } from '../dto/list-account-transactions-query.dto';
+import { ListWithdrawalsQueryDto } from '../dto/list-withdrawals-query.dto';
+import { AccountTransactionListQuery } from '../../account-transactions/types/account-transaction-list-query';
+import { MerchantsService } from '../../merchants/services/merchants.service';
 import { RejectWithdrawalDto } from '../dto/reject-withdrawal.dto';
 import { TxHashDto } from '../dto/tx-hash.dto';
 import { HashVerificationDto } from '../dto/usdt-transfer-inspection.dto';
@@ -64,23 +66,16 @@ export class AdminWithdrawalsController {
     private readonly operations: AccountTransactionsService,
     private readonly withdrawals: WithdrawalsService,
     private readonly directory: UserDirectoryService,
+    private readonly merchants: MerchantsService,
   ) {}
 
   @Get()
   @ApiOperation({ summary: 'Lists withdrawals; tabs are status filters' })
   @ApiPagedResponse(AdminWithdrawalDto)
   async list(
-    @Query() query: ListAccountTransactionsQueryDto,
+    @Query() query: ListWithdrawalsQueryDto,
   ): Promise<Page<AdminWithdrawalDto>> {
-    const page = await this.operations.list(
-      await toAccountTransactionListQuery(
-        AccountTransactionType.Withdrawal,
-        query,
-        this.directory,
-        this.operations,
-        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
-      ),
-    );
+    const page = await this.operations.list(await this.listQueryOf(query));
 
     return page.map(await this.detailsOf(page.items));
   }
@@ -123,16 +118,10 @@ export class AdminWithdrawalsController {
     content: { 'text/csv': { schema: { type: 'string' } } },
   })
   async export(
-    @Query() query: ListAccountTransactionsQueryDto,
+    @Query() query: ListWithdrawalsQueryDto,
   ): Promise<StreamableFile> {
     const rows = await this.operations.exportRows(
-      await toAccountTransactionListQuery(
-        AccountTransactionType.Withdrawal,
-        query,
-        this.directory,
-        this.operations,
-        this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
-      ),
+      await this.listQueryOf(query),
       ACCOUNT_TRANSACTIONS_EXPORT_MAX_ROWS,
     );
 
@@ -239,10 +228,37 @@ export class AdminWithdrawalsController {
     assertMayActOnAccount(admin, await this.directory.findById(row.userId));
   }
 
+  private async listQueryOf(
+    query: ListWithdrawalsQueryDto,
+  ): Promise<AccountTransactionListQuery> {
+    const base = await toAccountTransactionListQuery(
+      AccountTransactionType.Withdrawal,
+      query,
+      this.directory,
+      this.operations,
+      this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
+    );
+    const search = base.search;
+
+    return {
+      ...base,
+      merchantId: query.merchantId,
+      matchedMerchantIds:
+        search && !/^\d+$/.test(search)
+          ? await this.merchants.findIdsMatching(search)
+          : undefined,
+    };
+  }
+
   private async detailsOf(
     rows: AccountTransaction[],
   ): Promise<(row: AccountTransaction) => AdminWithdrawalDto> {
-    const [attempts, users] = await Promise.all([
+    const merchantIds = [
+      ...new Set(
+        rows.flatMap((row) => (row.merchantId ? [row.merchantId] : [])),
+      ),
+    ];
+    const [attempts, users, merchants] = await Promise.all([
       this.operations.attemptsOf(rows.map((row) => row.id)),
       this.directory.findByIds([
         ...new Set(
@@ -251,17 +267,23 @@ export class AdminWithdrawalsController {
           ),
         ),
       ]),
+      this.merchants.findByIds(merchantIds),
     ]);
     const parties = toAccountTransactionParties(users);
-
-    const payableByHand = this.withdrawals.payableByHand();
+    const merchantById = new Map(
+      merchants.map((merchant) => [
+        merchant.id,
+        { id: merchant.id, name: merchant.name },
+      ]),
+    );
 
     return (row) =>
       toAdminWithdrawalDto(
         row,
         attempts.get(row.id) ?? [],
         parties,
-        payableByHand,
+        this.withdrawals.payableByHand(row),
+        row.merchantId ? (merchantById.get(row.merchantId) ?? null) : null,
       );
   }
 }

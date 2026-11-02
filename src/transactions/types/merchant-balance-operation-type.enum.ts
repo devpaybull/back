@@ -4,4 +4,7 @@ export enum MerchantBalanceOperationType {
   DealPayOut = 'deal_pay_out',
   DealPayOutEscrowRelease = 'deal_pay_out_escrow_release',
   AdminAdjustment = 'admin_adjustment',
+  WithdrawalHold = 'withdrawal_hold',
+  Withdrawal = 'withdrawal',
+  WithdrawalRelease = 'withdrawal_release',
 }

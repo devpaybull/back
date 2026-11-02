@@ -22,5 +22,9 @@ export const transactionListOrder = (
       return { amountFiat: direction, id: direction };
     case TransactionSortField.Merchant:
       return { id: direction };
+    case TransactionSortField.ExpiresAt:
+      return { expiresAt: direction, id: direction };
+    case TransactionSortField.Rate:
+      return { rate: direction, id: direction };
   }
 };

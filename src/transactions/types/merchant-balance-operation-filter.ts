@@ -5,4 +5,5 @@ export interface MerchantBalanceOperationFilter {
   from?: Date;
   to?: Date;
   types?: MerchantBalanceOperationType[];
+  transactionIdSearch?: string;
 }

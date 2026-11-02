@@ -6,7 +6,7 @@ import { AccountTransactionStatus } from '../../account-transactions/types/accou
 import { AccountTransactionStatusReason } from '../../account-transactions/types/account-transaction-status-reason.enum';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { toQueryList } from '../../common/utils/to-query-list';
-import { IsNotBelow } from '../utils/is-not-below';
+import { IsNotBelow } from '../../common/decorators/is-not-below.decorator';
 import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 
 export class ListAccountTransactionsQueryDto extends PaginationQueryDto {

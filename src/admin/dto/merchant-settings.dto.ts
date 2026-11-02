@@ -20,7 +20,8 @@ export class MerchantSettingsDto {
   @ApiProperty({
     type: Number,
     nullable: true,
-    description: 'null takes DEAL_TTL_MINUTES',
+    description:
+      'minutes to pay a pay-in or pay-out of this merchant; null takes DEAL_TTL_MINUTES',
   })
   payInWindowMinutes: number | null;
 

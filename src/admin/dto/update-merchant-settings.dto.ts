@@ -36,7 +36,8 @@ export class UpdateMerchantSettingsDto {
     nullable: true,
     minimum: 1,
     maximum: 120,
-    description: 'null falls back to DEAL_TTL_MINUTES',
+    description:
+      'minutes to pay a pay-in or pay-out of this merchant; null falls back to DEAL_TTL_MINUTES',
   })
   @IsOptional()
   @IsInt()

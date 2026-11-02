@@ -4,8 +4,8 @@ import {
   ValidationArguments,
   ValidationOptions,
 } from 'class-validator';
-import { CALENDAR_DAY_PATTERN } from '../../common/utils/calendar-day-pattern';
-import { toDecimal } from '../../common/utils/to-decimal';
+import { CALENDAR_DAY_PATTERN } from '../utils/calendar-day-pattern';
+import { toDecimal } from '../utils/to-decimal';
 
 const DECIMAL_STRING = /^\d+(\.\d+)?$/;
 

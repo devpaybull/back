@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { plainToInstance, Type } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { IsNotBelow } from '../utils/is-not-below';
+import { IsNotBelow } from '../decorators/is-not-below.decorator';
 
 class NumberRange {
   from?: number;

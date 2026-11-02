@@ -1,5 +1,5 @@
 import { MerchantBalanceOperationDto } from '../dto/merchant-balance-operation.dto';
-import { csvField } from './csv-field';
+import { csvField } from '../../common/utils/csv-field';
 
 const HEADER = [
   'date',

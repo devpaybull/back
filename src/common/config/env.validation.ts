@@ -1,6 +1,7 @@
 import { IsCryptoAmount } from '../decorators/is-crypto-amount.decorator';
 import { IsFiatAmount } from '../decorators/is-fiat-amount.decorator';
 import { IsIanaTimeZone } from './is-iana-time-zone';
+import { DEFAULT_DEAL_TTL_MINUTES } from '../utils/default-deal-ttl-minutes';
 import { plainToInstance, Transform, Type } from 'class-transformer';
 import { utils } from 'tronweb';
 import {
@@ -218,10 +219,10 @@ export class EnvironmentVariables {
   @Min(0)
   PLATFORM_MIN_PERCENT: number;
 
-  @ToRequiredNumber()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
-  DEAL_TTL_MINUTES: number;
+  DEAL_TTL_MINUTES: number = DEFAULT_DEAL_TTL_MINUTES;
 
   @Type(() => Number)
   @IsInt()
@@ -499,6 +500,14 @@ export class EnvironmentVariables {
   @ToRequiredString()
   @IsCryptoAmount({ positive: true })
   WITHDRAWAL_DAILY_LIMIT_USDT: string;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  MERCHANT_WITHDRAWAL_MIN_USDT: string;
+
+  @ToRequiredString()
+  @IsCryptoAmount({ positive: true })
+  MERCHANT_WITHDRAWAL_DAILY_LIMIT_USDT: string;
 
   @ToRequiredNumber()
   @IsInt()

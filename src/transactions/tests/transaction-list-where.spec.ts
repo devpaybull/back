@@ -1,4 +1,10 @@
-import { Between, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import {
+  Between,
+  FindOperator,
+  In,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+} from 'typeorm';
 import { toFiat } from '../../common/utils/to-fiat';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
@@ -105,5 +111,22 @@ describe('transactionListWhere', () => {
       amountFiat: LessThanOrEqual(toFiat(300)),
       bankDetailsId: In([uuidOf(10)]),
     });
+  });
+
+  it('takes a list of statuses and a piece of the id, escaping the wildcards', () => {
+    const where = transactionListWhere({
+      page: 1,
+      limit: 20,
+      sortBy: TransactionSortField.CreatedAt,
+      sortOrder: SortOrder.Desc,
+      statuses: [TransactionStatus.Dispute, TransactionStatus.ManualReview],
+      idSearch: 'AB_1',
+    });
+
+    expect((where.status as FindOperator<unknown>).type).toBe('in');
+    expect((where.id as FindOperator<unknown>).type).toBe('raw');
+    expect((where.id as FindOperator<unknown>).objectLiteralParameters).toEqual(
+      { uuidPiece: '%ab\\_1%' },
+    );
   });
 });

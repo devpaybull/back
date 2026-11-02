@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import { Logger } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
@@ -49,6 +50,7 @@ const build = (mode = 'auto') => {
     findOne: jest.fn(async () => locked.row),
   };
   const queued: AccountTransaction[] = [];
+  const transactionFinds: Record<string, unknown>[] = [];
   const processing: AccountTransaction[] = [];
   const unlinked: WithdrawalAttempt[] = [];
   const attemptRepository = {
@@ -62,10 +64,14 @@ const build = (mode = 'auto') => {
             find: jest.fn(
               async (options: {
                 where: { status: AccountTransactionStatus };
-              }) =>
-                options.where.status === AccountTransactionStatus.Processing
+              }) => {
+                transactionFinds.push(options.where);
+
+                return options.where.status ===
+                  AccountTransactionStatus.Processing
                   ? processing
-                  : queued,
+                  : queued;
+              },
             ),
           }
         : attemptRepository,
@@ -118,6 +124,7 @@ const build = (mode = 'auto') => {
     claimed,
     locked,
     queued,
+    transactionFinds,
     processing,
     unlinked,
     withdrawals,
@@ -238,6 +245,23 @@ describe('PayoutQueueService', () => {
         txHash: 'b'.repeat(64),
         status: OutgoingTransferStatus.Broadcast,
       });
+    });
+
+    it('never queues a merchant’s request: an admin pays those by hand', async () => {
+      const built = build();
+      const row = withdrawal();
+      built.queued.push(row);
+      built.claimed.row = row;
+
+      await built.service.run();
+
+      expect(built.builder.andWhere).toHaveBeenCalledWith(
+        'entry.merchantId IS NULL',
+      );
+      const pending = built.transactionFinds.find(
+        (where) => where.status === AccountTransactionStatus.Pending,
+      );
+      expect(pending?.merchantId).toEqual(IsNull());
     });
 
     it('skips a row another instance claimed first', async () => {

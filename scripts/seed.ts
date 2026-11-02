@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { join } from 'path';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
+import { DEFAULT_DEAL_TTL_MINUTES } from '../src/common/utils/default-deal-ttl-minutes';
 import { loginOf } from '../src/common/utils/login-of';
 import { sha256Hex } from '../src/common/utils/sha256-hex';
 import { Role } from '../src/common/enums/role.enum';
@@ -96,11 +97,13 @@ const platformMinPercent = (): number => {
 };
 
 const dealTtlMinutes = (): number => {
-  const raw = process.env.DEAL_TTL_MINUTES ?? '';
+  const raw = process.env.DEAL_TTL_MINUTES;
+  if (raw === undefined) return DEFAULT_DEAL_TTL_MINUTES;
+
   const value = Number(raw);
 
   if (raw.trim() === '' || !Number.isInteger(value) || value < 1) {
-    throw new Error('DEAL_TTL_MINUTES must be set to seed deals');
+    throw new Error('DEAL_TTL_MINUTES must be a whole number of minutes ≥ 1');
   }
 
   return value;

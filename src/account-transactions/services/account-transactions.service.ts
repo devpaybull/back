@@ -9,6 +9,7 @@ import { toCrypto } from '../../common/utils/to-crypto';
 import { AccountTransaction } from '../entities/account-transaction.entity';
 import { DepositTransfer } from '../entities/deposit-transfer.entity';
 import { WithdrawalAttempt } from '../entities/withdrawal-attempt.entity';
+import { MerchantWithdrawalTotals } from '../types/merchant-withdrawal-totals';
 import { AccountTransactionListQuery } from '../types/account-transaction-list-query';
 import { AccountTransactionSortField } from '../types/account-transaction-sort-field.enum';
 import { AccountTransactionStats } from '../types/account-transaction-stats';
@@ -22,6 +23,12 @@ const FINAL_STATUSES = [
   AccountTransactionStatus.Completed,
   AccountTransactionStatus.Failed,
   AccountTransactionStatus.Canceled,
+];
+
+const MERCHANT_WITHDRAWAL_OPEN_STATUSES = [
+  AccountTransactionStatus.Pending,
+  AccountTransactionStatus.Processing,
+  AccountTransactionStatus.Failed,
 ];
 
 @Injectable()
@@ -175,6 +182,46 @@ export class AccountTransactionsService {
     };
   }
 
+  async merchantWithdrawalTotals(
+    merchantId: string,
+    from: Date | null,
+    to: Date,
+  ): Promise<MerchantWithdrawalTotals> {
+    const withdrawnSince = from
+      ? 'AND entry.completedAt >= :from AND entry.completedAt < :to'
+      : 'AND entry.completedAt < :to';
+    const row = await this.dataSource
+      .getRepository(AccountTransaction)
+      .createQueryBuilder('entry')
+      .select(
+        'COALESCE(SUM(entry.amount) FILTER (WHERE entry.status IN (:...open)), 0)',
+        'inProgressAmount',
+      )
+      .addSelect(
+        'COUNT(*) FILTER (WHERE entry.status IN (:...open))',
+        'inProgressCount',
+      )
+      .addSelect(
+        `COALESCE(SUM(entry.amount) FILTER (WHERE entry.status = :completed ${withdrawnSince}), 0)`,
+        'withdrawn',
+      )
+      .where('entry.type = :type', { type: AccountTransactionType.Withdrawal })
+      .andWhere('entry.merchantId = :merchantId', { merchantId })
+      .setParameters({
+        open: MERCHANT_WITHDRAWAL_OPEN_STATUSES,
+        completed: AccountTransactionStatus.Completed,
+        from,
+        to,
+      })
+      .getRawOne<Record<string, string>>();
+
+    return {
+      inProgressAmount: toCrypto(row?.inProgressAmount ?? '0'),
+      inProgressCount: Number(row?.inProgressCount ?? 0),
+      withdrawn: toCrypto(row?.withdrawn ?? '0'),
+    };
+  }
+
   async history(query: FinanceHistoryQuery): Promise<Page<AccountTransaction>> {
     const direction = query.sortOrder === SortOrder.Asc ? 'ASC' : 'DESC';
     const builder = this.historyFiltered(query)
@@ -291,6 +338,12 @@ export class AccountTransactionsService {
     if (query.userId)
       builder.andWhere('entry.userId = :userId', { userId: query.userId });
 
+    if (query.merchantId) {
+      builder.andWhere('entry.merchantId = :merchantId', {
+        merchantId: query.merchantId,
+      });
+    }
+
     if (query.createdFrom) {
       builder.andWhere('entry.createdAt >= :createdFrom', {
         createdFrom: query.createdFrom,
@@ -316,6 +369,12 @@ export class AccountTransactionsService {
           if (query.matchedUserIds?.length) {
             where.orWhere('entry.userId IN (:...matchedUserIds)', {
               matchedUserIds: query.matchedUserIds,
+            });
+          }
+
+          if (query.matchedMerchantIds?.length) {
+            where.orWhere('entry.merchantId IN (:...matchedMerchantIds)', {
+              matchedMerchantIds: query.matchedMerchantIds,
             });
           }
 

@@ -77,6 +77,8 @@ import { MerchantRowDto } from '../dto/merchant-row.dto';
 import { ReplaceMerchantMethodsDto } from '../dto/replace-merchant-methods.dto';
 import { UpdateMerchantDto } from '../dto/update-merchant.dto';
 import { MerchantVolumePeriod } from '../types/merchant-volume-period.enum';
+import { DayPeriod } from '../../common/enums/day-period.enum';
+import { dayPeriodRange } from '../../common/utils/day-period-range';
 
 const REGISTRY: readonly TransactionMethodDefinition[] = TRANSACTION_METHODS;
 
@@ -131,6 +133,13 @@ const compareKeys = (one: SortKey, other: SortKey): number => {
   }
 
   return one < other ? -1 : one > other ? 1 : 0;
+};
+
+const VOLUME_DAY_PERIODS: Record<MerchantVolumePeriod, DayPeriod> = {
+  [MerchantVolumePeriod.Today]: DayPeriod.Today,
+  [MerchantVolumePeriod.Yesterday]: DayPeriod.Yesterday,
+  [MerchantVolumePeriod.Last7Days]: DayPeriod.Last7Days,
+  [MerchantVolumePeriod.Month]: DayPeriod.Month,
 };
 
 @ApiTags('Admin · Merchants')
@@ -490,46 +499,17 @@ export class AdminMerchantsController {
     periodFrom?: string;
     periodTo?: string;
   }): { from: Date; to: Date } {
-    const custom =
-      query.periodFrom !== undefined || query.periodTo !== undefined;
+    const range = dayPeriodRange(
+      {
+        period: query.period && VOLUME_DAY_PERIODS[query.period],
+        periodFrom: query.periodFrom,
+        periodTo: query.periodTo,
+      },
+      DayPeriod.Today,
+      this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
+    );
 
-    if (custom && query.period !== undefined) {
-      throw new BadRequestException(
-        'period and periodFrom/periodTo cannot be used together',
-      );
-    }
-
-    if (
-      custom &&
-      (query.periodFrom === undefined || query.periodTo === undefined)
-    ) {
-      throw new BadRequestException(
-        'periodFrom and periodTo are given together',
-      );
-    }
-
-    const timeZone = this.config.getOrThrow<string>('BUSINESS_TIMEZONE');
-    const today = calendarDateIn(new Date(), timeZone);
-    const tomorrow = addCalendarDays(today, 1);
-    const [first, afterLast] = custom
-      ? [
-          query.periodFrom as string,
-          addCalendarDays(query.periodTo as string, 1),
-        ]
-      : {
-          [MerchantVolumePeriod.Today]: [today, tomorrow],
-          [MerchantVolumePeriod.Yesterday]: [addCalendarDays(today, -1), today],
-          [MerchantVolumePeriod.Last7Days]: [
-            addCalendarDays(today, -6),
-            tomorrow,
-          ],
-          [MerchantVolumePeriod.Month]: [`${today.slice(0, 8)}01`, tomorrow],
-        }[query.period ?? MerchantVolumePeriod.Today];
-
-    return {
-      from: zonedMidnight(first, timeZone),
-      to: zonedMidnight(afterLast, timeZone),
-    };
+    return { from: range.from as Date, to: range.to };
   }
 
   private async rowsOf(

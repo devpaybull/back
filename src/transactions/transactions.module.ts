@@ -19,6 +19,7 @@ import { BankDetailsTurnoverService } from './services/bank-details-turnover.ser
 import { CounterpartyDealStatsService } from './services/counterparty-deal-stats.service';
 import { DealExpiryService } from './services/deal-expiry.service';
 import { MerchantBalanceService } from './services/merchant-balance.service';
+import { MerchantDealsService } from './services/merchant-deals.service';
 import { MerchantStatsService } from './services/merchant-stats.service';
 import { MerchantVolumeService } from './services/merchant-volume.service';
 import { NightStopService } from './services/night-stop.service';
@@ -54,6 +55,7 @@ import { WalletService } from './services/wallet.service';
     MerchantBalanceService,
     MerchantVolumeService,
     MerchantStatsService,
+    MerchantDealsService,
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,
@@ -66,6 +68,7 @@ import { WalletService } from './services/wallet.service';
     MerchantBalanceService,
     MerchantVolumeService,
     MerchantStatsService,
+    MerchantDealsService,
     TransactionService,
     NightStopService,
     BankDetailsTurnoverService,

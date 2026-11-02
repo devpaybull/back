@@ -24,7 +24,13 @@ describe('UsersController', () => {
   const directory = { findAuthenticatableById: jest.fn() };
   const profile = { editOwnIdentifiers: jest.fn() };
   const emailVerification = { confirm: jest.fn() };
-  const settings = { ensure: jest.fn() };
+  const settings = {
+    ensure: jest.fn(async (userId: string) => ({ userId })),
+    findOrDefaults: jest.fn(async (userId: string) => ({ userId })),
+    insurancePayInMinOf: jest.fn(() => null),
+    insurancePayOutMinOf: jest.fn(() => null),
+    nightStopThresholdOf: jest.fn(() => null),
+  };
 
   const caller = (overrides: Partial<AuthenticatedUser> = {}) => ({
     id: uuidOf(7),
@@ -168,6 +174,28 @@ describe('UsersController', () => {
 
     await expect(controller.me(caller())).rejects.toThrow(
       UnauthorizedException,
+    );
+  });
+
+  describe('trader settings of the signed-in account', () => {
+    it.each([Role.Trader, Role.LeadTrader])(
+      'creates the row of a %s on first read',
+      async (role) => {
+        await controller.traderSettings(caller({ role }));
+
+        expect(settings.ensure).toHaveBeenCalledWith(uuidOf(7));
+        expect(settings.findOrDefaults).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([Role.Merchant, Role.MerchantSupport, Role.Admin])(
+      'answers the defaults to a %s without writing a row',
+      async (role) => {
+        await controller.traderSettings(caller({ role }));
+
+        expect(settings.findOrDefaults).toHaveBeenCalledWith(uuidOf(7));
+        expect(settings.ensure).not.toHaveBeenCalled();
+      },
     );
   });
 

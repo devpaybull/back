@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { Crypto } from '../../common/types/crypto';
 import { cryptoColumn } from '../../common/utils/crypto-column';
+import { Merchant } from '../../merchants/entities/merchant.entity';
 import { TronAddress } from '../../tron/entities/tron-address.entity';
 import { User } from '../../users/entities/user.entity';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
@@ -30,6 +31,10 @@ import { AccountTransactionType } from '../types/account-transaction-type.enum';
 @Check(
   'account_transactions_deposit_fields',
   `"type" = 'deposit' OR ("addressId" IS NULL AND "expiresAt" IS NULL AND "amountReceived" IS NULL)`,
+)
+@Check(
+  'account_transactions_merchant_only_on_withdrawal',
+  `"type" = 'withdrawal' OR "merchantId" IS NULL`,
 )
 @Check(
   'account_transactions_withdrawal_address',
@@ -59,6 +64,14 @@ export class AccountTransaction {
   @Index()
   @Column({ type: 'uuid' })
   userId: string;
+
+  @ManyToOne(() => Merchant, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'merchantId' })
+  merchant: Merchant | null;
+
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  merchantId: string | null;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'counterpartyUserId' })

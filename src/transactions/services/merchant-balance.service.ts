@@ -29,15 +29,23 @@ import { MerchantBalanceOperationFilter } from '../types/merchant-balance-operat
 import { MerchantBalanceOperationListQuery } from '../types/merchant-balance-operation-list-query';
 import { MerchantBalanceOperationType } from '../types/merchant-balance-operation-type.enum';
 import { MerchantBalanceState } from '../types/merchant-balance-state';
+import { uuidTextContains } from '../utils/uuid-text-contains';
 
 interface Movement {
   type: MerchantBalanceOperationType;
   balanceDelta: Decimal;
   escrowDelta: Decimal;
+  withdrawalReservedDelta?: Decimal;
   transactionId: string | null;
+  accountTransactionId?: number | null;
   comment?: string | null;
   actorUserId?: string | null;
 }
+
+const WITHDRAWAL_RESOLVING_TYPES = [
+  MerchantBalanceOperationType.Withdrawal,
+  MerchantBalanceOperationType.WithdrawalRelease,
+];
 
 const RESOLVING_TYPES = [
   MerchantBalanceOperationType.DealPayOut,
@@ -64,6 +72,11 @@ const operationWhere = (
     merchantBalanceId,
     ...(createdAt ? { createdAt } : {}),
     ...(filter.types?.length ? { type: In(filter.types) } : {}),
+    ...(filter.transactionIdSearch
+      ? {
+          transactionId: uuidTextContains(filter.transactionIdSearch),
+        }
+      : {}),
   };
 };
 
@@ -101,7 +114,11 @@ export class MerchantBalanceService {
 
         return [
           merchantId,
-          { balance: row?.balance ?? ZERO, escrow: row?.escrow ?? ZERO },
+          {
+            balance: row?.balance ?? ZERO,
+            escrow: row?.escrow ?? ZERO,
+            withdrawalReserved: row?.withdrawalReserved ?? ZERO,
+          },
         ];
       }),
     );
@@ -195,6 +212,78 @@ export class MerchantBalanceService {
       balanceDelta: held,
       escrowDelta: held.neg(),
       transactionId,
+    });
+  }
+
+  holdWithdrawalWithin(
+    manager: EntityManager,
+    merchantId: string,
+    amount: Crypto,
+    accountTransactionId: number,
+    actorUserId: string,
+    allowsOverdraft: () => Promise<boolean>,
+  ): Promise<MerchantBalanceOperation> {
+    return this.moveWithin(
+      manager,
+      merchantId,
+      {
+        type: MerchantBalanceOperationType.WithdrawalHold,
+        balanceDelta: amount.neg(),
+        escrowDelta: ZERO,
+        withdrawalReservedDelta: amount,
+        transactionId: null,
+        accountTransactionId,
+        actorUserId,
+      },
+      async (balance) => {
+        if (balance.balance.gte(amount)) return;
+
+        if (!(await allowsOverdraft())) {
+          throw new ConflictException(
+            'The merchant balance does not cover the withdrawal and its fee',
+          );
+        }
+      },
+    );
+  }
+
+  async settleWithdrawalWithin(
+    manager: EntityManager,
+    merchantId: string,
+    accountTransactionId: number,
+  ): Promise<MerchantBalanceOperation | null> {
+    const held = await this.heldForWithdrawal(manager, accountTransactionId);
+
+    if (!held) return null;
+
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.Withdrawal,
+      balanceDelta: ZERO,
+      escrowDelta: ZERO,
+      withdrawalReservedDelta: held.neg(),
+      transactionId: null,
+      accountTransactionId,
+    });
+  }
+
+  async releaseWithdrawalWithin(
+    manager: EntityManager,
+    merchantId: string,
+    accountTransactionId: number,
+    actorUserId: string,
+  ): Promise<MerchantBalanceOperation | null> {
+    const held = await this.heldForWithdrawal(manager, accountTransactionId);
+
+    if (!held) return null;
+
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.WithdrawalRelease,
+      balanceDelta: held,
+      escrowDelta: ZERO,
+      withdrawalReservedDelta: held.neg(),
+      transactionId: null,
+      accountTransactionId,
+      actorUserId,
     });
   }
 
@@ -313,6 +402,36 @@ export class MerchantBalanceService {
     return hold ? toCrypto(hold.escrowAfter.minus(hold.escrowBefore)) : null;
   }
 
+  private async heldForWithdrawal(
+    manager: EntityManager,
+    accountTransactionId: number,
+  ): Promise<Crypto | null> {
+    const operations = await manager.find(MerchantBalanceOperation, {
+      where: {
+        accountTransactionId,
+        type: In([
+          MerchantBalanceOperationType.WithdrawalHold,
+          ...WITHDRAWAL_RESOLVING_TYPES,
+        ]),
+      },
+    });
+    const hold = operations.find(
+      (operation) =>
+        operation.type === MerchantBalanceOperationType.WithdrawalHold,
+    );
+
+    if (
+      !hold ||
+      operations.some((operation) =>
+        WITHDRAWAL_RESOLVING_TYPES.includes(operation.type),
+      )
+    ) {
+      return null;
+    }
+
+    return toCrypto(hold.amount.neg());
+  }
+
   private async moveWithin(
     manager: EntityManager,
     merchantId: string,
@@ -341,6 +460,9 @@ export class MerchantBalanceService {
 
     balance.balance = after;
     balance.escrow = escrowAfter;
+    balance.withdrawalReserved = roundCrypto(
+      balance.withdrawalReserved.plus(movement.withdrawalReservedDelta ?? ZERO),
+    );
     await manager.save(balance);
 
     return manager.save(
@@ -348,6 +470,7 @@ export class MerchantBalanceService {
         merchantBalanceId: balance.id,
         type: movement.type,
         transactionId: movement.transactionId,
+        accountTransactionId: movement.accountTransactionId ?? null,
         amount: roundCrypto(after.minus(before)),
         balanceBefore: before,
         balanceAfter: after,

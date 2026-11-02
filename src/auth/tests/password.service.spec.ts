@@ -229,6 +229,24 @@ describe('PasswordService', () => {
       expect(refreshTokens.save).not.toHaveBeenCalled();
     });
 
+    it('writes a merchant’s password change into its activity feed', async () => {
+      const merchant = {
+        ...activeUser,
+        role: Role.Merchant,
+      } as typeof activeUser;
+      userDirectory.findAuthenticatableById.mockResolvedValue(merchant);
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userAdministration.update.mockResolvedValue(merchant);
+
+      await service.changePassword(uuidOf(1), change);
+
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: uuidOf(1),
+        targetUserId: uuidOf(1),
+        action: 'merchant_activity.password_changed',
+      });
+    });
+
     it('refuses an account that is no longer authenticatable', async () => {
       userDirectory.findAuthenticatableById.mockResolvedValue(null);
 

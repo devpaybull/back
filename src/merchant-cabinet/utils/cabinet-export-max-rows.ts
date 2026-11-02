@@ -1,0 +1,1 @@
+export const CABINET_EXPORT_MAX_ROWS = 100000;

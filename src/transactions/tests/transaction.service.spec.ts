@@ -83,6 +83,7 @@ const build = () => {
   };
   const merchantSettings = {
     allowsOverdraftWithin: jest.fn(async () => false),
+    payInWindowMinutesOf: jest.fn(async (): Promise<number | null> => null),
   };
   const rates = {
     resolveLeadPercents: jest.fn(
@@ -917,6 +918,48 @@ describe('TransactionService.createDeal, the deadline', () => {
       );
     },
   );
+
+  it.each([TransactionKind.PayIn, TransactionKind.PayOut] as const)(
+    'gives a merchant %s deal the merchant’s own payment window',
+    async (kind) => {
+      const { service, merchantSettings, config } = build();
+      merchantSettings.payInWindowMinutesOf.mockResolvedValueOnce(45);
+
+      const created = await service.createDeal(input({ kind }));
+
+      expect(merchantSettings.payInWindowMinutesOf).toHaveBeenCalledWith(
+        uuidOf(3),
+      );
+      expect(config.getOrThrow).not.toHaveBeenCalledWith('DEAL_TTL_MINUTES');
+      expect(created.expiresAt).toEqual(new Date(NOW.getTime() + 45 * 60_000));
+    },
+  );
+
+  it('falls back to DEAL_TTL_MINUTES when the merchant has no window', async () => {
+    const { service, merchantSettings } = build();
+
+    const created = await service.createDeal(input());
+
+    expect(merchantSettings.payInWindowMinutesOf).toHaveBeenCalledWith(
+      uuidOf(3),
+    );
+    expect(created.expiresAt).toEqual(
+      new Date(NOW.getTime() + DEAL_TTL_MINUTES * 60_000),
+    );
+  });
+
+  it('does not ask for a window when the deal has no merchant', async () => {
+    const { service, merchantSettings } = build();
+
+    const created = await service.createDeal(
+      input({ merchantId: null as never }),
+    );
+
+    expect(merchantSettings.payInWindowMinutesOf).not.toHaveBeenCalled();
+    expect(created.expiresAt).toEqual(
+      new Date(NOW.getTime() + DEAL_TTL_MINUTES * 60_000),
+    );
+  });
 
   it('fails before reserving anything when DEAL_TTL_MINUTES is missing', async () => {
     const { service, config, wallets } = build();

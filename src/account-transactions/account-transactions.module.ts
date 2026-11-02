@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { MerchantsModule } from '../merchants/merchants.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { TronModule } from '../tron/tron.module';
 import { UsersModule } from '../users/users.module';
@@ -29,6 +30,7 @@ import { WithdrawalsService } from './services/withdrawals.service';
       WithdrawalQuote,
     ]),
     AuditModule,
+    MerchantsModule,
     TransactionsModule,
     TronModule,
     UsersModule,

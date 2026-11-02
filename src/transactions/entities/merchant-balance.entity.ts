@@ -31,6 +31,9 @@ export class MerchantBalance {
   @Column(cryptoColumn({ default: 0 }))
   escrow: Crypto;
 
+  @Column(cryptoColumn({ default: 0 }))
+  withdrawalReserved: Crypto;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

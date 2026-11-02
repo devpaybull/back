@@ -9,6 +9,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomInt } from 'crypto';
 import { DataSource, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
+import { MerchantActivityAction } from '../../audit/types/merchant-activity-action.enum';
 import { RecordAuditEntry } from '../../audit/types/record-audit-entry';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { AccountMailService } from '../../mail/services/account-mail.service';
@@ -69,7 +70,14 @@ export class PasswordService {
 
     await this.replacePassword(userId, { password: dto.newPassword });
 
-    return this.sessions.issueSession(user);
+    const session = await this.sessions.issueSession(user);
+
+    await this.sessions.recordMerchantActivity(
+      user,
+      MerchantActivityAction.PasswordChanged,
+    );
+
+    return session;
   }
 
   async issueGeneratedPassword(

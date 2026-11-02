@@ -5,6 +5,8 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, IsNull, Not, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
+import { MerchantActivityAction } from '../../audit/types/merchant-activity-action.enum';
+import { MERCHANT_SIDE_ROLES } from '../../common/utils/merchant-side-roles';
 import { TokenType } from '../../common/types/token';
 import { sha256Hex } from '../../common/utils/sha256-hex';
 import { User } from '../../users/entities/user.entity';
@@ -56,7 +58,24 @@ export class SessionService {
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
 
-    return this.issueSession(user, context);
+    const session = await this.issueSession(user, context);
+
+    await this.recordMerchantActivity(user, MerchantActivityAction.Login);
+
+    return session;
+  }
+
+  async recordMerchantActivity(
+    user: Pick<User, 'id' | 'role'>,
+    action: MerchantActivityAction,
+  ): Promise<void> {
+    if (!MERCHANT_SIDE_ROLES.includes(user.role)) return;
+
+    await this.audit.record({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action,
+    });
   }
 
   async refresh(refreshToken: string): Promise<IssuedSession> {
@@ -103,10 +122,22 @@ export class SessionService {
   async logout(refreshToken: string): Promise<void> {
     if (!refreshToken) return;
 
-    await this.refreshTokens.update(
-      { tokenHash: sha256Hex(refreshToken), revokedAt: IsNull() },
+    const tokenHash = sha256Hex(refreshToken);
+    const live = await this.refreshTokens.findOne({
+      where: { tokenHash, revokedAt: IsNull() },
+    });
+    const revoked = await this.refreshTokens.update(
+      { tokenHash, revokedAt: IsNull() },
       { revokedAt: new Date() },
     );
+
+    if (!live || revoked?.affected !== 1 || live.impersonatedByUserId) return;
+
+    const user = await this.directory.findById(live.userId);
+
+    if (user) {
+      await this.recordMerchantActivity(user, MerchantActivityAction.Logout);
+    }
   }
 
   async revokeAllSessions(

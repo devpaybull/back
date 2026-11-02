@@ -189,11 +189,14 @@ export class TransactionService {
     const holdsMerchant =
       input.kind === TransactionKind.PayOut && Boolean(input.merchantId);
     const status = startStatus(input.kind);
+    const merchantWindowMinutes = input.merchantId
+      ? await this.merchantSettings.payInWindowMinutesOf(input.merchantId)
+      : null;
+    const ttlMinutes =
+      merchantWindowMinutes ??
+      this.config.getOrThrow<number>('DEAL_TTL_MINUTES');
     const createdAt = new Date();
-    const expiresAt = new Date(
-      createdAt.getTime() +
-        this.config.getOrThrow<number>('DEAL_TTL_MINUTES') * MINUTE_MS,
-    );
+    const expiresAt = new Date(createdAt.getTime() + ttlMinutes * MINUTE_MS);
 
     return this.dataSource.transaction(async (manager) => {
       if (input.kind === TransactionKind.PayIn) {

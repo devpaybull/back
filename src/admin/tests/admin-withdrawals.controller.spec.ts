@@ -108,15 +108,24 @@ const build = (mode = 'auto') => {
     ]),
     findById: jest.fn(async () => ({ id: TRADER, role: Role.Trader }) as User),
   };
+  const merchants = {
+    findIdsMatching: jest.fn(async () => [MERCHANT]),
+    findByIds: jest.fn(async (ids: string[]) =>
+      ids.includes(MERCHANT) ? [{ id: MERCHANT, name: 'Casino' }] : [],
+    ),
+  };
   const controller = new AdminWithdrawalsController(
     config as never,
     operations as never,
     withdrawals as never,
     directory as never,
+    merchants as never,
   );
 
-  return { controller, operations, withdrawals, directory };
+  return { controller, operations, withdrawals, directory, merchants };
 };
+
+const MERCHANT = '00000000-0000-4000-8000-0000000000aa';
 
 describe('AdminWithdrawalsController', () => {
   it('is for admin and superadmin, and writes only on complete-manually and reject', () => {
@@ -156,6 +165,41 @@ describe('AdminWithdrawalsController', () => {
       fee: '0.250000',
       actions: { canPayManually: true, canReject: true },
     });
+  });
+
+  it('shows the merchant of a merchant request and asks payability per row', async () => {
+    const { controller, operations, withdrawals } = build();
+    operations.list.mockResolvedValue(
+      toPage([[withdrawal({ merchantId: MERCHANT })], 1], {
+        page: 1,
+        limit: 20,
+      }),
+    );
+
+    const page = await controller.list(query());
+
+    expect(page.items[0].merchant).toEqual({ id: MERCHANT, name: 'Casino' });
+    expect(withdrawals.payableByHand).toHaveBeenCalledWith(
+      expect.objectContaining({ merchantId: MERCHANT }),
+    );
+  });
+
+  it('filters by merchant and finds merchants by name in the search', async () => {
+    const { controller, operations, merchants } = build();
+
+    await controller.list({
+      ...query(),
+      merchantId: MERCHANT,
+      search: 'casino',
+    } as never);
+
+    expect(merchants.findIdsMatching).toHaveBeenCalledWith('casino');
+    expect(operations.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId: MERCHANT,
+        matchedMerchantIds: [MERCHANT],
+      }),
+    );
   });
 
   describe('stats', () => {

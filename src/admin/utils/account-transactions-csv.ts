@@ -1,4 +1,4 @@
-import { csvField } from './csv-field';
+import { csvField } from '../../common/utils/csv-field';
 
 export interface AccountTransactionCsvRow {
   id: number;

@@ -12,7 +12,7 @@ import { CALENDAR_DAY_PATTERN } from '../../common/utils/calendar-day-pattern';
 import { MerchantSortField } from '../../merchants/types/merchant-sort-field.enum';
 import { MerchantStatus } from '../../merchants/types/merchant-status.enum';
 import { MerchantVolumePeriod } from '../types/merchant-volume-period.enum';
-import { IsNotBelow } from '../utils/is-not-below';
+import { IsNotBelow } from '../../common/decorators/is-not-below.decorator';
 
 const asBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true') return true;

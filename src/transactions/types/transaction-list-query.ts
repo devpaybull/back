@@ -12,6 +12,8 @@ export interface TransactionListQuery {
   sortOrder: SortOrder;
   kind?: TransactionKind;
   status?: TransactionStatus;
+  statuses?: TransactionStatus[];
+  idSearch?: string;
   method?: TransactionMethod;
   traderUserId?: string;
   merchantId?: string;

@@ -79,6 +79,7 @@ export class PayoutQueueService implements OnModuleInit, OnModuleDestroy {
         where: {
           type: AccountTransactionType.Withdrawal,
           status: AccountTransactionStatus.Pending,
+          merchantId: IsNull(),
         },
         order: { createdAt: 'ASC', id: 'ASC' },
         take: this.config.get<number>('PAYOUT_BATCH_SIZE', 10),
@@ -158,6 +159,7 @@ export class PayoutQueueService implements OnModuleInit, OnModuleDestroy {
         .andWhere('entry.status = :status', {
           status: AccountTransactionStatus.Pending,
         })
+        .andWhere('entry.merchantId IS NULL')
         .getOne();
 
       if (!row) return null;

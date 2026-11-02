@@ -559,3 +559,91 @@ describe('AccountTransactionsService history', () => {
     expect(builders[0].calls).toContainEqual(['groupBy', 'entry.type']);
   });
 });
+
+describe('AccountTransactionsService — merchant withdrawal requests', () => {
+  const MERCHANT = uuidOf(30);
+
+  it('filters by merchant and finds merchants by name in the search', async () => {
+    const { service, builders } = build([{ getManyAndCount: [[], 0] }]);
+
+    await service.list(
+      query({
+        type: AccountTransactionType.Withdrawal,
+        merchantId: MERCHANT,
+        search: 'casino',
+        matchedMerchantIds: [MERCHANT],
+      }),
+    );
+
+    expect(builders[0].calls).toContainEqual([
+      'andWhere',
+      'entry.merchantId = :merchantId',
+      { merchantId: MERCHANT },
+    ]);
+    const bracket = builders[0].calls.find(
+      ([method, condition]) =>
+        method === 'andWhere' && condition instanceof Brackets,
+    )!;
+    expect(bracketCalls(bracket[1])).toContainEqual([
+      'orWhere',
+      'entry.merchantId IN (:...matchedMerchantIds)',
+      { matchedMerchantIds: [MERCHANT] },
+    ]);
+  });
+
+  it('sums the open requests and the paid ones of the period in one query', async () => {
+    const { service, builders } = build([
+      {
+        getRawOne: {
+          inProgressAmount: '500.500000',
+          inProgressCount: '2',
+          withdrawn: '300.000000',
+        },
+      },
+    ]);
+    const from = new Date('2026-10-01T00:00:00Z');
+    const to = new Date('2026-11-01T00:00:00Z');
+
+    const totals = await service.merchantWithdrawalTotals(MERCHANT, from, to);
+
+    expect(totals).toEqual({
+      inProgressAmount: toCrypto('500.5'),
+      inProgressCount: 2,
+      withdrawn: toCrypto(300),
+    });
+    expect(builders[0].calls).toContainEqual([
+      'andWhere',
+      'entry.merchantId = :merchantId',
+      { merchantId: MERCHANT },
+    ]);
+    expect(builders[0].calls).toContainEqual([
+      'setParameters',
+      {
+        open: [
+          AccountTransactionStatus.Pending,
+          AccountTransactionStatus.Processing,
+          AccountTransactionStatus.Failed,
+        ],
+        completed: AccountTransactionStatus.Completed,
+        from,
+        to,
+      },
+    ]);
+  });
+
+  it('has no lower bound on the paid sum for all time', async () => {
+    const { service, builders } = build([{ getRawOne: undefined }]);
+
+    const totals = await service.merchantWithdrawalTotals(
+      MERCHANT,
+      null,
+      new Date('2026-11-01T00:00:00Z'),
+    );
+
+    const withdrawn = builders[0].calls.find(
+      ([method, , alias]) => method === 'addSelect' && alias === 'withdrawn',
+    )!;
+    expect(withdrawn[1]).not.toContain(':from');
+    expect(totals.inProgressCount).toBe(0);
+  });
+});

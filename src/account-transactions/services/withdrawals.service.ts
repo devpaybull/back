@@ -13,11 +13,14 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, MoreThan, Not } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
+import { MerchantActivityAction } from '../../audit/types/merchant-activity-action.enum';
 import { Crypto } from '../../common/types/crypto';
 import { formatCrypto } from '../../common/utils/format-crypto';
 import { roundCrypto } from '../../common/utils/round-crypto';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { toDecimal } from '../../common/utils/to-decimal';
+import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
+import { MerchantBalanceService } from '../../transactions/services/merchant-balance.service';
 import { WalletService } from '../../transactions/services/wallet.service';
 import { TronOutgoingTransfer } from '../../tron/entities/tron-outgoing-transfer.entity';
 import { EnergyManager } from '../../tron/services/energy-manager.service';
@@ -39,6 +42,7 @@ import { AccountTransactionStatus } from '../types/account-transaction-status.en
 import { AccountTransactionStatusReason } from '../types/account-transaction-status-reason.enum';
 import { AccountTransactionType } from '../types/account-transaction-type.enum';
 import { FeeChangedException } from '../types/fee-changed.error';
+import { MerchantWithdrawalRequestInput } from '../types/merchant-withdrawal-request-input';
 import { WithdrawalQuoteResult } from '../types/withdrawal-quote-result';
 import { WithdrawalRequestInput } from '../types/withdrawal-request-input';
 import { WithdrawalVerification } from '../types/withdrawal-verification';
@@ -66,6 +70,8 @@ export class WithdrawalsService {
     private readonly credentials: UserCredentialsService,
     private readonly directory: UserDirectoryService,
     private readonly transfers: TransfersService,
+    private readonly merchantBalances: MerchantBalanceService,
+    private readonly merchantSettings: MerchantSettingsService,
     tracker: TronConfirmationTracker,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {
@@ -122,38 +128,7 @@ export class WithdrawalsService {
     input: WithdrawalRequestInput,
     now = new Date(),
   ): Promise<AccountTransaction> {
-    const user = await this.directory.requireById(input.userId);
-
-    const code = await this.credentials.spendWithdrawalTotp(
-      user,
-      input.totp,
-      {
-        maxFailures: this.config.get<number>('WITHDRAWAL_TOTP_MAX_FAILURES', 5),
-        windowMinutes: this.config.get<number>(
-          'WITHDRAWAL_TOTP_LOCK_MINUTES',
-          15,
-        ),
-      },
-      now,
-    );
-
-    if (code !== 'accepted') {
-      await this.audit.record({
-        actorUserId: input.userId,
-        targetUserId: input.userId,
-        action: 'withdrawal.totp_refused',
-        metadata: { locked: code === 'locked' },
-      });
-
-      if (code === 'locked') {
-        throw new HttpException(
-          'Too many wrong codes; withdrawals are locked for a while',
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-
-      throw new UnauthorizedException(INVALID_TOTP);
-    }
+    const user = await this.acceptTotp(input, now);
 
     this.assertSecurityHoldOver(
       [user.passwordChangedAt, user.twoFactorResetAt],
@@ -219,6 +194,165 @@ export class WithdrawalsService {
 
       return row;
     });
+  }
+
+  async quoteForMerchant(
+    merchantId: string,
+    userId: string,
+    address: string,
+    amount: Crypto,
+    now = new Date(),
+  ): Promise<WithdrawalQuoteResult> {
+    await this.assertMerchantDestination(address);
+
+    const [state] = (
+      await this.merchantBalances.statesByMerchant([merchantId])
+    ).values();
+    const fee = await this.energy.quoteUsdtTransferFee(
+      await this.keyring.hotAddress(),
+      address,
+      amount,
+    );
+    const expiresAt = new Date(
+      now.getTime() +
+        this.config.getOrThrow<number>('WITHDRAWAL_QUOTE_TTL_SECONDS') * 1000,
+    );
+
+    await this.dataSource.getRepository(WithdrawalQuote).save({
+      userId,
+      address,
+      amount,
+      fee: fee.usdt,
+      feeTrx: fee.trx,
+      expiresAt,
+    });
+
+    const max = roundCrypto(state.balance.minus(fee.usdt));
+
+    return {
+      available: state.balance,
+      fee,
+      maxAmount: max.isNegative() ? toCrypto(0) : max,
+      internal: false,
+      expiresAt,
+    };
+  }
+
+  async requestForMerchant(
+    input: MerchantWithdrawalRequestInput,
+    now = new Date(),
+  ): Promise<AccountTransaction> {
+    const user = await this.acceptTotp(input, now);
+
+    this.assertSecurityHoldOver(
+      [user.passwordChangedAt, user.twoFactorResetAt],
+      now,
+    );
+    await this.assertMerchantDestination(input.address);
+
+    const minimum = toCrypto(
+      this.config.getOrThrow<string>('MERCHANT_WITHDRAWAL_MIN_USDT'),
+    );
+
+    if (input.amount.lt(minimum)) {
+      throw new BadRequestException(
+        `The amount is below the minimum withdrawal of ${formatCrypto(minimum)} USDT`,
+      );
+    }
+
+    const fee = await this.liveMerchantFee(input, now);
+
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `merchant-withdrawals:${input.merchantId}`,
+      ]);
+      await this.assertMerchantDailyLimit(manager, input, now);
+
+      const row = await manager.save(
+        manager.create(AccountTransaction, {
+          type: AccountTransactionType.Withdrawal,
+          status: AccountTransactionStatus.Pending,
+          statusReason: null,
+          userId: input.userId,
+          merchantId: input.merchantId,
+          amount: input.amount,
+          fee,
+          address: input.address,
+          paidManually: false,
+        }),
+      );
+
+      await this.merchantBalances.holdWithdrawalWithin(
+        manager,
+        input.merchantId,
+        roundCrypto(input.amount.plus(fee)),
+        row.id,
+        input.userId,
+        () =>
+          this.merchantSettings.allowsOverdraftWithin(
+            manager,
+            input.merchantId,
+          ),
+      );
+
+      const metadata = {
+        accountTransactionId: row.id,
+        merchantId: input.merchantId,
+        address: input.address,
+        amount: formatCrypto(input.amount),
+        fee: formatCrypto(fee),
+      };
+
+      await this.audit.record(
+        {
+          actorUserId: input.userId,
+          targetUserId: input.userId,
+          action: 'withdrawal.requested',
+          metadata,
+        },
+        manager,
+      );
+      await this.audit.record(
+        {
+          actorUserId: input.userId,
+          targetUserId: input.userId,
+          action: MerchantActivityAction.WithdrawalRequested,
+          metadata,
+        },
+        manager,
+      );
+
+      return row;
+    });
+  }
+
+  cancelOwnForMerchant(
+    id: number,
+    merchantId: string,
+    userId: string,
+  ): Promise<AccountTransaction> {
+    return this.release(
+      id,
+      [AccountTransactionStatus.Pending],
+      AccountTransactionStatusReason.CanceledByUser,
+      userId,
+      { merchantId },
+    );
+  }
+
+  async findOwnForMerchant(
+    id: number,
+    merchantId: string,
+  ): Promise<AccountTransaction> {
+    const row = await this.dataSource
+      .getRepository(AccountTransaction)
+      .findOne({
+        where: { id, merchantId, type: AccountTransactionType.Withdrawal },
+      });
+
+    if (!row) throw new NotFoundException('Withdrawal not found');
+
+    return row;
   }
 
   async findById(id: number): Promise<AccountTransaction | null> {
@@ -386,13 +520,21 @@ export class WithdrawalsService {
     row: AccountTransaction,
     txHash: string | null,
   ): Promise<AccountTransaction> {
-    await this.wallets.settleWithdrawalWithin(
-      manager,
-      row.userId,
-      row.amount!,
-      row.fee ?? toCrypto(0),
-      row.id,
-    );
+    if (row.merchantId) {
+      await this.merchantBalances.settleWithdrawalWithin(
+        manager,
+        row.merchantId,
+        row.id,
+      );
+    } else {
+      await this.wallets.settleWithdrawalWithin(
+        manager,
+        row.userId,
+        row.amount!,
+        row.fee ?? toCrypto(0),
+        row.id,
+      );
+    }
     row.status = AccountTransactionStatus.Completed;
     row.statusReason = null;
     row.txHash = txHash;
@@ -418,7 +560,9 @@ export class WithdrawalsService {
       {
         actorUserId: row.actorUserId,
         targetUserId: row.userId,
-        action: ActivityAction.WithdrawalCompleted,
+        action: row.merchantId
+          ? MerchantActivityAction.WithdrawalCompleted
+          : ActivityAction.WithdrawalCompleted,
         metadata,
       },
       manager,
@@ -432,7 +576,7 @@ export class WithdrawalsService {
     from: AccountTransactionStatus[],
     reason: AccountTransactionStatusReason,
     actorUserId: string,
-    scope: { userId?: string },
+    scope: { userId?: string; merchantId?: string },
     comment: string | null = null,
   ): Promise<AccountTransaction> {
     return this.dataSource.transaction(async (manager) => {
@@ -449,11 +593,20 @@ export class WithdrawalsService {
         );
       }
 
-      await this.wallets.releaseEscrowWithin(
-        manager,
-        row.userId,
-        roundCrypto(row.amount!.plus(row.fee ?? toCrypto(0))),
-      );
+      if (row.merchantId) {
+        await this.merchantBalances.releaseWithdrawalWithin(
+          manager,
+          row.merchantId,
+          row.id,
+          actorUserId,
+        );
+      } else {
+        await this.wallets.releaseEscrowWithin(
+          manager,
+          row.userId,
+          roundCrypto(row.amount!.plus(row.fee ?? toCrypto(0))),
+        );
+      }
       row.status = AccountTransactionStatus.Canceled;
       row.statusReason = reason;
       row.comment = comment ?? row.comment;
@@ -476,6 +629,24 @@ export class WithdrawalsService {
         },
         manager,
       );
+
+      if (
+        row.merchantId &&
+        reason === AccountTransactionStatusReason.RejectedByAdmin
+      ) {
+        await this.audit.record(
+          {
+            actorUserId,
+            targetUserId: row.userId,
+            action: MerchantActivityAction.WithdrawalRejected,
+            metadata: {
+              accountTransactionId: row.id,
+              amount: formatCrypto(row.amount!),
+            },
+          },
+          manager,
+        );
+      }
 
       return saved;
     });
@@ -529,7 +700,7 @@ export class WithdrawalsService {
       );
     }
 
-    if (!this.payableByHand().includes(row.status)) {
+    if (!this.payableByHand(row).includes(row.status)) {
       return new ConflictException(
         `A ${row.status} withdrawal cannot be closed by hand`,
       );
@@ -580,6 +751,111 @@ export class WithdrawalsService {
     }
 
     return { kind: 'internal', recipientUserId: owner.userId };
+  }
+
+  private async acceptTotp(input: WithdrawalRequestInput, now: Date) {
+    const user = await this.directory.requireById(input.userId);
+    const code = await this.credentials.spendWithdrawalTotp(
+      user,
+      input.totp,
+      {
+        maxFailures: this.config.get<number>('WITHDRAWAL_TOTP_MAX_FAILURES', 5),
+        windowMinutes: this.config.get<number>(
+          'WITHDRAWAL_TOTP_LOCK_MINUTES',
+          15,
+        ),
+      },
+      now,
+    );
+
+    if (code !== 'accepted') {
+      await this.audit.record({
+        actorUserId: input.userId,
+        targetUserId: input.userId,
+        action: 'withdrawal.totp_refused',
+        metadata: { locked: code === 'locked' },
+      });
+
+      if (code === 'locked') {
+        throw new HttpException(
+          'Too many wrong codes; withdrawals are locked for a while',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      throw new UnauthorizedException(INVALID_TOTP);
+    }
+
+    return user;
+  }
+
+  private async assertMerchantDestination(address: string): Promise<void> {
+    if (!isTronAddress(address)) {
+      throw new BadRequestException('The address is not a valid Tron address');
+    }
+
+    const platform = await this.keyring.findAddress(address);
+
+    if (platform && platform.purpose !== AddressPurpose.Deposit) {
+      throw new BadRequestException(
+        'Withdrawals to a platform wallet are refused',
+      );
+    }
+  }
+
+  private async liveMerchantFee(
+    input: MerchantWithdrawalRequestInput,
+    now: Date,
+  ): Promise<Crypto> {
+    const quotes = await this.dataSource.getRepository(WithdrawalQuote).find({
+      where: {
+        userId: input.userId,
+        address: input.address,
+        expiresAt: MoreThan(now),
+      },
+      order: { id: 'DESC' },
+      take: 20,
+    });
+    const quote = quotes.find((candidate) => candidate.amount.eq(input.amount));
+
+    if (quote) return quote.fee;
+
+    const fresh = await this.quoteForMerchant(
+      input.merchantId,
+      input.userId,
+      input.address,
+      input.amount,
+      now,
+    );
+    throw new FeeChangedException(formatCrypto(fresh.fee.usdt));
+  }
+
+  private async assertMerchantDailyLimit(
+    manager: EntityManager,
+    input: MerchantWithdrawalRequestInput,
+    now: Date,
+  ): Promise<void> {
+    const recent = await manager.find(AccountTransaction, {
+      where: {
+        type: AccountTransactionType.Withdrawal,
+        merchantId: input.merchantId,
+        status: Not(In([AccountTransactionStatus.Canceled])),
+        createdAt: MoreThan(new Date(now.getTime() - DAY_MS)),
+      },
+    });
+    const total = recent.reduce(
+      (sum, row) => sum.plus(row.amount ?? 0),
+      toDecimal(input.amount),
+    );
+    const limit = toCrypto(
+      this.config.getOrThrow<string>('MERCHANT_WITHDRAWAL_DAILY_LIMIT_USDT'),
+    );
+
+    if (total.gt(limit)) {
+      throw new ConflictException(
+        `The 24-hour withdrawal limit of ${formatCrypto(limit)} USDT would be exceeded`,
+      );
+    }
   }
 
   private async liveFee(
@@ -672,8 +948,11 @@ export class WithdrawalsService {
     }
   }
 
-  payableByHand(): AccountTransactionStatus[] {
-    return this.config.get<string>('PAYOUT_MODE') === 'manual'
+  payableByHand(row?: {
+    merchantId: string | null;
+  }): AccountTransactionStatus[] {
+    return row?.merchantId ||
+      this.config.get<string>('PAYOUT_MODE') === 'manual'
       ? [AccountTransactionStatus.Pending, AccountTransactionStatus.Failed]
       : [AccountTransactionStatus.Failed];
   }

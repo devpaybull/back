@@ -1,0 +1,1 @@
+export const DEFAULT_DEAL_TTL_MINUTES = 15;

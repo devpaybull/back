@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiEnvelopeResponse } from '../common/decorators/api-envelope-response.decorator';
+import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { WriteAccess } from '../common/decorators/write-access.decorator';
 import { WriteAccessGuard } from '../common/guards/write-access.guard';
@@ -27,6 +28,8 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { EmailVerificationService } from './services/email-verification.service';
 import { UserDirectoryService } from './services/user-directory.service';
 import { UserProfileService } from './services/user-profile.service';
+
+const TRADING_ROLES: readonly Role[] = [Role.Trader, Role.LeadTrader];
 
 @ApiTags('Profile')
 @ApiBearerAuth()
@@ -59,7 +62,9 @@ export class UsersController {
   async traderSettings(
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<TraderSettingsDto> {
-    const row = await this.settings.ensure(user.id);
+    const row = TRADING_ROLES.includes(user.role)
+      ? await this.settings.ensure(user.id)
+      : await this.settings.findOrDefaults(user.id);
 
     return toTraderSettingsDto(row, {
       insurancePayInMin: this.settings.insurancePayInMinOf(row),

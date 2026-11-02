@@ -8,6 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { AccountTransaction } from '../../account-transactions/entities/account-transaction.entity';
 import { Crypto } from '../../common/types/crypto';
 import { User } from '../../users/entities/user.entity';
 import { cryptoColumn } from '../../common/utils/crypto-column';
@@ -17,6 +18,7 @@ import { Transaction } from './transaction.entity';
 
 @Entity('merchant_balance_operations')
 @Index(['transactionId', 'type'], { unique: true })
+@Index(['accountTransactionId', 'type'], { unique: true })
 export class MerchantBalanceOperation {
   @PrimaryGeneratedColumn()
   id: number;
@@ -38,6 +40,13 @@ export class MerchantBalanceOperation {
 
   @Column({ type: 'uuid', nullable: true })
   transactionId: string | null;
+
+  @ManyToOne(() => AccountTransaction, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'accountTransactionId' })
+  accountTransaction: AccountTransaction | null;
+
+  @Column({ type: 'int', nullable: true })
+  accountTransactionId: number | null;
 
   @Column(cryptoColumn())
   amount: Crypto;
