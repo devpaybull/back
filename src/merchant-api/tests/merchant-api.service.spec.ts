@@ -15,6 +15,7 @@ import { NoRequisiteFoundError } from '../../transactions/exceptions/no-requisit
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { NoBaseRateError } from '../../transactions/utils/resolve-rate';
+import { PaymentViewService } from '../../transactions/services/payment-view.service';
 import { MerchantApiService } from '../merchant-api.service';
 import { PayInRequest } from '../types/pay-in-request';
 import { PayOutRequest } from '../types/pay-out-request';
@@ -208,12 +209,9 @@ const build = () => {
     deps.deals as never,
     deps.rates as never,
     deps.selection as never,
-    {
-      latestOf: jest.fn(async () => []),
-      openByMerchant: jest.fn(),
-      cancelByMerchant: jest.fn(),
-    } as never,
-    { listOf: jest.fn(async () => []) } as never,
+    { openByMerchant: jest.fn(), cancelByMerchant: jest.fn() } as never,
+    new PaymentViewService(deps.bankDetails as never, deps.banks as never),
+    { manager: { find: jest.fn(async () => []) } } as never,
   );
   const log: MerchantRequestDetails = {};
   const create = (input: PayInRequest = request()) =>
@@ -693,11 +691,12 @@ describe('MerchantApiService: reading, canceling and extending', () => {
     expect(page.items.map((item) => item.id)).toEqual(rows.map((r) => r.id));
     expect(page.meta.total).toBe(3);
     expect(deps.bankDetails.findByIdsWithDeleted).toHaveBeenCalledTimes(1);
-    expect(deps.bankDetails.findByIdsWithDeleted).toHaveBeenCalledWith([
-      REQUISITE,
-    ]);
+    expect(deps.bankDetails.findByIdsWithDeleted).toHaveBeenCalledWith(
+      [REQUISITE],
+      expect.anything(),
+    );
     expect(deps.banks.findByIds).toHaveBeenCalledTimes(1);
-    expect(deps.banks.findByIds).toHaveBeenCalledWith([7]);
+    expect(deps.banks.findByIds).toHaveBeenCalledWith([7], expect.anything());
   });
 
   it('cancels through the transactions owner and answers the canceled deal', async () => {

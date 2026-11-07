@@ -367,10 +367,13 @@ export class BankDetailsService {
     return counts;
   }
 
-  async findByIdsWithDeleted(ids: string[]): Promise<BankDetails[]> {
+  async findByIdsWithDeleted(
+    ids: string[],
+    manager?: EntityManager,
+  ): Promise<BankDetails[]> {
     if (ids.length === 0) return [];
 
-    return this.bankDetails.find({
+    return (manager?.getRepository(BankDetails) ?? this.bankDetails).find({
       where: { id: In(ids) },
       relations: { bank: true, mobileOperator: true },
       withDeleted: true,

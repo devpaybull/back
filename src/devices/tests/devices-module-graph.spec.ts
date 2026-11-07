@@ -10,6 +10,7 @@ import { BankDetailTagLink } from '../../bank-details/entities/bank-detail-tag-l
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionStatusEvent } from '../../transactions/entities/transaction-status-event.entity';
 import { Wallet } from '../../transactions/entities/wallet.entity';
+import { MerchantCallback } from '../../merchant-callbacks/entities/merchant-callback.entity';
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../../transactions/entities/payout-decline.entity';
 import { SelectionAttempt } from '../../transactions/entities/selection-attempt.entity';
@@ -116,6 +117,7 @@ describe('the devices ↔ bank-details module graph', () => {
     TransactionFile,
     PayoutDecline,
     TransactionDispute,
+    MerchantCallback,
   ];
 
   const compile = () => {

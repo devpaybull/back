@@ -181,6 +181,9 @@ export class Transaction {
   @Column({ type: 'varchar', length: 15, nullable: true })
   payoutPhone: string | null;
 
+  @Column({ type: 'int', default: 0 })
+  callbackSeq: number;
+
   @Column({ type: 'timestamptz', nullable: true })
   payoutTakenAt: Date | null;
 

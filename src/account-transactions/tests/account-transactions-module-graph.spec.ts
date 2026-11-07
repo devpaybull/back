@@ -47,6 +47,7 @@ import { DeviceCredential } from '../../devices/entities/device-credential.entit
 import { DevicePairing } from '../../devices/entities/device-pairing.entity';
 import { Device } from '../../devices/entities/device.entity';
 import { MobileOperator } from '../../mobile-operators/entities/mobile-operator.entity';
+import { MerchantCallback } from '../../merchant-callbacks/entities/merchant-callback.entity';
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../../transactions/entities/payout-decline.entity';
 import { SelectionAttempt } from '../../transactions/entities/selection-attempt.entity';
@@ -110,6 +111,7 @@ describe('the account transactions module graph', () => {
     TransactionFile,
     PayoutDecline,
     TransactionDispute,
+    MerchantCallback,
     BankDetails,
     BankDetailTag,
     BankDetailTagLink,

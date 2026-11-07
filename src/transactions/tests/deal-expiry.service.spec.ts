@@ -180,6 +180,7 @@ const build = (rows: Transaction[]) => {
     {} as never,
     {} as never,
     {} as never,
+    { recordWithin: jest.fn(async () => undefined) } as never,
   );
   const service = new DealExpiryService(
     repository as never,

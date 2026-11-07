@@ -1,3 +1,5 @@
+import { MerchantCallbacksModule } from '../merchant-callbacks/merchant-callbacks.module';
+import { AdminMerchantCallbacksController } from './controllers/admin-merchant-callbacks.controller';
 import { AdminDisputesController } from './controllers/admin-disputes.controller';
 import { Module } from '@nestjs/common';
 import { AdminDepositsController } from './controllers/admin-deposits.controller';
@@ -59,6 +61,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     CountriesModule,
     CurrenciesModule,
     TransactionsModule,
+    MerchantCallbacksModule,
     AccountTransactionsModule,
     AuditModule,
     TraderSettingsModule,
@@ -69,6 +72,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     DebtsModule,
   ],
   controllers: [
+    AdminMerchantCallbacksController,
     AdminDisputesController,
     AdminDepositsController,
     AdminWithdrawalsController,

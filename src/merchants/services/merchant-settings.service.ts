@@ -89,6 +89,17 @@ export class MerchantSettingsService {
     private readonly audit: AuditService,
   ) {}
 
+  async callbackUrlWithin(
+    manager: EntityManager,
+    merchantId: string,
+  ): Promise<string | null> {
+    const settings = await manager.findOne(MerchantSettings, {
+      where: { merchantId },
+    });
+
+    return settings?.callbackUrl ?? null;
+  }
+
   async settingsOf(merchantId: string): Promise<MerchantSettingsView> {
     const row = await this.settings.findOne({ where: { merchantId } });
 

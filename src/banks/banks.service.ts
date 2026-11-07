@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsRelations, In, Repository } from 'typeorm';
+import { EntityManager, FindOptionsRelations, In, Repository } from 'typeorm';
 import { Page, toPage } from '../common/types/page';
 import { CountriesService } from '../countries/countries.service';
 import { CurrenciesService } from '../currencies/currencies.service';
@@ -78,10 +78,12 @@ export class BanksService {
     return this.banks.findOne({ where: { code, active: true } });
   }
 
-  async findByIds(ids: number[]): Promise<Bank[]> {
+  async findByIds(ids: number[], manager?: EntityManager): Promise<Bank[]> {
     if (ids.length === 0) return [];
 
-    return this.banks.find({ where: { id: In(ids) } });
+    return (manager?.getRepository(Bank) ?? this.banks).find({
+      where: { id: In(ids) },
+    });
   }
 
   async update(id: number, changes: BankChanges): Promise<Bank> {

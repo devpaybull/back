@@ -20,10 +20,11 @@ import { MerchantCurrenciesService } from '../merchants/services/merchant-curren
 import { MerchantMethodsService } from '../merchants/services/merchant-methods.service';
 import { MerchantSettingsService } from '../merchants/services/merchant-settings.service';
 import { MobileOperatorsService } from '../mobile-operators/mobile-operators.service';
-import { PaymentDto, toPaymentDto } from '../transactions/dto/payment.dto';
+import { PaymentDto } from '../transactions/dto/payment.dto';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { DisputesService } from '../transactions/services/disputes.service';
-import { TransactionFilesService } from '../transactions/services/transaction-files.service';
-import { TransactionFileKind } from '../transactions/types/transaction-file-kind.enum';
+import { PaymentViewService } from '../transactions/services/payment-view.service';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { NoRequisiteFoundError } from '../transactions/exceptions/no-requisite-found.exception';
 import { MerchantDealsService } from '../transactions/services/merchant-deals.service';
@@ -52,12 +53,6 @@ const dealNotFound = (): NotFoundException =>
     message: 'Deal not found',
   });
 
-const distinct = <T>(values: (T | null | undefined)[]): T[] => [
-  ...new Set(
-    values.filter((value): value is T => value !== null && value !== undefined),
-  ),
-];
-
 @Injectable()
 export class MerchantApiService {
   constructor(
@@ -73,7 +68,9 @@ export class MerchantApiService {
     private readonly rates: RateService,
     private readonly selection: RequisiteSelectionService,
     private readonly disputes: DisputesService,
-    private readonly files: TransactionFilesService,
+    private readonly paymentView: PaymentViewService,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async findPayment(merchantId: string, id: string): Promise<PaymentDto> {
@@ -627,49 +624,14 @@ export class MerchantApiService {
     return payment;
   }
 
-  private async paymentsOf(
+  private paymentsOf(
     deals: Transaction[],
     requestedBank?: Bank | null,
   ): Promise<PaymentDto[]> {
-    const requisiteIds = distinct(deals.map((deal) => deal.bankDetailsId));
-    const bankIds = distinct(
-      deals.flatMap((deal) => [
-        requestedBank === undefined ? deal.requestedBankId : null,
-        deal.payoutBankId,
-      ]),
-    );
-    const dealIds = deals.map((deal) => deal.id);
-    const [requisites, banks, disputes, files] = await Promise.all([
-      requisiteIds.length
-        ? this.bankDetails.findByIdsWithDeleted(requisiteIds)
-        : Promise.resolve([]),
-      bankIds.length ? this.banks.findByIds(bankIds) : Promise.resolve([]),
-      this.disputes.latestOf(dealIds),
-      this.files.listOf(dealIds),
-    ]);
-    const disputeOf = new Map(
-      disputes.map((dispute) => [dispute.transactionId, dispute]),
-    );
-    const merchantFiles = files.filter(
-      (file) => file.kind === TransactionFileKind.DisputeReceipt,
-    );
-    const requisiteById = new Map(requisites.map((row) => [row.id, row]));
-    const bankById = new Map(banks.map((bank) => [bank.id, bank]));
-    const bankOf = (id: number | null | undefined): Bank | null =>
-      (id && bankById.get(id)) || null;
-
-    return deals.map((deal) =>
-      toPaymentDto(deal, {
-        requisite: requisiteById.get(deal.bankDetailsId) ?? null,
-        requestedBank:
-          requestedBank === undefined
-            ? bankOf(deal.requestedBankId)
-            : requestedBank,
-        payoutBank: bankOf(deal.payoutBankId),
-        paymentPageUrl: null,
-        dispute: disputeOf.get(deal.id) ?? null,
-        disputeFiles: merchantFiles,
-      }),
+    return this.paymentView.paymentsOf(
+      this.dataSource.manager,
+      deals,
+      requestedBank,
     );
   }
 }

@@ -15,6 +15,7 @@ import {
 } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { Fiat } from '../../common/types/fiat';
+import { MerchantCallbackEvent } from '../../merchant-callbacks/types/merchant-callback-event.enum';
 import { Page, toPage } from '../../common/types/page';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { TransactionDispute } from '../entities/transaction-dispute.entity';
@@ -33,6 +34,7 @@ import { TransactionStatus } from '../types/transaction-status.enum';
 import { TransactionUpload } from '../types/transaction-upload';
 import { dealNotFound } from '../utils/deal-not-found';
 import { MERCHANT_CANCELED_REASON } from '../utils/merchant-canceled-reason';
+import { DealCallbacksService } from './deal-callbacks.service';
 import { DisputeMoneyService } from './dispute-money.service';
 import { TransactionFilesService } from './transaction-files.service';
 import { TransactionService } from './transaction.service';
@@ -72,6 +74,7 @@ export class DisputesService {
     private readonly files: TransactionFilesService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    private readonly dealCallbacks: DealCallbacksService,
   ) {}
 
   openByMerchant(
@@ -164,6 +167,7 @@ export class DisputesService {
         },
         manager,
       );
+      await this.announce(manager, deal);
 
       return deal;
     });
@@ -214,6 +218,7 @@ export class DisputesService {
         },
         manager,
       );
+      await this.announce(manager, deal);
 
       return deal;
     });
@@ -253,6 +258,7 @@ export class DisputesService {
         },
         manager,
       );
+      await this.announce(manager, deal);
 
       return dispute;
     });
@@ -327,6 +333,7 @@ export class DisputesService {
           },
           manager,
         );
+        await this.announce(manager, deal);
 
         return dispute;
       });
@@ -371,6 +378,7 @@ export class DisputesService {
         },
         manager,
       );
+      await this.announce(manager, deal);
 
       return dispute;
     });
@@ -406,6 +414,7 @@ export class DisputesService {
         },
         manager,
       );
+      await this.announce(manager, deal);
 
       return dispute;
     });
@@ -448,6 +457,7 @@ export class DisputesService {
         actorUserId: null,
         reason: TRADER_SILENT_REASON,
       });
+      await this.announce(manager, deal);
 
       return true;
     });
@@ -525,6 +535,14 @@ export class DisputesService {
       actorUserId: source.actorUserId,
       reason: 'dispute_accepted',
     });
+  }
+
+  private announce(manager: EntityManager, deal: Transaction): Promise<void> {
+    return this.dealCallbacks.recordWithin(
+      manager,
+      deal,
+      MerchantCallbackEvent.DisputeChanged,
+    );
   }
 
   private async assertNotCanceledByMerchant(

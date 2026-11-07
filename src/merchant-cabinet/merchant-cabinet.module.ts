@@ -4,11 +4,13 @@ import { AuditModule } from '../audit/audit.module';
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
+import { MerchantCallbacksModule } from '../merchant-callbacks/merchant-callbacks.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { UsersModule } from '../users/users.module';
 import { MerchantAccountController } from './controllers/merchant-account.controller';
 import { MerchantBalanceController } from './controllers/merchant-balance.controller';
+import { MerchantCallbacksController } from './controllers/merchant-callbacks.controller';
 import { MerchantDashboardController } from './controllers/merchant-dashboard.controller';
 import { MerchantDealsController } from './controllers/merchant-deals.controller';
 import { MerchantRatesController } from './controllers/merchant-rates.controller';
@@ -23,6 +25,7 @@ import { MerchantScopeGuard } from './guards/merchant-scope.guard';
     BankDetailsModule,
     BanksModule,
     CounterpartiesModule,
+    MerchantCallbacksModule,
     MerchantsModule,
     TransactionsModule,
     UsersModule,
@@ -35,6 +38,7 @@ import { MerchantScopeGuard } from './guards/merchant-scope.guard';
     MerchantWithdrawalsController,
     MerchantRatesController,
     MerchantSettingsController,
+    MerchantCallbacksController,
   ],
   providers: [MerchantScopeGuard],
 })

@@ -34,6 +34,9 @@ import { RateService } from './services/rate.service';
 import { RequisiteSelectionService } from './services/requisite-selection.service';
 import { SelectionAttemptRetentionService } from './services/selection-attempt-retention.service';
 import { TransactionDispute } from './entities/transaction-dispute.entity';
+import { MerchantCallbacksModule } from '../merchant-callbacks/merchant-callbacks.module';
+import { DealCallbacksService } from './services/deal-callbacks.service';
+import { PaymentViewService } from './services/payment-view.service';
 import { DisputeDeadlineService } from './services/dispute-deadline.service';
 import { DisputeMoneyService } from './services/dispute-money.service';
 import { DisputesService } from './services/disputes.service';
@@ -67,6 +70,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     ]),
     AuditModule,
     FileStorageModule,
+    MerchantCallbacksModule,
     BanksModule,
     forwardRef(() => BankDetailsModule),
     CounterpartiesModule,
@@ -82,6 +86,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
     MerchantVolumeService,
     MerchantStatsService,
     MerchantDealsService,
+    PaymentViewService,
+    DealCallbacksService,
     DisputeMoneyService,
     DisputesService,
     DisputeDeadlineService,
@@ -102,6 +108,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     SelectionAttemptRetentionService,
   ],
   exports: [
+    PaymentViewService,
     DisputesService,
     DisputeDeadlineService,
     TraderDealsService,

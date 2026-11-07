@@ -20,6 +20,7 @@ import { FIAT_SCALE } from '../../common/utils/fiat-scale';
 import { RATE_SCALE } from '../../common/utils/rate-scale';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
+import { MerchantCallbackEvent } from '../../merchant-callbacks/types/merchant-callback-event.enum';
 import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
 import { UserTeamService } from '../../users/services/user-team.service';
 import { TransactionDispute } from '../entities/transaction-dispute.entity';
@@ -64,6 +65,7 @@ import {
 import { transactionListOrder } from '../utils/transaction-list-order';
 import { transactionListWhere } from '../utils/transaction-list-where';
 import { RateService } from './rate.service';
+import { DealCallbacksService } from './deal-callbacks.service';
 import { MerchantBalanceService } from './merchant-balance.service';
 import { WalletService } from './wallet.service';
 
@@ -97,6 +99,7 @@ export class TransactionService {
     private readonly merchantSettings: MerchantSettingsService,
     private readonly config: ConfigService,
     private readonly counterpartyStats: CounterpartyStatsService,
+    private readonly dealCallbacks: DealCallbacksService,
   ) {}
 
   findById(id: string): Promise<Transaction | null> {
@@ -626,6 +629,11 @@ export class TransactionService {
         },
         manager,
       );
+      await this.dealCallbacks.recordWithin(
+        manager,
+        deal,
+        MerchantCallbackEvent.TimerExtended,
+      );
 
       return deal;
     });
@@ -682,6 +690,11 @@ export class TransactionService {
     if (countsTowardCounterpartyStats(transaction)) {
       await this.recordCounterpartyStatus(manager, transaction);
     }
+    await this.dealCallbacks.recordWithin(
+      manager,
+      transaction,
+      MerchantCallbackEvent.StatusChanged,
+    );
     if (
       transaction.kind === TransactionKind.PayIn &&
       isFinalStatus(change.toStatus)
@@ -713,6 +726,12 @@ export class TransactionService {
     if (firstDispute && countsTowardCounterpartyStats(transaction)) {
       await this.recordCounterpartyStatus(manager, transaction);
     }
+
+    await this.dealCallbacks.recordWithin(
+      manager,
+      transaction,
+      MerchantCallbackEvent.StatusChanged,
+    );
 
     return transaction;
   }
@@ -746,6 +765,11 @@ export class TransactionService {
           : DEFERRED_DEAL_SUCCEEDED;
       dispute.resolvedAt = new Date();
       await manager.save(dispute);
+      await this.dealCallbacks.recordWithin(
+        manager,
+        transaction,
+        MerchantCallbackEvent.DisputeChanged,
+      );
 
       return;
     }
@@ -763,6 +787,11 @@ export class TransactionService {
       actorUserId: null,
       reason: DEFERRED_STARTED,
     });
+    await this.dealCallbacks.recordWithin(
+      manager,
+      transaction,
+      MerchantCallbackEvent.DisputeChanged,
+    );
   }
 
   payInAppealDeadline(from: Date): Date {

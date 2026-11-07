@@ -304,6 +304,31 @@ export class EnvironmentVariables {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  MERCHANT_CALLBACK_TIMEOUT_MS: number = 10000;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_CALLBACK_MAX_ATTEMPTS: number = 10;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_CALLBACK_INTERVAL_SECONDS: number = 5;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_CALLBACK_CONCURRENCY: number = 10;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_CALLBACK_RETENTION_DAYS: number = 90;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   DISPUTE_FILE_MAX_BYTES: number = 52428800;
 
   @ToRequiredString()

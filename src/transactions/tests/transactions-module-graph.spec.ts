@@ -44,6 +44,7 @@ import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
 import { SelectionAttempt } from '../entities/selection-attempt.entity';
+import { MerchantCallback } from '../../merchant-callbacks/entities/merchant-callback.entity';
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../entities/payout-decline.entity';
 import { TransactionDispute } from '../entities/transaction-dispute.entity';
@@ -154,6 +155,8 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(PayoutDecline))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(TransactionDispute))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantCallback))
       .useValue(repository)
       .overrideProvider(FileStorage)
       .useValue({})

@@ -125,6 +125,7 @@ const build = () => {
     merchantSettings as never,
     config as never,
     counterpartyStats as never,
+    { recordWithin: jest.fn(async () => undefined) } as never,
   );
 
   return {
@@ -1306,6 +1307,7 @@ describe('TransactionService.list', () => {
       {} as never,
       {} as never,
       {} as never,
+      { recordWithin: jest.fn(async () => undefined) } as never,
     );
 
     return { service, repository, builder, rows };
@@ -1630,6 +1632,7 @@ describe('TransactionService, the merchant API lookups', () => {
       {} as never,
       {} as never,
       {} as never,
+      { recordWithin: jest.fn(async () => undefined) } as never,
     );
 
     return { repository, service };
