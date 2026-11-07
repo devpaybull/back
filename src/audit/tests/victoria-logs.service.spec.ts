@@ -487,4 +487,31 @@ describe('VictoriaLogsService', () => {
       ).rejects.toThrow(/400/);
     });
   });
+
+  describe('selectScoped', () => {
+    it('runs the query under this installation and parses every line', async () => {
+      fetchMock.mockResolvedValueOnce(
+        answer(200, '{"requestId":"r1"}\n{"requestId":"r2"}\n'),
+      );
+
+      const lines = await victoriaAt('http://vl:9428').selectScoped(
+        'source:="merchant_api" | limit 2',
+      );
+      const [url, init] = fetchMock.mock.calls[0];
+
+      expect(url).toBe('http://vl:9428/select/logsql/query');
+      expect((init.body as URLSearchParams).get('query')).toBe(
+        `${SCOPE} source:="merchant_api" | limit 2`,
+      );
+      expect(lines).toEqual([{ requestId: 'r1' }, { requestId: 'r2' }]);
+    });
+
+    it('throws when VictoriaLogs answers an error', async () => {
+      fetchMock.mockResolvedValueOnce(answer(500, 'boom'));
+
+      await expect(
+        victoriaAt('http://vl:9428').selectScoped('source:="merchant_api"'),
+      ).rejects.toThrow(/500/);
+    });
+  });
 });

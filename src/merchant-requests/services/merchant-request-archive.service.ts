@@ -11,15 +11,15 @@ import { VictoriaLogsService } from '../../audit/services/victoria-logs.service'
 import { ArchiveLine } from '../../audit/types/archive-line';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { MerchantApiRequest } from '../entities/merchant-api-request.entity';
+import { MERCHANT_REQUEST_ARCHIVE_SOURCE } from '../utils/merchant-request-archive-source';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ARCHIVE_SOURCE = 'merchant_api';
 
 const iso = (value: Date | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 
 const toLine = (row: MerchantApiRequest): ArchiveLine => ({
-  source: ARCHIVE_SOURCE,
+  source: MERCHANT_REQUEST_ARCHIVE_SOURCE,
   message: `${row.method} ${row.path}`,
   requestId: row.id,
   merchantId: row.merchantId,

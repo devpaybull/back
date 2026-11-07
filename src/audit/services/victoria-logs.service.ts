@@ -6,6 +6,7 @@ import { ArchiveLine } from '../types/archive-line';
 import { AuditRecord } from '../types/audit-record';
 import { AuditSource } from '../types/audit-source.enum';
 import { VictoriaAuditQuery } from '../types/victoria-audit-query';
+import { VictoriaLine } from '../types/victoria-line';
 import { AuditInstallationService } from './audit-installation.service';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -18,8 +19,6 @@ const FILTERED_FIELDS = [
   'statusCode',
 ] as const;
 const ONE_ROW_PER_AUDIT_ID = 'sort by (auditId) partition by (auditId) limit 1';
-
-type VictoriaLine = Record<string, string | undefined>;
 
 @Injectable()
 export class VictoriaLogsService {
@@ -80,6 +79,14 @@ export class VictoriaLogsService {
     );
 
     return [lines.map(fromLine), total];
+  }
+
+  async selectScoped(logsql: string): Promise<VictoriaLine[]> {
+    const installationId = await this.installation.installationId();
+
+    return this.select(
+      `installationId:=${JSON.stringify(installationId)} ${logsql}`,
+    );
   }
 
   private async select(logsql: string): Promise<VictoriaLine[]> {

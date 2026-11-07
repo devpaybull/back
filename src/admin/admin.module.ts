@@ -17,6 +17,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
 import { DebtsModule } from '../debts/debts.module';
 import { DevicesModule } from '../devices/devices.module';
 import { InvitesModule } from '../invites/invites.module';
+import { MerchantRequestsModule } from '../merchant-requests/merchant-requests.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -25,6 +26,7 @@ import { UsersModule } from '../users/users.module';
 import { AdminAnalyticsController } from './controllers/admin-analytics.controller';
 import { AdminMerchantAttachmentsController } from './controllers/admin-merchant-attachments.controller';
 import { AdminMerchantBalanceController } from './controllers/admin-merchant-balance.controller';
+import { AdminMerchantRequestsController } from './controllers/admin-merchant-requests.controller';
 import { AdminMerchantIntegrationsController } from './controllers/admin-merchant-integrations.controller';
 import { AdminMerchantGroupsController } from './controllers/admin-merchant-groups.controller';
 import { AdminAuditController } from './controllers/admin-audit.controller';
@@ -68,6 +70,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     CounterpartiesModule,
     AnalyticsModule,
     MerchantsModule,
+    MerchantRequestsModule,
     UserNotesModule,
     DebtsModule,
   ],
@@ -92,6 +95,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     AdminMerchantsController,
     AdminMerchantIntegrationsController,
     AdminMerchantBalanceController,
+    AdminMerchantRequestsController,
     AdminMerchantGroupsController,
     AdminMerchantAttachmentsController,
     AdminBanksController,
