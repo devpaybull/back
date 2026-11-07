@@ -36,6 +36,8 @@ const CATALOG: [HttpStatus, MerchantApiErrorCode][] = [
   [HttpStatus.CONFLICT, MerchantApiErrorCode.DealNotCancelable],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.TimerNotExtendable],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.DisputeNotAllowed],
+  [HttpStatus.PAYLOAD_TOO_LARGE, MerchantApiErrorCode.FileTooLarge],
+  [HttpStatus.BAD_REQUEST, MerchantApiErrorCode.FileTypeNotAllowed],
   [HttpStatus.INTERNAL_SERVER_ERROR, MerchantApiErrorCode.InternalError],
   [HttpStatus.SERVICE_UNAVAILABLE, MerchantApiErrorCode.RateUnavailable],
 ];

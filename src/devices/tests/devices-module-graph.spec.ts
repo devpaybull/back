@@ -13,6 +13,7 @@ import { Wallet } from '../../transactions/entities/wallet.entity';
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../../transactions/entities/payout-decline.entity';
 import { SelectionAttempt } from '../../transactions/entities/selection-attempt.entity';
+import { TransactionDispute } from '../../transactions/entities/transaction-dispute.entity';
 import { TransactionFile } from '../../transactions/entities/transaction-file.entity';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { MethodRate } from '../../transactions/entities/method-rate.entity';
@@ -114,6 +115,7 @@ describe('the devices ↔ bank-details module graph', () => {
     SelectionAttempt,
     TransactionFile,
     PayoutDecline,
+    TransactionDispute,
   ];
 
   const compile = () => {

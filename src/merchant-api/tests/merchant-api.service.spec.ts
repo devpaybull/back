@@ -208,6 +208,12 @@ const build = () => {
     deps.deals as never,
     deps.rates as never,
     deps.selection as never,
+    {
+      latestOf: jest.fn(async () => []),
+      openByMerchant: jest.fn(),
+      cancelByMerchant: jest.fn(),
+    } as never,
+    { listOf: jest.fn(async () => []) } as never,
   );
   const log: MerchantRequestDetails = {};
   const create = (input: PayInRequest = request()) =>

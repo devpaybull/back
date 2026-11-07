@@ -50,6 +50,7 @@ import { MobileOperator } from '../../mobile-operators/entities/mobile-operator.
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../../transactions/entities/payout-decline.entity';
 import { SelectionAttempt } from '../../transactions/entities/selection-attempt.entity';
+import { TransactionDispute } from '../../transactions/entities/transaction-dispute.entity';
 import { TransactionFile } from '../../transactions/entities/transaction-file.entity';
 import { AccountTransactionsModule } from '../account-transactions.module';
 import { AccountTransaction } from '../entities/account-transaction.entity';
@@ -108,6 +109,7 @@ describe('the account transactions module graph', () => {
     SelectionAttempt,
     TransactionFile,
     PayoutDecline,
+    TransactionDispute,
     BankDetails,
     BankDetailTag,
     BankDetailTagLink,

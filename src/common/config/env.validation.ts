@@ -54,7 +54,11 @@ const isSecureUrl = (value: unknown, production: boolean): boolean => {
     return true;
   }
 };
-const NIGHT_WINDOW_PREFIXES = ['NIGHT_STOP', 'INSURANCE_NIGHT'] as const;
+const NIGHT_WINDOW_PREFIXES = [
+  'NIGHT_STOP',
+  'INSURANCE_NIGHT',
+  'APPEAL_NIGHT',
+] as const;
 const TRUE_VALUES = ['true', '1', 'yes'];
 const FALSE_VALUES = ['false', '0', 'no'];
 
@@ -263,6 +267,39 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   PAYOUT_INSURANCE_HOLD_MINUTES: number = 120;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  APPEAL_TRADER_RESPONSE_MINUTES: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  APPEAL_NIGHT_START_HOUR: number = 0;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  APPEAL_NIGHT_END_HOUR: number = 10;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  APPEAL_NIGHT_GRACE_MINUTES: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_APPEAL_RESPONSE_HOURS: number = 12;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  DISPUTE_FILES_MAX: number = 5;
 
   @Type(() => Number)
   @IsInt()

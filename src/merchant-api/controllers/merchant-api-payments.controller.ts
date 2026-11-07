@@ -30,6 +30,7 @@ import { SkipIpCheck } from '../decorators/skip-ip-check.decorator';
 import { CreatePayInDto } from '../dto/create-pay-in.dto';
 import { CreatePayOutDto } from '../dto/create-pay-out.dto';
 import { ListPaymentsQueryDto } from '../dto/list-payments-query.dto';
+import { OpenDisputeDto } from '../dto/open-dispute.dto';
 import { MerchantApiExceptionFilter } from '../filters/merchant-api-exception.filter';
 import { MerchantApiKeyGuard } from '../guards/merchant-api-key.guard';
 import { MerchantApiService } from '../merchant-api.service';
@@ -136,6 +137,44 @@ export class MerchantApiPaymentsController {
     @Param('id', DealIdPipe) id: string,
   ): Promise<PaymentDto> {
     return this.payments.cancelPayment(merchant.merchantId, id);
+  }
+
+  @Post(':id/dispute')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('Merchant API · Disputes')
+  @ApiOperation({
+    summary: 'Open a dispute on a deal',
+    description:
+      'Pay-in: canceled, success, success_changed, or active, where it waits and starts only if the deal is canceled by the timer or the trader. Pay-out: checking or success. Older than 14 days, another status, or a dispute already there is a 409 DISPUTE_NOT_ALLOWED.',
+  })
+  @ApiEnvelopeResponse(PaymentDto)
+  openDispute(
+    @CurrentApiMerchant() merchant: ApiMerchant,
+    @Param('id', DealIdPipe) id: string,
+    @Body() dto: OpenDisputeDto,
+  ): Promise<PaymentDto> {
+    return this.payments.openDispute(
+      merchant.merchantId,
+      id,
+      dto.fileKeys,
+      dto.amount === undefined ? null : toFiat(dto.amount),
+    );
+  }
+
+  @Post(':id/dispute/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('Merchant API · Disputes')
+  @ApiOperation({
+    summary: 'Cancel a dispute while nobody has contested it yet',
+    description:
+      'The deal returns to its earlier status and no money moves; afterwards it is a 409 DISPUTE_NOT_ALLOWED.',
+  })
+  @ApiEnvelopeResponse(PaymentDto)
+  cancelDispute(
+    @CurrentApiMerchant() merchant: ApiMerchant,
+    @Param('id', DealIdPipe) id: string,
+  ): Promise<PaymentDto> {
+    return this.payments.cancelDispute(merchant.merchantId, id);
   }
 
   @Post(':id/extend-timer')

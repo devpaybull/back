@@ -146,6 +146,20 @@ export class MerchantBalanceService {
     });
   }
 
+  creditDisputeWithin(
+    manager: EntityManager,
+    merchantId: string,
+    amount: Crypto,
+    transactionId: string,
+  ): Promise<MerchantBalanceOperation> {
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.DealDispute,
+      balanceDelta: amount,
+      escrowDelta: ZERO,
+      transactionId,
+    });
+  }
+
   holdPayOutWithin(
     manager: EntityManager,
     merchantId: string,

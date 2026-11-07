@@ -46,6 +46,7 @@ import { TransactionStatusEvent } from '../entities/transaction-status-event.ent
 import { SelectionAttempt } from '../entities/selection-attempt.entity';
 import { FileStorage } from '../../file-storage/types/file-storage';
 import { PayoutDecline } from '../entities/payout-decline.entity';
+import { TransactionDispute } from '../entities/transaction-dispute.entity';
 import { TransactionFile } from '../entities/transaction-file.entity';
 import { Wallet } from '../entities/wallet.entity';
 import { RateService } from '../services/rate.service';
@@ -151,6 +152,8 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(TransactionFile))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(PayoutDecline))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(TransactionDispute))
       .useValue(repository)
       .overrideProvider(FileStorage)
       .useValue({})

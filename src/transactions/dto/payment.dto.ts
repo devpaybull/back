@@ -1,3 +1,4 @@
+import { DisputeStatus } from '../types/dispute-status.enum';
 import { ApiProperty } from '@nestjs/swagger';
 import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { formatCrypto } from '../../common/utils/format-crypto';
@@ -14,6 +15,40 @@ import { PaymentBankDto } from './payment-bank.dto';
 import { PaymentRequisiteDto } from './payment-requisite.dto';
 
 const MS_PER_MINUTE = 60_000;
+
+export class PaymentDisputeFileDto {
+  @ApiProperty({ format: 'uuid' })
+  fileKey: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  size: number;
+
+  @ApiProperty()
+  mime: string;
+}
+
+export class PaymentDisputeDto {
+  @ApiProperty({ enum: DisputeStatus })
+  status: DisputeStatus;
+
+  @ApiProperty()
+  openedAt: Date;
+
+  @ApiProperty({ type: String, nullable: true })
+  amount: string | null;
+
+  @ApiProperty({ type: PaymentDisputeFileDto, isArray: true })
+  files: PaymentDisputeFileDto[];
+
+  @ApiProperty({ type: String, nullable: true })
+  declineReason: string | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  resolvedAt: Date | null;
+}
 
 export class PaymentDto {
   @ApiProperty()
@@ -96,8 +131,8 @@ export class PaymentDto {
   @ApiProperty({ nullable: true })
   paymentPageUrl: string | null;
 
-  @ApiProperty({ type: Object, nullable: true })
-  dispute: null;
+  @ApiProperty({ type: PaymentDisputeDto, nullable: true })
+  dispute: PaymentDisputeDto | null;
 
   @ApiProperty()
   createdAt: Date;
@@ -168,7 +203,25 @@ export const toPaymentDto = (
     : null,
   expiresAt: deal.expiresAt ?? null,
   paymentPageUrl: extras.paymentPageUrl ?? null,
-  dispute: null,
+  dispute: extras.dispute
+    ? {
+        status: extras.dispute.status,
+        openedAt: extras.dispute.openedAt,
+        amount: extras.dispute.amountFiat
+          ? formatFiat(extras.dispute.amountFiat)
+          : null,
+        files: (extras.disputeFiles ?? [])
+          .filter((file) => file.disputeId === extras.dispute?.id)
+          .map((file) => ({
+            fileKey: file.id,
+            name: file.name,
+            size: file.size,
+            mime: file.mime,
+          })),
+        declineReason: extras.dispute.declineReason ?? null,
+        resolvedAt: extras.dispute.resolvedAt ?? null,
+      }
+    : null,
   createdAt: deal.createdAt,
   resolvedAt: deal.resolvedAt ?? null,
 });

@@ -1,3 +1,4 @@
+import { AdminDisputesController } from './controllers/admin-disputes.controller';
 import { Module } from '@nestjs/common';
 import { AdminDepositsController } from './controllers/admin-deposits.controller';
 import { AdminWithdrawalsController } from './controllers/admin-withdrawals.controller';
@@ -68,6 +69,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     DebtsModule,
   ],
   controllers: [
+    AdminDisputesController,
     AdminDepositsController,
     AdminWithdrawalsController,
     AdminInvitesController,

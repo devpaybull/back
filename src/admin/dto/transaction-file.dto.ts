@@ -17,8 +17,13 @@ export class TransactionFileDto {
   @ApiProperty()
   size: number;
 
-  @ApiProperty({ format: 'uuid' })
-  uploadedByUserId: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'null: uploaded by the merchant through /v1',
+  })
+  uploadedByUserId: string | null;
 
   @ApiProperty()
   createdAt: Date;

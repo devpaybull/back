@@ -91,6 +91,14 @@ export class MerchantApiExceptionFilter implements ExceptionFilter {
         };
       }
 
+      if (exception.getStatus() === HttpStatus.PAYLOAD_TOO_LARGE) {
+        return {
+          statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+          code: MerchantApiErrorCode.FileTooLarge,
+          message: exception.message,
+        };
+      }
+
       if (exception.getStatus() === HttpStatus.BAD_REQUEST) {
         return {
           statusCode: HttpStatus.BAD_REQUEST,

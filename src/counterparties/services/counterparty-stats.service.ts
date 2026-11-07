@@ -1,3 +1,4 @@
+import { Fiat } from '../../common/types/fiat';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
@@ -76,6 +77,33 @@ export class CounterpartyStatsService {
       counterpartyId,
       this.dayOf(outcome.resolvedAt),
       1,
+      amount,
+    ]);
+  }
+
+  async recordDisputePaidWithin(
+    manager: EntityManager,
+    counterpartyId: number,
+    outcome: { newlyPaid: boolean; amountFiat: Fiat; resolvedAt: Date },
+  ): Promise<void> {
+    const amount = formatFiat(outcome.amountFiat);
+    const newlyPaid = outcome.newlyPaid ? 1 : 0;
+
+    await manager
+      .createQueryBuilder()
+      .update(Counterparty)
+      .set({
+        paidCount: () => '"paidCount" + :newlyPaid',
+        paidAmount: () => '"paidAmount" + :amount',
+        lastDepositAt: () => 'GREATEST("lastDepositAt", :resolvedAt)',
+      })
+      .where('id = :counterpartyId', { counterpartyId })
+      .setParameters({ newlyPaid, amount, resolvedAt: outcome.resolvedAt })
+      .execute();
+    await manager.query(ADD_TO_DAY, [
+      counterpartyId,
+      this.dayOf(outcome.resolvedAt),
+      newlyPaid,
       amount,
     ]);
   }

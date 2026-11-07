@@ -33,6 +33,10 @@ import { RapiraRateProvider } from './services/rapira-rate.provider';
 import { RateService } from './services/rate.service';
 import { RequisiteSelectionService } from './services/requisite-selection.service';
 import { SelectionAttemptRetentionService } from './services/selection-attempt-retention.service';
+import { TransactionDispute } from './entities/transaction-dispute.entity';
+import { DisputeDeadlineService } from './services/dispute-deadline.service';
+import { DisputeMoneyService } from './services/dispute-money.service';
+import { DisputesService } from './services/disputes.service';
 import { PayoutPricingService } from './services/payout-pricing.service';
 import { PayoutTimersService } from './services/payout-timers.service';
 import { TraderDealActionsService } from './services/trader-deal-actions.service';
@@ -58,6 +62,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
       MerchantBalanceOperation,
       SelectionAttempt,
       TransactionFile,
+      TransactionDispute,
       PayoutDecline,
     ]),
     AuditModule,
@@ -77,6 +82,9 @@ import { RequisiteRanking } from './types/requisite-ranking';
     MerchantVolumeService,
     MerchantStatsService,
     MerchantDealsService,
+    DisputeMoneyService,
+    DisputesService,
+    DisputeDeadlineService,
     TraderDealsService,
     TraderDealActionsService,
     TraderPayoutsService,
@@ -94,6 +102,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
     SelectionAttemptRetentionService,
   ],
   exports: [
+    DisputesService,
+    DisputeDeadlineService,
     TraderDealsService,
     TraderDealActionsService,
     TraderPayoutsService,

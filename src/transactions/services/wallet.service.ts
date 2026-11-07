@@ -277,48 +277,72 @@ export class WalletService {
     await manager.save(wallet);
   }
 
-  async applyDisputeLoss(
+  async applyDisputeLossWithin(
+    manager: EntityManager,
     userId: string,
     amount: Crypto,
     transactionId: string,
   ): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
-      const wallet = await this.lock(manager, userId);
-      const operations: BalanceOperation[] = [];
+    if (!amount.gt(0)) return;
 
-      const fromMain = toCrypto(
-        Decimal.min(amount, Decimal.max(wallet.mainBalance, 0)),
-      );
-      if (fromMain.gt(0)) {
-        operations.push(
-          this.journalMove(
-            manager,
-            wallet,
-            BalanceKind.Main,
-            fromMain.neg(),
-            BalanceOperationType.Transaction,
-            transactionId,
-          ),
-        );
-      }
+    const wallet = await this.lock(manager, userId);
+    const fromMain = roundCrypto(
+      Decimal.min(amount, Decimal.max(wallet.mainBalance, 0)),
+    );
+    const left = amount.minus(fromMain);
+    const fromInsurance = roundCrypto(
+      Decimal.min(left, Decimal.max(wallet.insurancePayInBalance, 0)),
+    );
+    const belowZero = roundCrypto(left.minus(fromInsurance));
+    const operations = [
+      ...(fromMain.gt(0) || belowZero.gt(0)
+        ? [
+            this.journalMove(
+              manager,
+              wallet,
+              BalanceKind.Main,
+              fromMain.plus(belowZero).neg(),
+              BalanceOperationType.Transaction,
+              transactionId,
+            ),
+          ]
+        : []),
+      ...(fromInsurance.gt(0)
+        ? [
+            this.journalMove(
+              manager,
+              wallet,
+              BalanceKind.InsurancePayIn,
+              fromInsurance.neg(),
+              BalanceOperationType.Transaction,
+              transactionId,
+            ),
+          ]
+        : []),
+    ];
 
-      const remainder = roundCrypto(amount.minus(fromMain));
-      if (remainder.gt(0)) {
-        operations.push(
-          this.journalMove(
-            manager,
-            wallet,
-            BalanceKind.InsurancePayIn,
-            remainder.neg(),
-            BalanceOperationType.Transaction,
-            transactionId,
-          ),
-        );
-      }
+    await manager.save(wallet);
+    await manager.save(operations);
+  }
 
-      await manager.save(wallet);
-      await manager.save(operations);
-    });
+  async debitLeadShareWithin(
+    manager: EntityManager,
+    userId: string,
+    amount: Crypto,
+    transactionId: string,
+  ): Promise<void> {
+    const wallet = await this.lock(manager, userId);
+    const operation = this.journalMove(
+      manager,
+      wallet,
+      BalanceKind.Main,
+      amount.neg(),
+      BalanceOperationType.Transaction,
+      transactionId,
+    );
+
+    await manager.save(wallet);
+    await manager.save(operation);
   }
 
   async transferWithin(

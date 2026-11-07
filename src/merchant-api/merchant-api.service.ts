@@ -21,6 +21,9 @@ import { MerchantMethodsService } from '../merchants/services/merchant-methods.s
 import { MerchantSettingsService } from '../merchants/services/merchant-settings.service';
 import { MobileOperatorsService } from '../mobile-operators/mobile-operators.service';
 import { PaymentDto, toPaymentDto } from '../transactions/dto/payment.dto';
+import { DisputesService } from '../transactions/services/disputes.service';
+import { TransactionFilesService } from '../transactions/services/transaction-files.service';
+import { TransactionFileKind } from '../transactions/types/transaction-file-kind.enum';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { NoRequisiteFoundError } from '../transactions/exceptions/no-requisite-found.exception';
 import { MerchantDealsService } from '../transactions/services/merchant-deals.service';
@@ -69,6 +72,8 @@ export class MerchantApiService {
     private readonly deals: MerchantDealsService,
     private readonly rates: RateService,
     private readonly selection: RequisiteSelectionService,
+    private readonly disputes: DisputesService,
+    private readonly files: TransactionFilesService,
   ) {}
 
   async findPayment(merchantId: string, id: string): Promise<PaymentDto> {
@@ -110,6 +115,21 @@ export class MerchantApiService {
     );
 
     return this.paymentOf(deal);
+  }
+
+  async openDispute(
+    merchantId: string,
+    id: string,
+    fileKeys: readonly string[],
+    amountFiat: Fiat | null,
+  ): Promise<PaymentDto> {
+    return this.paymentOf(
+      await this.disputes.openByMerchant(merchantId, id, fileKeys, amountFiat),
+    );
+  }
+
+  async cancelDispute(merchantId: string, id: string): Promise<PaymentDto> {
+    return this.paymentOf(await this.disputes.cancelByMerchant(merchantId, id));
   }
 
   async extendPaymentTimer(
@@ -618,12 +638,21 @@ export class MerchantApiService {
         deal.payoutBankId,
       ]),
     );
-    const [requisites, banks] = await Promise.all([
+    const dealIds = deals.map((deal) => deal.id);
+    const [requisites, banks, disputes, files] = await Promise.all([
       requisiteIds.length
         ? this.bankDetails.findByIdsWithDeleted(requisiteIds)
         : Promise.resolve([]),
       bankIds.length ? this.banks.findByIds(bankIds) : Promise.resolve([]),
+      this.disputes.latestOf(dealIds),
+      this.files.listOf(dealIds),
     ]);
+    const disputeOf = new Map(
+      disputes.map((dispute) => [dispute.transactionId, dispute]),
+    );
+    const merchantFiles = files.filter(
+      (file) => file.kind === TransactionFileKind.DisputeReceipt,
+    );
     const requisiteById = new Map(requisites.map((row) => [row.id, row]));
     const bankById = new Map(banks.map((bank) => [bank.id, bank]));
     const bankOf = (id: number | null | undefined): Bank | null =>
@@ -638,6 +667,8 @@ export class MerchantApiService {
             : requestedBank,
         payoutBank: bankOf(deal.payoutBankId),
         paymentPageUrl: null,
+        dispute: disputeOf.get(deal.id) ?? null,
+        disputeFiles: merchantFiles,
       }),
     );
   }

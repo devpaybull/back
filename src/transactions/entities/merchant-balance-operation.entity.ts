@@ -17,7 +17,10 @@ import { MerchantBalance } from './merchant-balance.entity';
 import { Transaction } from './transaction.entity';
 
 @Entity('merchant_balance_operations')
-@Index(['transactionId', 'type'], { unique: true })
+@Index(['transactionId', 'type'], {
+  unique: true,
+  where: `"type" <> 'deal_dispute'`,
+})
 @Index(['accountTransactionId', 'type'], { unique: true })
 export class MerchantBalanceOperation {
   @PrimaryGeneratedColumn()

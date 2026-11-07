@@ -138,6 +138,7 @@ const build = (rows: Transaction[]) => {
       return row;
     }),
     find: jest.fn(async () => []),
+    exists: jest.fn(async () => false),
   };
   const repository = {
     find: jest.fn(

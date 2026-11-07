@@ -4,6 +4,9 @@ import {
   NestModule,
   RequestMethod,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { MulterModule } from '@nestjs/platform-express';
+import { dealFileUploadOptions } from '../file-storage/utils/deal-file-upload-options';
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
@@ -12,6 +15,7 @@ import { MerchantsModule } from '../merchants/merchants.module';
 import { MobileOperatorsModule } from '../mobile-operators/mobile-operators.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { MerchantApiAccountController } from './controllers/merchant-api-account.controller';
+import { MerchantApiFilesController } from './controllers/merchant-api-files.controller';
 import { MerchantApiPaymentsController } from './controllers/merchant-api-payments.controller';
 import { MerchantApiKeyGuard } from './guards/merchant-api-key.guard';
 import { MerchantApiService } from './merchant-api.service';
@@ -26,8 +30,16 @@ import { MerchantRequestLogMiddleware } from './middleware/merchant-request-log.
     BankDetailsModule,
     CounterpartiesModule,
     MobileOperatorsModule,
+    MulterModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: dealFileUploadOptions,
+    }),
   ],
-  controllers: [MerchantApiAccountController, MerchantApiPaymentsController],
+  controllers: [
+    MerchantApiAccountController,
+    MerchantApiPaymentsController,
+    MerchantApiFilesController,
+  ],
   providers: [MerchantApiKeyGuard, MerchantApiService],
 })
 export class MerchantApiModule implements NestModule {

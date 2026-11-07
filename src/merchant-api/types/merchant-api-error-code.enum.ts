@@ -18,6 +18,8 @@ export enum MerchantApiErrorCode {
   DealNotCancelable = 'DEAL_NOT_CANCELABLE',
   TimerNotExtendable = 'TIMER_NOT_EXTENDABLE',
   DisputeNotAllowed = 'DISPUTE_NOT_ALLOWED',
+  FileTooLarge = 'FILE_TOO_LARGE',
+  FileTypeNotAllowed = 'FILE_TYPE_NOT_ALLOWED',
   InternalError = 'INTERNAL_ERROR',
   RateUnavailable = 'RATE_UNAVAILABLE',
 }

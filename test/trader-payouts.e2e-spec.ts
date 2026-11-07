@@ -570,14 +570,16 @@ describe('the trader cabinet: pay-outs', () => {
       .expect(404);
   });
 
-  it('refuses a text field beside the receipt', async () => {
+  it('refuses more text fields than an upload may carry', async () => {
     const id = await createPayOut();
     await take(id).expect(200);
 
     await e2e.http
       .post(`/trader/payouts/${id}/complete`)
       .set(bearer(trader))
-      .field('padding', 'x')
+      .field('a', 'x')
+      .field('b', 'x')
+      .field('c', 'x')
       .attach('file', PDF, 'r.pdf')
       .expect(400);
     expect((await dealRow(id)).status).toBe('active');

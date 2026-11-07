@@ -64,6 +64,7 @@ const build = () => {
     }),
     find: jest.fn(async (): Promise<unknown[]> => []),
     findOne: jest.fn(async (): Promise<unknown> => null),
+    exists: jest.fn(async () => false),
   };
   const dataSource = {
     transaction: jest.fn(
