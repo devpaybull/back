@@ -685,4 +685,80 @@ describe('TraderSettingsService', () => {
       );
     });
   });
+
+  describe('switchTrading', () => {
+    const mayEnable = jest.fn(async () => undefined);
+
+    beforeEach(() => mayEnable.mockClear());
+
+    it('switches on after the check and records the trader as the actor', async () => {
+      build(base({ tradingEnabled: false }));
+
+      const row = await service.switchTrading(uuidOf(1), true, null, mayEnable);
+
+      expect(row.tradingEnabled).toBe(true);
+      expect(mayEnable).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: uuidOf(1),
+          targetUserId: uuidOf(1),
+          action: ActivityAction.TradingEnabled,
+          impersonatorUserId: null,
+        },
+        expect.anything(),
+      );
+    });
+
+    it('switches off with no check at all', async () => {
+      build(base({ tradingEnabled: true }));
+
+      const row = await service.switchTrading(
+        uuidOf(1),
+        false,
+        uuidOf(8),
+        mayEnable,
+      );
+
+      expect(row.tradingEnabled).toBe(false);
+      expect(mayEnable).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: ActivityAction.TradingDisabled,
+          impersonatorUserId: uuidOf(8),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it.each([true, false])(
+      'repeating %s changes nothing and writes no audit row',
+      async (value) => {
+        build(base({ tradingEnabled: value }));
+
+        const row = await service.switchTrading(
+          uuidOf(1),
+          value,
+          null,
+          mayEnable,
+        );
+
+        expect(row.tradingEnabled).toBe(value);
+        expect(mayEnable).not.toHaveBeenCalled();
+        expect(manager.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+      },
+    );
+
+    it('leaves the flag off when the check refuses', async () => {
+      build(base({ tradingEnabled: false }));
+      mayEnable.mockRejectedValueOnce(new Error('refused'));
+
+      await expect(
+        service.switchTrading(uuidOf(1), true, null, mayEnable),
+      ).rejects.toThrow('refused');
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
 });

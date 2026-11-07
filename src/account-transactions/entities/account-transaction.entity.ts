@@ -12,6 +12,7 @@ import {
 import { Crypto } from '../../common/types/crypto';
 import { cryptoColumn } from '../../common/utils/crypto-column';
 import { Merchant } from '../../merchants/entities/merchant.entity';
+import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { TronAddress } from '../../tron/entities/tron-address.entity';
 import { User } from '../../users/entities/user.entity';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
@@ -39,6 +40,14 @@ import { AccountTransactionType } from '../types/account-transaction-type.enum';
 @Check(
   'account_transactions_withdrawal_address',
   `"type" <> 'withdrawal' OR "address" IS NOT NULL`,
+)
+@Check(
+  'account_transactions_own_balances_only_on_transfer',
+  `"type" = 'transfer' OR "fromBalance" IS NULL`,
+)
+@Check(
+  'account_transactions_own_balances_both_or_neither',
+  `("fromBalance" IS NULL) = ("toBalance" IS NULL)`,
 )
 export class AccountTransaction {
   @PrimaryGeneratedColumn()
@@ -80,6 +89,12 @@ export class AccountTransaction {
   @Index()
   @Column({ type: 'uuid', nullable: true })
   counterpartyUserId: string | null;
+
+  @Column({ type: 'enum', enum: BalanceKind, nullable: true })
+  fromBalance: BalanceKind | null;
+
+  @Column({ type: 'enum', enum: BalanceKind, nullable: true })
+  toBalance: BalanceKind | null;
 
   @Column(cryptoColumn({ nullable: true }))
   amount: Crypto | null;

@@ -128,7 +128,7 @@ describe('mobile operators and the two requisite types', () => {
 
   it('creates a mobile requisite without a bank', async () => {
     const created = await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         deviceId,
@@ -166,7 +166,7 @@ describe('mobile operators and the two requisite types', () => {
   it('refuses a mobile requisite without a phone, without an operator or with a bank', async () => {
     const refused = (body: Record<string, unknown>) =>
       e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(trader))
         .send({
           deviceId,
@@ -188,7 +188,7 @@ describe('mobile operators and the two requisite types', () => {
 
   it('refuses a card-or-sbp requisite with neither a card nor a phone, or without a bank', async () => {
     await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         deviceId,
@@ -199,7 +199,7 @@ describe('mobile operators and the two requisite types', () => {
       })
       .expect(400);
     await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         deviceId,
@@ -209,7 +209,7 @@ describe('mobile operators and the two requisite types', () => {
       })
       .expect(400);
     await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         deviceId,
@@ -223,7 +223,7 @@ describe('mobile operators and the two requisite types', () => {
 
   it('carries a card and a phone on one requisite, and moves it between the types', async () => {
     const created = await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         deviceId,
@@ -243,7 +243,7 @@ describe('mobile operators and the two requisite types', () => {
     const id = created.body.data.id as string;
 
     const mobile = await e2e.http
-      .patch(`/bank-details/${id}`)
+      .patch(`/trader/requisites/${id}`)
       .set(bearer(trader))
       .send({ type: 'mobile', mobileOperatorId: operatorId })
       .expect(200);
@@ -257,7 +257,7 @@ describe('mobile operators and the two requisite types', () => {
     });
 
     const back = await e2e.http
-      .patch(`/bank-details/${id}`)
+      .patch(`/trader/requisites/${id}`)
       .set(bearer(trader))
       .send({ type: 'card_or_sbp', bankId })
       .expect(200);

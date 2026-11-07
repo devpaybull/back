@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Body,
   Controller,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -40,9 +39,7 @@ import { formatCrypto } from '../../common/utils/format-crypto';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { formatRate } from '../../common/utils/format-rate';
 import { roundFiat } from '../../common/utils/round-fiat';
-import { toCrypto } from '../../common/utils/to-crypto';
 import { toFiat } from '../../common/utils/to-fiat';
-import { MerchantAttachmentsService } from '../../merchants/services/merchant-attachments.service';
 import { MerchantsService } from '../../merchants/services/merchants.service';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { Transaction } from '../../transactions/entities/transaction.entity';
@@ -50,7 +47,6 @@ import { PayoutPricingService } from '../../transactions/services/payout-pricing
 import { TraderPayoutActionsService } from '../../transactions/services/trader-payout-actions.service';
 import { TraderPayoutsService } from '../../transactions/services/trader-payouts.service';
 import { TransactionFilesService } from '../../transactions/services/transaction-files.service';
-import { WalletService } from '../../transactions/services/wallet.service';
 import { TraderPayoutFilter } from '../../transactions/types/trader-payout-filter';
 import { TransactionSortField } from '../../transactions/types/transaction-sort-field.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
@@ -77,13 +73,6 @@ const SORT_FIELDS: Record<TraderPayoutSortField, TransactionSortField> = {
   [TraderPayoutSortField.TraderCommission]:
     TransactionSortField.TraderCommission,
 };
-const EMPTY_POOL_META = (query: ListPayoutPoolQueryDto) => ({
-  total: 0,
-  page: query.page,
-  limit: query.limit,
-  pages: 0,
-});
-
 const distinct = <T>(values: (T | null | undefined)[]): T[] => [
   ...new Set(
     values.filter((value): value is T => value !== null && value !== undefined),
@@ -102,8 +91,6 @@ export class TraderPayoutsController {
     private readonly pricing: PayoutPricingService,
     private readonly files: TransactionFilesService,
     private readonly settings: TraderSettingsService,
-    private readonly wallets: WalletService,
-    private readonly attachments: MerchantAttachmentsService,
     private readonly merchants: MerchantsService,
     private readonly banks: BanksService,
     private readonly config: ConfigService,
@@ -113,43 +100,24 @@ export class TraderPayoutsController {
   @ApiOperation({
     summary: '«Доступные»: the pool of untaken pay-outs this trader may take',
     description:
-      'A 403 PAYOUTS_ACCESS_DISABLED when the access is off; empty when the pay-out insurance is below its minimum. The recipient is shown whole. A pay-out that passes the insurance room here can still be refused by take once it is priced exactly.',
+      'A 403 PAYOUTS_ACCESS_DISABLED when the access is off, a 403 TRADING_DISABLED when the trading switch is off; empty when the pay-out insurance is below its minimum. The recipient is shown whole. A pay-out that passes the insurance room here can still be refused by take once it is priced exactly.',
   })
   @ApiPagedResponse(TraderPayoutDto)
   async available(
     @CurrentUser() trader: AuthenticatedUser,
     @Query() query: ListPayoutPoolQueryDto,
   ): Promise<Page<TraderPayoutDto>> {
-    const now = new Date();
     const settings = await this.settings.findOrDefaults(trader.id);
 
-    if (!settings.payoutTradingEnabled) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'PAYOUTS_ACCESS_DISABLED',
-        message: 'Pay-outs are switched off for this trader',
-      });
-    }
+    this.actions.assertPoolOpen(settings);
 
-    const wallet = await this.wallets.findByUserId(trader.id);
-    const belowMinimum = (wallet?.insurancePayOutBalance ?? toCrypto(0)).lt(
-      this.settings.insurancePayOutMinOf(settings),
-    );
-    const room = settings.trustedUser
-      ? null
-      : await this.actions.insuranceRoomOf(wallet, trader.id, now);
-
-    if (belowMinimum || room?.lte(0)) {
-      return new Page([], EMPTY_POOL_META(query));
-    }
-
-    const [exclusions, merchantIds] = await Promise.all([
-      this.attachments.exclusionsOfTrader(trader.id),
+    const merchantIds =
       query.merchantGroupId === undefined
         ? undefined
-        : this.merchants.findIdsOfGroup(query.merchantGroupId),
-    ]);
-    const page = await this.payouts.pool(
+        : await this.merchants.findIdsOfGroup(query.merchantGroupId);
+    const page = await this.actions.poolOf(
+      trader.id,
+      settings,
       {
         method: query.method,
         amountFrom:
@@ -163,9 +131,7 @@ export class TraderPayoutsController {
         sortBy: SORT_FIELDS[query.sortBy],
         sortOrder: query.sortOrder,
       },
-      exclusions,
-      room,
-      now,
+      new Date(),
     );
     const rows = await this.withDetails(page.items);
 

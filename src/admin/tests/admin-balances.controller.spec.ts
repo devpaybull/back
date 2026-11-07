@@ -13,6 +13,7 @@ import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AuthenticatedUser } from '../../common/types/token';
 import { Wallet } from '../../transactions/entities/wallet.entity';
+import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { User } from '../../users/entities/user.entity';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AdminBalancesController } from '../controllers/admin-balances.controller';
@@ -43,14 +44,14 @@ describe('AdminBalancesController', () => {
     }) as Wallet;
 
   let wallets: { findByUserId: jest.Mock };
-  let transfers: { transfer: jest.Mock };
+  let transfers: { transfer: jest.Mock; transferOwnBalance: jest.Mock };
   let directory: { findById: jest.Mock; findByLogin: jest.Mock };
   let debts: { debtIdsByBalanceOperation: jest.Mock };
   let controller: AdminBalancesController;
 
   beforeEach(() => {
     wallets = { findByUserId: jest.fn() };
-    transfers = { transfer: jest.fn() };
+    transfers = { transfer: jest.fn(), transferOwnBalance: jest.fn() };
     directory = { findById: jest.fn(), findByLogin: jest.fn() };
     debts = { debtIdsByBalanceOperation: jest.fn(async () => new Map()) };
     controller = new AdminBalancesController(
@@ -192,6 +193,93 @@ describe('AdminBalancesController', () => {
           amount: '50.000000',
         }),
       );
+    });
+  });
+
+  describe('balanceTransfer', () => {
+    const dto = {
+      from: BalanceKind.Main,
+      to: BalanceKind.InsurancePayOut,
+      amount: '100',
+      comment: 'support ticket',
+    };
+    const moved = {
+      id: 5,
+      type: AccountTransactionType.Transfer,
+      status: AccountTransactionStatus.Completed,
+      statusReason: null,
+      userId: uuidOf(1),
+      counterpartyUserId: uuidOf(1),
+      fromBalance: BalanceKind.Main,
+      toBalance: BalanceKind.InsurancePayOut,
+      amount: toCrypto(100),
+      comment: 'support ticket',
+      actorUserId: admin.id,
+      completedAt: new Date(),
+      createdAt: new Date(),
+    } as AccountTransaction;
+
+    it('moves the money for admin and superadmin, without the 14-day check', async () => {
+      directory.findById.mockResolvedValue(sender);
+      transfers.transferOwnBalance.mockResolvedValue(moved);
+
+      const result = await controller.balanceTransfer(uuidOf(1), dto, admin);
+
+      expect(transfers.transferOwnBalance).toHaveBeenCalledWith({
+        userId: uuidOf(1),
+        from: BalanceKind.Main,
+        to: BalanceKind.InsurancePayOut,
+        amount: toCrypto(100),
+        actorUserId: admin.id,
+        impersonatorUserId: null,
+        comment: 'support ticket',
+      });
+      expect(result).toMatchObject({
+        fromBalance: BalanceKind.Main,
+        toBalance: BalanceKind.InsurancePayOut,
+        amount: '100.000000',
+      });
+    });
+
+    it('refuses the same balance on both sides', async () => {
+      await expect(
+        controller.balanceTransfer(
+          uuidOf(1),
+          { ...dto, to: BalanceKind.Main },
+          admin,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses the admin’s own account, an unknown one, and a role they cannot act on', async () => {
+      await expect(
+        controller.balanceTransfer(admin.id, dto, admin),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      directory.findById.mockResolvedValue(null);
+      await expect(
+        controller.balanceTransfer(uuidOf(1), dto, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      directory.findById.mockResolvedValue({
+        id: uuidOf(1),
+        role: Role.Superadmin,
+      });
+      await expect(
+        controller.balanceTransfer(uuidOf(1), dto, admin),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('refuses an account that is not a trader', async () => {
+      directory.findById.mockResolvedValue({
+        id: uuidOf(1),
+        role: Role.LeadTrader,
+      });
+
+      await expect(
+        controller.balanceTransfer(uuidOf(1), dto, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(transfers.transferOwnBalance).not.toHaveBeenCalled();
     });
   });
 });

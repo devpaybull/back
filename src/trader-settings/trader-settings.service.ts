@@ -18,6 +18,7 @@ const UNIQUE_VIOLATION = '23505';
 const UNSAVED_DEFAULTS = {
   tradingEnabled: false,
   payoutTradingEnabled: true,
+  withdrawalsEnabled: true,
   maxActivePayouts: null,
   individualRatesEnabled: false,
   autoBuybackEnabled: false,
@@ -38,6 +39,7 @@ const isUniqueViolation = (error: unknown): boolean =>
 const FLAG_KEYS = [
   'tradingEnabled',
   'payoutTradingEnabled',
+  'withdrawalsEnabled',
   'individualRatesEnabled',
   'payInAntifraudEnabled',
   'qrBuybackAccess',
@@ -201,6 +203,40 @@ export class TraderSettingsService {
             : ActivityAction.AutoBuybackDisabled,
         );
       }
+
+      return settings;
+    });
+  }
+
+  switchTrading(
+    userId: string,
+    enabled: boolean,
+    impersonatorUserId: string | null,
+    assertMayEnable: (
+      manager: EntityManager,
+      settings: TraderSettings,
+    ) => Promise<void>,
+  ): Promise<TraderSettings> {
+    return this.dataSource.transaction(async (manager) => {
+      const settings = await this.ensureWithin(manager, userId);
+
+      if (settings.tradingEnabled === enabled) return settings;
+
+      if (enabled) await assertMayEnable(manager, settings);
+
+      settings.tradingEnabled = enabled;
+      await manager.save(settings);
+      await this.audit.record(
+        {
+          actorUserId: userId,
+          targetUserId: userId,
+          action: enabled
+            ? ActivityAction.TradingEnabled
+            : ActivityAction.TradingDisabled,
+          impersonatorUserId,
+        },
+        manager,
+      );
 
       return settings;
     });

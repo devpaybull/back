@@ -31,11 +31,11 @@ import {
 import { DepositsService } from '../services/deposits.service';
 import { AccountTransaction } from '../entities/account-transaction.entity';
 
-@ApiTags('Finances')
+@ApiTags('Trader · Finances')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Trader, Role.LeadTrader)
-@Controller('users/me')
+@Controller('trader')
 export class DepositsController {
   constructor(private readonly deposits: DepositsService) {}
 

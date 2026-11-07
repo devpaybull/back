@@ -19,11 +19,11 @@ import {
 import { ListFinanceOperationsQueryDto } from '../dto/list-finance-operations-query.dto';
 import { AccountTransactionsService } from '../services/account-transactions.service';
 
-@ApiTags('Finances')
+@ApiTags('Trader · Finances')
 @ApiBearerAuth()
 @UseGuards(RolesGuard)
 @Roles(Role.Trader, Role.LeadTrader)
-@Controller('users/me/finance-operations')
+@Controller('trader/finance-operations')
 export class FinanceOperationsController {
   constructor(
     private readonly operations: AccountTransactionsService,

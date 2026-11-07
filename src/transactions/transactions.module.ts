@@ -45,6 +45,7 @@ import { PayoutTimersService } from './services/payout-timers.service';
 import { TraderDealActionsService } from './services/trader-deal-actions.service';
 import { TraderPayoutActionsService } from './services/trader-payout-actions.service';
 import { TraderPayoutsService } from './services/trader-payouts.service';
+import { TradingSwitchService } from './services/trading-switch.service';
 import { TransactionFilesService } from './services/transaction-files.service';
 import { TraderDealsService } from './services/trader-deals.service';
 import { TransactionService } from './services/transaction.service';
@@ -94,6 +95,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     TraderDealsService,
     TraderDealActionsService,
     TraderPayoutsService,
+    TradingSwitchService,
     TraderPayoutActionsService,
     PayoutPricingService,
     PayoutTimersService,
@@ -114,6 +116,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     TraderDealsService,
     TraderDealActionsService,
     TraderPayoutsService,
+    TradingSwitchService,
     TraderPayoutActionsService,
     PayoutPricingService,
     PayoutTimersService,

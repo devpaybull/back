@@ -19,7 +19,7 @@ describe('PAYOUT_MODE=manual end to end', () => {
     await scan(e2e);
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(trader))
         .expect(200)
     ).body.data.address;
@@ -32,7 +32,7 @@ describe('PAYOUT_MODE=manual end to end', () => {
   it('never sends a withdrawal itself, and an admin closes a queued one by hash', async () => {
     const destination = 'TKTX96CBxr5kvhjsDHcqoiPWZageGxoTW3';
     await e2e.http
-      .get('/users/me/withdrawals/quote')
+      .get('/trader/withdrawals/quote')
       .set(bearer(trader))
       .query({ address: destination, amount: '100' })
       .expect(200);
@@ -40,7 +40,7 @@ describe('PAYOUT_MODE=manual end to end', () => {
       .getRepository(User)
       .update(trader.user.id, { withdrawalTotpLastStep: null });
     const created = await e2e.http
-      .post('/users/me/withdrawals')
+      .post('/trader/withdrawals')
       .set(bearer(trader))
       .send({
         amount: '100',

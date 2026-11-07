@@ -285,7 +285,7 @@ describe('the merchant API: keys, access and the request log', () => {
       });
       requisiteId = (
         await e2e.http
-          .post('/bank-details')
+          .post('/trader/requisites')
           .set(bearer(trader))
           .send({
             type: 'card_or_sbp',

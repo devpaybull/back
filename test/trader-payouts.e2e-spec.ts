@@ -149,9 +149,11 @@ describe('the trader cabinet: pay-outs', () => {
     trader = await e2e.createUser(Role.Trader);
     other = await e2e.createUser(Role.Trader);
     for (const user of [trader, other]) {
-      await e2e.dataSource
-        .getRepository(TraderSettings)
-        .save({ userId: user.user.id, trustedUser: true });
+      await e2e.dataSource.getRepository(TraderSettings).save({
+        userId: user.user.id,
+        trustedUser: true,
+        tradingEnabled: true,
+      });
       await armTrader(user);
     }
   });
@@ -462,7 +464,7 @@ describe('the trader cabinet: pay-outs', () => {
     const poor = await e2e.createUser(Role.Trader);
     await e2e.dataSource
       .getRepository(TraderSettings)
-      .save({ userId: poor.user.id });
+      .save({ userId: poor.user.id, tradingEnabled: true });
     await armTrader(poor, 100);
     const id = await createPayOut();
 
@@ -474,7 +476,7 @@ describe('the trader cabinet: pay-outs', () => {
     const standard = await e2e.createUser(Role.Trader);
     await e2e.dataSource
       .getRepository(TraderSettings)
-      .save({ userId: standard.user.id });
+      .save({ userId: standard.user.id, tradingEnabled: true });
     await armTrader(standard, 300);
 
     const big = await createPayOut('27000');

@@ -3,6 +3,7 @@ import { Crypto } from '../../common/types/crypto';
 export interface TraderSettingsChanges {
   tradingEnabled?: boolean;
   payoutTradingEnabled?: boolean;
+  withdrawalsEnabled?: boolean;
   maxActivePayouts?: number | null;
   individualRatesEnabled?: boolean;
   autoBuybackEnabled?: boolean;

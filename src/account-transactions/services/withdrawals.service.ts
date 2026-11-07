@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -10,8 +11,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, MoreThan, Not } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, MoreThan, Not } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
+import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { MerchantActivityAction } from '../../audit/types/merchant-activity-action.enum';
 import { Crypto } from '../../common/types/crypto';
@@ -74,6 +76,7 @@ export class WithdrawalsService {
     private readonly merchantSettings: MerchantSettingsService,
     tracker: TronConfirmationTracker,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly traderSettings: TraderSettingsService,
   ) {
     tracker.register(WITHDRAWAL_KEY_PREFIX, (manager, transfer) =>
       this.onAttemptFinal(manager, transfer),
@@ -86,6 +89,8 @@ export class WithdrawalsService {
     amount: Crypto,
     now = new Date(),
   ): Promise<WithdrawalQuoteResult> {
+    await this.assertWithdrawalsEnabled(userId);
+
     const destination = await this.destinationOf(userId, address);
     const wallet = await this.wallets.findByUserId(userId);
     const available = wallet
@@ -128,6 +133,8 @@ export class WithdrawalsService {
     input: WithdrawalRequestInput,
     now = new Date(),
   ): Promise<AccountTransaction> {
+    await this.assertWithdrawalsEnabled(input.userId);
+
     const user = await this.acceptTotp(input, now);
 
     this.assertSecurityHoldOver(
@@ -895,6 +902,18 @@ export class WithdrawalsService {
     await this.assertDailyLimit(manager, input.userId, input.amount, now);
   }
 
+  private async assertWithdrawalsEnabled(userId: string): Promise<void> {
+    const settings = await this.traderSettings.findOrDefaults(userId);
+
+    if (!settings.withdrawalsEnabled) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'WITHDRAWALS_DISABLED',
+        message: 'Withdrawals are switched off for this trader',
+      });
+    }
+  }
+
   private async assertDailyLimit(
     manager: EntityManager,
     userId: string,
@@ -914,6 +933,7 @@ export class WithdrawalsService {
           type: AccountTransactionType.Transfer,
           userId,
           actorUserId: userId,
+          fromBalance: IsNull(),
           createdAt: since,
         },
       ],

@@ -31,11 +31,11 @@ describe('deposits end to end', () => {
   describe('the deposit address', () => {
     it('issues the first HD address on first use, with a QR, and keeps it', async () => {
       const first = await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(trader))
         .expect(200);
       const second = await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(trader))
         .expect(200);
 
@@ -49,7 +49,7 @@ describe('deposits end to end', () => {
     it('gives a second trader the next index', async () => {
       const other = await e2e.createUser(Role.LeadTrader);
       const response = await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(other))
         .expect(200);
 
@@ -61,11 +61,11 @@ describe('deposits end to end', () => {
         status: UserStatus.Suspended,
       });
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(suspended))
         .expect(403);
       await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(suspended))
         .send({ amount: '50' })
         .expect(403);
@@ -73,10 +73,10 @@ describe('deposits end to end', () => {
 
     it('is not reachable for an admin or anonymously', async () => {
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(admin))
         .expect(403);
-      await e2e.http.get('/users/me/deposit-address').expect(401);
+      await e2e.http.get('/trader/deposit-address').expect(401);
     });
   });
 
@@ -90,7 +90,7 @@ describe('deposits end to end', () => {
         {},
       ]) {
         await e2e.http
-          .post('/users/me/deposits')
+          .post('/trader/deposits')
           .set(bearer(trader))
           .send(body)
           .expect(400);
@@ -99,17 +99,17 @@ describe('deposits end to end', () => {
 
     it('opens requests up to DEPOSIT_MAX_ACTIVE_REQUESTS, then 409', async () => {
       const first = await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(trader))
         .send({ amount: '500' })
         .expect(201);
       await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(trader))
         .send({ amount: '120.5' })
         .expect(201);
       await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(trader))
         .send({ amount: '10' })
         .expect(409);
@@ -130,17 +130,17 @@ describe('deposits end to end', () => {
     it('answers another trader’s request with a 404', async () => {
       const other = await e2e.createUser(Role.Trader);
       const list = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(trader))
         .expect(200);
       const id = list.body.data[0].id;
 
       await e2e.http
-        .get(`/users/me/deposits/${id}`)
+        .get(`/trader/deposits/${id}`)
         .set(bearer(other))
         .expect(404);
       await e2e.http
-        .post(`/users/me/deposits/${id}/cancel`)
+        .post(`/trader/deposits/${id}/cancel`)
         .set(bearer(other))
         .expect(404);
     });
@@ -155,7 +155,7 @@ describe('deposits end to end', () => {
       await scan(e2e);
 
       const history = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(trader))
         .query({ type: 'deposit', sortOrder: 'asc' })
         .expect(200);
@@ -180,7 +180,7 @@ describe('deposits end to end', () => {
       await scan(e2e);
 
       const history = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(trader))
         .query({ type: 'deposit', status: 'completed', sortOrder: 'asc' })
         .expect(200);
@@ -310,13 +310,13 @@ describe('deposits end to end', () => {
   describe('expiry and cancel', () => {
     it('expires a request whose window has passed and still credits a late transfer', async () => {
       await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(trader))
         .send({ amount: '600' })
         .expect(201);
       await expireDeposits(e2e, new Date(Date.now() + 46 * 60_000));
       const pending = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(trader))
         .query({ type: 'deposit', status: 'canceled' })
         .expect(200);
@@ -331,14 +331,14 @@ describe('deposits end to end', () => {
 
     it('lets the trader cancel only a pending request', async () => {
       const opened = await e2e.http
-        .post('/users/me/deposits')
+        .post('/trader/deposits')
         .set(bearer(trader))
         .send({ amount: '42' })
         .expect(201);
       const id = opened.body.data.id;
 
       const canceled = await e2e.http
-        .post(`/users/me/deposits/${id}/cancel`)
+        .post(`/trader/deposits/${id}/cancel`)
         .set(bearer(trader))
         .expect(200);
       expect(canceled.body.data).toEqual(
@@ -348,7 +348,7 @@ describe('deposits end to end', () => {
         }),
       );
       await e2e.http
-        .post(`/users/me/deposits/${id}/cancel`)
+        .post(`/trader/deposits/${id}/cancel`)
         .set(bearer(trader))
         .expect(409);
     });
@@ -413,7 +413,7 @@ describe('deposits end to end', () => {
       const late = await e2e.createUser(Role.Trader);
       const lateAddress = (
         await e2e.http
-          .get('/users/me/deposit-address')
+          .get('/trader/deposit-address')
           .set(bearer(late))
           .expect(200)
       ).body.data.address;

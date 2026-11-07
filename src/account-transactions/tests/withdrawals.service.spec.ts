@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   NotFoundException,
@@ -71,7 +72,7 @@ const withdrawal = (
     ...overrides,
   }) as AccountTransaction;
 
-const build = () => {
+const build = (setup: { withdrawalsEnabled?: boolean } = {}) => {
   const findOneBy = new Map<unknown, Finder>();
   const findBy = new Map<unknown, Finder>();
   const countBy = new Map<unknown, Finder>();
@@ -192,6 +193,11 @@ const build = () => {
   const merchantSettings = {
     allowsOverdraftWithin: jest.fn(async () => false),
   };
+  const traderSettings = {
+    findOrDefaults: jest.fn(async () => ({
+      withdrawalsEnabled: setup.withdrawalsEnabled ?? true,
+    })),
+  };
   const service = new WithdrawalsService(
     config as never,
     wallets as never,
@@ -207,6 +213,7 @@ const build = () => {
     merchantSettings as never,
     tracker as never,
     dataSource as never,
+    traderSettings as never,
   );
 
   return {
@@ -1332,6 +1339,39 @@ describe('WithdrawalsService.payableByHand', () => {
       expect(service.payableByHand({ merchantId: null })).toEqual([
         AccountTransactionStatus.Failed,
       ]);
+    });
+  });
+
+  describe('withdrawalsEnabled', () => {
+    const codeOf = (error: unknown): unknown =>
+      (error as ForbiddenException).getResponse() as { code?: string };
+
+    it('refuses a quote before anything is estimated', async () => {
+      const { service, wallets } = build({ withdrawalsEnabled: false });
+
+      const error = await service
+        .quote(uuidOf(1), 'TAddress', toCrypto(10))
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect(codeOf(error)).toMatchObject({ code: 'WITHDRAWALS_DISABLED' });
+      expect(wallets.findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('refuses a request before the TOTP code is spent', async () => {
+      const { service, credentials } = build({ withdrawalsEnabled: false });
+
+      const error = await service
+        .request({
+          userId: uuidOf(1),
+          address: 'TAddress',
+          amount: toCrypto(10),
+          totp: '000000',
+        })
+        .catch((e: unknown) => e);
+
+      expect(codeOf(error)).toMatchObject({ code: 'WITHDRAWALS_DISABLED' });
+      expect(credentials.spendWithdrawalTotp).not.toHaveBeenCalled();
     });
   });
 });

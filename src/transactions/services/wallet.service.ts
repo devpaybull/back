@@ -13,6 +13,7 @@ import { Page, toPage } from '../../common/types/page';
 import { roundCrypto } from '../../common/utils/round-crypto';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { toCrypto } from '../../common/utils/to-crypto';
+import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { Wallet } from '../entities/wallet.entity';
@@ -21,8 +22,11 @@ import { BalanceOperationListQuery } from '../types/balance-operation-list-query
 import { balanceOperationWhere } from '../utils/balance-operation-where';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
+import { OwnBalanceMove } from '../types/own-balance-move';
 import { canWithdrawInsurance } from '../utils/can-withdraw-insurance';
 import { isNightWindow } from '../utils/is-night-window';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class WalletService {
@@ -100,12 +104,44 @@ export class WalletService {
   }
 
   async isTradingEnabled(userId: string): Promise<boolean> {
-    const wallet = await this.requireWallet(userId);
-    const threshold = toCrypto(
-      this.config.get<string>('MAIN_BALANCE_MIN_THRESHOLD', '0'),
-    );
+    return this.isMainAboveThreshold(await this.requireWallet(userId));
+  }
 
-    return this.getAvailableMain(wallet).gt(threshold);
+  async assertMayEnableTradingWithin(
+    manager: EntityManager,
+    userId: string,
+    settings: TraderSettings,
+  ): Promise<void> {
+    const wallet = await manager.findOne(Wallet, { where: { userId } });
+    const insurance = wallet?.insurancePayInBalance ?? toCrypto(0);
+
+    if (insurance.lt(this.traderSettings.insurancePayInMinOf(settings))) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'INSURANCE_BELOW_MINIMUM',
+        message: 'The pay-in insurance is below its minimum',
+      });
+    }
+
+    if (!wallet || !this.isMainAboveThreshold(wallet)) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'BALANCE_BELOW_THRESHOLD',
+        message: 'The available balance is below the trading threshold',
+      });
+    }
+  }
+
+  async stampAcceptedDealWithin(
+    manager: EntityManager,
+    userId: string,
+    acceptedAt: Date,
+  ): Promise<void> {
+    await manager.update(
+      Wallet,
+      { userId },
+      { lastAcceptedDealAt: acceptedAt },
+    );
   }
 
   async hasMinInsurancePayIn(userId: string): Promise<boolean> {
@@ -391,6 +427,51 @@ export class WalletService {
     await manager.save([debit, credit]);
   }
 
+  async moveBetweenOwnBalancesWithin(
+    manager: EntityManager,
+    move: OwnBalanceMove,
+  ): Promise<void> {
+    const [wallet] = await this.lockWalletsWithin(
+      manager,
+      [move.userId],
+      [move.userId],
+    );
+
+    if (move.from !== BalanceKind.Main && move.insuranceDelayCheckedAt) {
+      this.assertInsuranceDelayOver(wallet, move.insuranceDelayCheckedAt);
+    }
+
+    if (this.availableOf(wallet, move.from).lt(move.amount)) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Insufficient available balance',
+      });
+    }
+
+    const debit = this.journalMove(
+      manager,
+      wallet,
+      move.from,
+      move.amount.neg(),
+      BalanceOperationType.Internal,
+      null,
+    );
+    const credit = this.journalMove(
+      manager,
+      wallet,
+      move.to,
+      move.amount,
+      BalanceOperationType.Internal,
+      null,
+    );
+    debit.accountTransactionId = move.accountTransactionId;
+    credit.accountTransactionId = move.accountTransactionId;
+
+    await manager.save(wallet);
+    await manager.save([debit, credit]);
+  }
+
   async creditDepositWithin(
     manager: EntityManager,
     userId: string,
@@ -476,6 +557,51 @@ export class WalletService {
     await manager.save(wallet);
 
     return manager.save(operation);
+  }
+
+  private isMainAboveThreshold(wallet: Wallet): boolean {
+    return this.getAvailableMain(wallet).gt(
+      toCrypto(this.config.get<string>('MAIN_BALANCE_MIN_THRESHOLD', '0')),
+    );
+  }
+
+  private assertInsuranceDelayOver(wallet: Wallet, now: Date): void {
+    const lastAcceptedDealAt = wallet.lastAcceptedDealAt ?? null;
+    const delayDays = this.config.get<number>(
+      'INSURANCE_WITHDRAWAL_DELAY_DAYS',
+      14,
+    );
+
+    if (
+      lastAcceptedDealAt === null ||
+      canWithdrawInsurance(lastAcceptedDealAt, now, delayDays)
+    ) {
+      return;
+    }
+
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'INSURANCE_WITHDRAWAL_DELAYED',
+      message: `The insurance can be moved ${delayDays} days after the last accepted deal`,
+      availableAt: new Date(
+        lastAcceptedDealAt.getTime() + delayDays * DAY_MS,
+      ).toISOString(),
+    });
+  }
+
+  private availableOf(wallet: Wallet, kind: BalanceKind): Crypto {
+    switch (kind) {
+      case BalanceKind.Main:
+        return this.getAvailableMain(wallet);
+      case BalanceKind.InsurancePayIn:
+        return roundCrypto(
+          wallet.insurancePayInBalance.minus(wallet.insurancePayInReserved),
+        );
+      case BalanceKind.InsurancePayOut:
+        return roundCrypto(
+          wallet.insurancePayOutBalance.minus(wallet.insurancePayOutReserved),
+        );
+    }
   }
 
   private async requireWallet(userId: string): Promise<Wallet> {

@@ -32,11 +32,11 @@ import {
 } from '../dto/withdrawal-quote.dto';
 import { WithdrawalsService } from '../services/withdrawals.service';
 
-@ApiTags('Finances')
+@ApiTags('Trader · Finances')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Trader, Role.LeadTrader)
-@Controller('users/me/withdrawals')
+@Controller('trader/withdrawals')
 export class WithdrawalsController {
   constructor(private readonly withdrawals: WithdrawalsService) {}
 

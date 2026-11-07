@@ -226,7 +226,7 @@ describe('disputes', () => {
     });
     await e2e.dataSource.getRepository(Wallet).save({ userId: trader.user.id });
     await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         type: 'card_or_sbp',

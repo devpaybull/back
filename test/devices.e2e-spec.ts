@@ -15,7 +15,7 @@ describe('device pairing and heartbeat', () => {
   const createDevice = async (name: string): Promise<number> =>
     (
       await e2e.http
-        .post('/devices')
+        .post('/trader/devices')
         .set(bearer(trader))
         .send({ type: 'android', name })
         .expect(201)
@@ -23,7 +23,7 @@ describe('device pairing and heartbeat', () => {
 
   const issuePairing = async (id: number): Promise<string> => {
     const issued = await e2e.http
-      .post(`/devices/${id}/pairing`)
+      .post(`/trader/devices/${id}/pairing`)
       .set(bearer(trader))
       .expect(201);
 
@@ -42,7 +42,7 @@ describe('device pairing and heartbeat', () => {
     const id = await createDevice('Pixel 7');
 
     const fresh = await e2e.http
-      .get(`/devices/${id}`)
+      .get(`/trader/devices/${id}`)
       .set(bearer(trader))
       .expect(200);
     expect(fresh.body.data).toMatchObject({
@@ -53,7 +53,7 @@ describe('device pairing and heartbeat', () => {
     });
 
     const issued = await e2e.http
-      .post(`/devices/${id}/pairing`)
+      .post(`/trader/devices/${id}/pairing`)
       .set(bearer(trader))
       .expect(201);
     const payload = JSON.parse(issued.body.data.qrPayload);
@@ -63,7 +63,7 @@ describe('device pairing and heartbeat', () => {
     );
 
     await e2e.http
-      .post(`/devices/${id}/pairing`)
+      .post(`/trader/devices/${id}/pairing`)
       .set(bearer(stranger))
       .expect(404);
 
@@ -91,8 +91,12 @@ describe('device pairing and heartbeat', () => {
       .getRepository(Device)
       .update({ id }, { lastActivity: new Date(Date.now() - 10 * 60 * 1000) });
     expect(
-      (await e2e.http.get(`/devices/${id}`).set(bearer(trader)).expect(200))
-        .body.data.network,
+      (
+        await e2e.http
+          .get(`/trader/devices/${id}`)
+          .set(bearer(trader))
+          .expect(200)
+      ).body.data.network,
     ).toBe('offline');
 
     const beat = await e2e.http
@@ -103,7 +107,7 @@ describe('device pairing and heartbeat', () => {
     expect(beat.body.data).toEqual({ heartbeatSeconds: 30 });
 
     const online = await e2e.http
-      .get(`/devices/${id}`)
+      .get(`/trader/devices/${id}`)
       .set(bearer(trader))
       .expect(200);
     expect(online.body.data).toMatchObject({
@@ -115,7 +119,7 @@ describe('device pairing and heartbeat', () => {
     });
 
     const counts = await e2e.http
-      .get('/devices/counts')
+      .get('/trader/devices/counts')
       .set(bearer(trader))
       .expect(200);
     expect(counts.body.data).toEqual({ total: 1, online: 1, offline: 0 });
@@ -125,12 +129,20 @@ describe('device pairing and heartbeat', () => {
       .update({ id }, { lastActivity: new Date(Date.now() - 121 * 1000) });
 
     expect(
-      (await e2e.http.get(`/devices/${id}`).set(bearer(trader)).expect(200))
-        .body.data.network,
+      (
+        await e2e.http
+          .get(`/trader/devices/${id}`)
+          .set(bearer(trader))
+          .expect(200)
+      ).body.data.network,
     ).toBe('offline');
     expect(
-      (await e2e.http.get('/devices/counts').set(bearer(trader)).expect(200))
-        .body.data,
+      (
+        await e2e.http
+          .get('/trader/devices/counts')
+          .set(bearer(trader))
+          .expect(200)
+      ).body.data,
     ).toEqual({ total: 1, online: 0, offline: 1 });
   });
 
@@ -138,7 +150,7 @@ describe('device pairing and heartbeat', () => {
     const id = await createDevice('Old name');
 
     const patched = await e2e.http
-      .patch(`/devices/${id}`)
+      .patch(`/trader/devices/${id}`)
       .set(bearer(trader))
       .send({
         name: 'Work phone',
@@ -153,12 +165,12 @@ describe('device pairing and heartbeat', () => {
     });
 
     await e2e.http
-      .patch(`/devices/${id}`)
+      .patch(`/trader/devices/${id}`)
       .set(bearer(trader))
       .send({ appVersion: '9.9.9' })
       .expect(400);
     await e2e.http
-      .patch(`/devices/${id}`)
+      .patch(`/trader/devices/${id}`)
       .set(bearer(trader))
       .send({ type: 'ios' })
       .expect(400);
@@ -229,7 +241,10 @@ describe('device pairing and heartbeat', () => {
     ).body.data.deviceToken;
     const unused = await issuePairing(id);
 
-    await e2e.http.delete(`/devices/${id}`).set(bearer(trader)).expect(200);
+    await e2e.http
+      .delete(`/trader/devices/${id}`)
+      .set(bearer(trader))
+      .expect(200);
 
     await e2e.http
       .post('/device/heartbeat')

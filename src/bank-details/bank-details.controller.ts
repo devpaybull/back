@@ -50,18 +50,18 @@ import { UpdateBankDetailsDto } from './dto/update-bank-details.dto';
 import { BankDetails } from './entities/bank-details.entity';
 import { withFiatLimits } from './utils/with-fiat-limits';
 
-@ApiTags('Bank details')
+@ApiTags('Trader · Requisites')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Trader)
-@Controller('bank-details')
+@Controller('trader')
 export class BankDetailsController {
   constructor(
     private readonly bankDetails: BankDetailsService,
     private readonly turnover: BankDetailsTurnoverService,
   ) {}
 
-  @Post()
+  @Post('requisites')
   @WriteAccess()
   @ApiOperation({ summary: 'Attaches bank details to the signed-in account' })
   @ApiEnvelopeResponse(OwnBankDetailsDto, { status: HttpStatus.CREATED })
@@ -77,7 +77,7 @@ export class BankDetailsController {
     );
   }
 
-  @Get()
+  @Get('requisites')
   @ApiOperation({ summary: "Lists the signed-in account's own bank details" })
   @ApiPagedResponse(OwnBankDetailsDto)
   async list(
@@ -89,7 +89,7 @@ export class BankDetailsController {
     return new Page(await this.withExtras(page.items), page.meta);
   }
 
-  @Get('counts')
+  @Get('requisites/counts')
   @ApiOperation({
     summary: 'Counts the signed-in account’s bank details per status',
     description:
@@ -107,7 +107,7 @@ export class BankDetailsController {
     });
   }
 
-  @Get('history')
+  @Get('requisites/history')
   @ApiOperation({
     summary: 'Lists what happened to the signed-in account’s bank details',
     description:
@@ -123,7 +123,7 @@ export class BankDetailsController {
     );
   }
 
-  @Get('history/unread')
+  @Get('requisites/history/unread')
   @ApiOperation({ summary: 'Counts the unread rows of the history' })
   @ApiEnvelopeResponse(RequisiteHistoryReadStateDto)
   historyReadState(
@@ -132,7 +132,7 @@ export class BankDetailsController {
     return this.bankDetails.historyReadState(trader.id);
   }
 
-  @Post('history/read')
+  @Post('requisites/history/read')
   @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({ summary: 'Marks the whole history read, as of now' })
@@ -143,7 +143,7 @@ export class BankDetailsController {
     return this.bankDetails.markHistoryRead(trader.id);
   }
 
-  @Get('tags')
+  @Get('requisite-tags')
   @ApiOperation({ summary: 'Lists the signed-in account’s tags' })
   @ApiPagedResponse(BankDetailTagDto)
   async listTags(
@@ -155,7 +155,7 @@ export class BankDetailsController {
     );
   }
 
-  @Post('tags')
+  @Post('requisite-tags')
   @WriteAccess()
   @ApiOperation({
     summary: 'Creates a tag of the signed-in account',
@@ -172,7 +172,7 @@ export class BankDetailsController {
     );
   }
 
-  @Delete('tags/:tagId')
+  @Delete('requisite-tags/:tagId')
   @WriteAccess()
   @ApiOperation({
     summary: 'Deletes a tag of the signed-in account',
@@ -187,7 +187,7 @@ export class BankDetailsController {
     await this.bankDetails.deleteTag(trader.id, tagId);
   }
 
-  @Get(':id')
+  @Get('requisites/:id')
   @ApiOperation({
     summary: 'Reads one of the signed-in account’s bank details',
   })
@@ -203,7 +203,7 @@ export class BankDetailsController {
     return this.withExtrasOf(found);
   }
 
-  @Post(':id/enable')
+  @Post('requisites/:id/enable')
   @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({
@@ -226,7 +226,7 @@ export class BankDetailsController {
     );
   }
 
-  @Post(':id/disable')
+  @Post('requisites/:id/disable')
   @HttpCode(HttpStatus.OK)
   @WriteAccess()
   @ApiOperation({
@@ -247,7 +247,7 @@ export class BankDetailsController {
     );
   }
 
-  @Delete(':id')
+  @Delete('requisites/:id')
   @WriteAccess()
   @ApiOperation({
     summary: 'Deletes bank details the signed-in account owns',
@@ -266,7 +266,7 @@ export class BankDetailsController {
     );
   }
 
-  @Patch(':id')
+  @Patch('requisites/:id')
   @WriteAccess()
   @ApiOperation({ summary: 'Updates bank details the signed-in account owns' })
   @ApiEnvelopeResponse(OwnBankDetailsDto)

@@ -149,7 +149,7 @@ describe('merchant callbacks', () => {
       insurancePayInBalance: toCrypto(1000),
     });
     await e2e.http
-      .post('/bank-details')
+      .post('/trader/requisites')
       .set(bearer(trader))
       .send({
         type: 'card_or_sbp',

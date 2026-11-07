@@ -44,7 +44,7 @@ describe('the counterparties page', () => {
   const requisite = async (body: Record<string, unknown>) =>
     (
       await e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(trader))
         .send({
           bankId,
@@ -368,7 +368,7 @@ describe('the counterparties page', () => {
       .send({ bankDetailsId: cardRequisite, bindingType: 'cards' })
       .expect(201);
     await e2e.http
-      .patch(`/bank-details/${cardRequisite}`)
+      .patch(`/trader/requisites/${cardRequisite}`)
       .set(bearer(trader))
       .send({ counterpartyOnly: false })
       .expect(200);
@@ -380,7 +380,7 @@ describe('the counterparties page', () => {
       .send({ bankDetailsId: sbpRequisite, bindingType: 'sbp' })
       .expect(201);
     await e2e.http
-      .delete(`/bank-details/${sbpRequisite}`)
+      .delete(`/trader/requisites/${sbpRequisite}`)
       .set(bearer(trader))
       .expect(200);
     expect((await card(second)).binding).toBeNull();

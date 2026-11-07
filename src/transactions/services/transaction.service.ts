@@ -429,6 +429,14 @@ export class TransactionService {
       );
     }
 
+    if (input.traderUserId) {
+      await this.wallets.stampAcceptedDealWithin(
+        manager,
+        input.traderUserId,
+        createdAt,
+      );
+    }
+
     const transaction = manager.create(Transaction, {
       kind: input.kind,
       status,

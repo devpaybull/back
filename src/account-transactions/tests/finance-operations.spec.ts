@@ -7,6 +7,7 @@ import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { toCrypto } from '../../common/utils/to-crypto';
+import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { FinanceOperationsController } from '../controllers/finance-operations.controller';
 import { FinanceHistoryFilterDto } from '../dto/finance-history-filter.dto';
@@ -134,6 +135,43 @@ describe('ListFinanceOperationsQueryDto', () => {
 
     await expect(validate(dto)).resolves.toEqual([]);
     expect(dto.status).toEqual(['failed', 'canceled']);
+  });
+});
+
+describe('toFinanceOperationDto between the account’s own balances', () => {
+  const own = (fromBalance: BalanceKind, toBalance: BalanceKind) =>
+    row({
+      type: AccountTransactionType.Transfer,
+      counterpartyUserId: ME,
+      fromBalance,
+      toBalance,
+      address: null,
+      txHash: null,
+    });
+
+  it('names the two balances and leaves the wallet and the hash empty', () => {
+    expect(
+      toFinanceOperationDto(
+        own(BalanceKind.Main, BalanceKind.InsurancePayIn),
+        ME,
+      ),
+    ).toMatchObject({
+      type: 'transfer',
+      direction: 'out',
+      fromBalance: BalanceKind.Main,
+      toBalance: BalanceKind.InsurancePayIn,
+      address: null,
+      txHash: null,
+    });
+  });
+
+  it('reads money back to main as incoming', () => {
+    expect(
+      toFinanceOperationDto(
+        own(BalanceKind.InsurancePayOut, BalanceKind.Main),
+        ME,
+      ).direction,
+    ).toBe('in');
   });
 });
 

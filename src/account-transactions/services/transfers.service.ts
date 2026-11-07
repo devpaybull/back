@@ -7,6 +7,7 @@ import { WalletService } from '../../transactions/services/wallet.service';
 import { AccountTransaction } from '../entities/account-transaction.entity';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
 import { AccountTransactionType } from '../types/account-transaction-type.enum';
+import { OwnBalanceTransferInput } from '../types/own-balance-transfer-input';
 import { TransferInput } from '../types/transfer-input';
 
 @Injectable()
@@ -55,6 +56,54 @@ export class TransfersService {
             accountTransactionId: transfer.id,
             fromUserId: input.fromUserId,
             toUserId: input.toUserId,
+            amount: formatCrypto(input.amount),
+          },
+        },
+        manager,
+      );
+
+      return transfer;
+    });
+  }
+
+  transferOwnBalance(
+    input: OwnBalanceTransferInput,
+  ): Promise<AccountTransaction> {
+    return this.dataSource.transaction(async (manager) => {
+      const transfer = await manager.save(
+        manager.create(AccountTransaction, {
+          type: AccountTransactionType.Transfer,
+          status: AccountTransactionStatus.Completed,
+          statusReason: null,
+          userId: input.userId,
+          counterpartyUserId: input.userId,
+          fromBalance: input.from,
+          toBalance: input.to,
+          amount: input.amount,
+          comment: input.comment ?? null,
+          actorUserId: input.actorUserId,
+          completedAt: new Date(),
+        }),
+      );
+
+      await this.wallets.moveBetweenOwnBalancesWithin(manager, {
+        userId: input.userId,
+        from: input.from,
+        to: input.to,
+        amount: input.amount,
+        accountTransactionId: transfer.id,
+        insuranceDelayCheckedAt: input.insuranceDelayCheckedAt,
+      });
+      await this.audit.record(
+        {
+          actorUserId: input.actorUserId,
+          targetUserId: input.userId,
+          impersonatorUserId: input.impersonatorUserId ?? null,
+          action: 'balance.transfer',
+          metadata: {
+            accountTransactionId: transfer.id,
+            from: input.from,
+            to: input.to,
             amount: formatCrypto(input.amount),
           },
         },

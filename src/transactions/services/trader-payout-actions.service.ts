@@ -10,6 +10,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { Crypto } from '../../common/types/crypto';
+import { Page, toPage } from '../../common/types/page';
 import { formatCrypto } from '../../common/utils/format-crypto';
 import { roundCrypto } from '../../common/utils/round-crypto';
 import { toCrypto } from '../../common/utils/to-crypto';
@@ -18,6 +19,7 @@ import { addCalendarDays } from '../../common/utils/add-calendar-days';
 import { calendarDateIn } from '../../common/utils/calendar-date-in';
 import { zonedMidnight } from '../../common/utils/zoned-midnight';
 import { MerchantAttachmentsService } from '../../merchants/services/merchant-attachments.service';
+import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { PayoutDecline } from '../entities/payout-decline.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
@@ -27,12 +29,14 @@ import { PayoutDeclineKind } from '../types/payout-decline-kind.enum';
 import { PayoutDeclineReason } from '../types/payout-decline-reason.enum';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TraderDealActor } from '../types/trader-deal-actor';
+import { TraderPayoutListQuery } from '../types/trader-payout-list-query';
 import { TransactionFileKind } from '../types/transaction-file-kind.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { TransactionUpload } from '../types/transaction-upload';
 import { PayoutPricingService } from './payout-pricing.service';
 import { TransactionFilesService } from './transaction-files.service';
+import { TraderPayoutsService } from './trader-payouts.service';
 import { TransactionService } from './transaction.service';
 import { WalletService } from './wallet.service';
 
@@ -60,7 +64,52 @@ export class TraderPayoutActionsService {
     private readonly pricing: PayoutPricingService,
     private readonly files: TransactionFilesService,
     private readonly config: ConfigService,
+    private readonly payouts: TraderPayoutsService,
   ) {}
+
+  assertPoolOpen(settings: TraderSettings): void {
+    if (!settings.payoutTradingEnabled) {
+      throw refused(
+        ForbiddenException,
+        403,
+        'PAYOUTS_ACCESS_DISABLED',
+        'Pay-outs are switched off for this trader',
+      );
+    }
+
+    if (!settings.tradingEnabled) {
+      throw refused(
+        ForbiddenException,
+        403,
+        'TRADING_DISABLED',
+        'Trading is switched off',
+      );
+    }
+  }
+
+  async poolOf(
+    traderUserId: string,
+    settings: TraderSettings,
+    query: TraderPayoutListQuery,
+    now: Date,
+  ): Promise<Page<Transaction>> {
+    const wallet = await this.wallets.findByUserId(traderUserId);
+    const belowMinimum = (wallet?.insurancePayOutBalance ?? toCrypto(0)).lt(
+      this.settings.insurancePayOutMinOf(settings),
+    );
+    const room = settings.trustedUser
+      ? null
+      : await this.insuranceRoomOf(wallet, traderUserId, now);
+
+    if (belowMinimum || room?.lte(0)) return toPage([[], 0], query);
+
+    return this.payouts.pool(
+      query,
+      await this.attachments.exclusionsOfTrader(traderUserId),
+      room,
+      now,
+    );
+  }
 
   async take(
     actor: TraderDealActor,
@@ -71,14 +120,7 @@ export class TraderPayoutActionsService {
       actor.traderUserId,
     );
 
-    if (!traderSettings.payoutTradingEnabled) {
-      throw refused(
-        ForbiddenException,
-        403,
-        'PAYOUTS_ACCESS_DISABLED',
-        'Pay-outs are switched off for this trader',
-      );
-    }
+    this.assertPoolOpen(traderSettings);
 
     const offered = await this.dataSource.manager.findOne(Transaction, {
       where: { id, kind: TransactionKind.PayOut },
@@ -176,6 +218,12 @@ export class TraderPayoutActionsService {
           );
         }
       }
+
+      await this.wallets.stampAcceptedDealWithin(
+        manager,
+        actor.traderUserId,
+        now,
+      );
 
       Object.assign(deal, {
         traderUserId: actor.traderUserId,

@@ -333,7 +333,7 @@ describe('VictoriaLogsService', () => {
           answer(
             200,
             JSON.stringify({
-              _msg: 'PATCH /bank-details/:id',
+              _msg: 'PATCH /trader/requisites/:id',
               _time: '2026-01-01T00:00:00Z',
               auditId: '3',
               source: 'http',

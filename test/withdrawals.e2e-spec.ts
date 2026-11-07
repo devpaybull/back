@@ -24,7 +24,7 @@ describe('withdrawals end to end', () => {
   let trader: E2eUser;
   const quote = (amount: string, address = DESTINATION) =>
     e2e.http
-      .get('/users/me/withdrawals/quote')
+      .get('/trader/withdrawals/quote')
       .set(bearer(trader))
       .query({ address, amount });
   const resetCodes = () =>
@@ -42,7 +42,7 @@ describe('withdrawals end to end', () => {
     if (!totp) await resetCodes();
 
     return e2e.http
-      .post('/users/me/withdrawals')
+      .post('/trader/withdrawals')
       .set(bearer(trader))
       .send({ amount, address, totp: totp ?? (await e2e.totp(trader)) })
       .expect(status);
@@ -50,7 +50,7 @@ describe('withdrawals end to end', () => {
   const fund = async (user: E2eUser, amount: string) => {
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(user))
         .expect(200)
     ).body.data.address;
@@ -96,7 +96,7 @@ describe('withdrawals end to end', () => {
 
     it('refuses an invalid address, a platform wallet and the trader’s own deposit address', async () => {
       const own = (
-        await e2e.http.get('/users/me/deposit-address').set(bearer(trader))
+        await e2e.http.get('/trader/deposit-address').set(bearer(trader))
       ).body.data.address;
 
       for (const address of [
@@ -182,7 +182,7 @@ describe('withdrawals end to end', () => {
       expect(balances.mainReserved).toBe('72.590000');
 
       await e2e.http
-        .post(`/users/me/withdrawals/${created.body.data.id}/cancel`)
+        .post(`/trader/withdrawals/${created.body.data.id}/cancel`)
         .set(bearer(trader))
         .expect(200);
       expect((await mainBalance(e2e, admin, trader.user.id)).mainReserved).toBe(
@@ -356,7 +356,7 @@ describe('withdrawals end to end', () => {
 
       expect(e2e.node.broadcasts).toHaveLength(2);
       const row = await e2e.http
-        .get(`/users/me/withdrawals/${created.body.data.id}`)
+        .get(`/trader/withdrawals/${created.body.data.id}`)
         .set(bearer(trader))
         .expect(200);
       expect(row.body.data).toEqual(
@@ -385,7 +385,7 @@ describe('withdrawals end to end', () => {
       const recipient = await e2e.createUser(Role.Trader);
       const address = (
         await e2e.http
-          .get('/users/me/deposit-address')
+          .get('/trader/deposit-address')
           .set(bearer(recipient))
           .expect(200)
       ).body.data.address;
@@ -412,7 +412,7 @@ describe('withdrawals end to end', () => {
       ).toBe('30.000000');
 
       const recipientHistory = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(recipient))
         .expect(200);
       expect(recipientHistory.body.data[0]).toEqual(
@@ -428,7 +428,7 @@ describe('withdrawals end to end', () => {
   describe('history and admin surface', () => {
     it('shows the trader their own operations with tab counts', async () => {
       const counts = await e2e.http
-        .get('/users/me/finance-operations/stats')
+        .get('/trader/finance-operations/stats')
         .set(bearer(trader))
         .expect(200);
       expect(counts.body.data).toEqual(
@@ -443,18 +443,18 @@ describe('withdrawals end to end', () => {
     it('answers someone else’s withdrawal with 404 and refuses traders on admin routes', async () => {
       const other = await e2e.createUser(Role.Trader);
       const list = await e2e.http
-        .get('/users/me/finance-operations')
+        .get('/trader/finance-operations')
         .set(bearer(trader))
         .query({ type: 'withdrawal' })
         .expect(200);
       const id = list.body.data[0].id;
 
       await e2e.http
-        .get(`/users/me/withdrawals/${id}`)
+        .get(`/trader/withdrawals/${id}`)
         .set(bearer(other))
         .expect(404);
       await e2e.http
-        .post(`/users/me/withdrawals/${id}/cancel`)
+        .post(`/trader/withdrawals/${id}/cancel`)
         .set(bearer(other))
         .expect(404);
       await e2e.http.get('/admin/withdrawals').set(bearer(trader)).expect(403);

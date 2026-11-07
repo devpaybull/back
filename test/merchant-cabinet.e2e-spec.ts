@@ -80,7 +80,7 @@ describe('the merchant cabinet', () => {
       .expect(201);
     const bankDetailsId = (
       await e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(trader))
         .send({
           bankId: bank.body.data.id,

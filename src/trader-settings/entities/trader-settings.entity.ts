@@ -31,6 +31,9 @@ export class TraderSettings {
   @Column({ default: true })
   payoutTradingEnabled: boolean;
 
+  @Column({ default: true })
+  withdrawalsEnabled: boolean;
+
   @Column({ type: 'int', nullable: true })
   maxActivePayouts: number | null;
 

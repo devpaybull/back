@@ -64,7 +64,7 @@ describe('the merchants page', () => {
       .expect(201);
     bankDetailsId = (
       await e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(trader))
         .send({
           bankId: bank.body.data.id,

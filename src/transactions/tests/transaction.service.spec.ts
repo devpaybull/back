@@ -72,6 +72,7 @@ const build = () => {
     ),
   };
   const wallets = {
+    stampAcceptedDealWithin: jest.fn(async () => undefined),
     reserveMainEscrowWithin: jest.fn<Promise<void>, [unknown, string, Crypto]>(
       async () => undefined,
     ),
@@ -1471,6 +1472,35 @@ describe('TransactionService, counterparty statistics', () => {
       expect(
         built.counterpartyStats.recordDealCreatedWithin,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the last accepted deal', () => {
+    it('stamps the trader’s wallet with the deal’s creation, after reserving', async () => {
+      const built = build();
+
+      const deal = await built.service.createDeal(input());
+
+      expect(built.wallets.stampAcceptedDealWithin).toHaveBeenCalledWith(
+        built.manager,
+        deal.traderUserId,
+        deal.createdAt,
+      );
+      expect(
+        built.wallets.reserveMainEscrowWithin.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        built.wallets.stampAcceptedDealWithin.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('stamps nothing when a pay-out has no trader yet', async () => {
+      const built = build();
+
+      await built.service.createDeal(
+        input({ kind: TransactionKind.PayOut, traderUserId: null as never }),
+      );
+
+      expect(built.wallets.stampAcceptedDealWithin).not.toHaveBeenCalled();
     });
   });
 

@@ -47,7 +47,7 @@ describe('the Tron engine with KEY_SOURCE=env and no Vault', () => {
   it('deposits, sweeps and withdraws with the keys from the environment', async () => {
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(trader))
         .expect(200)
     ).body.data.address as string;
@@ -67,12 +67,12 @@ describe('the Tron engine with KEY_SOURCE=env and no Vault', () => {
     expect(e2e.node.usdtOf(HOT_ADDRESS)).toBe(usdtSun('100'));
 
     await e2e.http
-      .get('/users/me/withdrawals/quote')
+      .get('/trader/withdrawals/quote')
       .set(bearer(trader))
       .query({ address: DESTINATION, amount: '20' })
       .expect(200);
     await e2e.http
-      .post('/users/me/withdrawals')
+      .post('/trader/withdrawals')
       .set(bearer(trader))
       .send({
         amount: '20',

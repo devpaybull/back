@@ -48,6 +48,7 @@ import {
   AccountTransactionDto,
   toAccountTransactionDto,
 } from '../dto/account-transaction.dto';
+import { AdminBalanceTransferDto } from '../dto/admin-balance-transfer.dto';
 import { AdminTransferDto } from '../dto/admin-transfer.dto';
 import { BalancesDto, toBalancesDto } from '../dto/balances.dto';
 import { canIssueRole } from '../utils/can-issue-role';
@@ -194,6 +195,52 @@ export class AdminBalancesController {
     });
 
     return toAccountTransactionDto(transfer);
+  }
+
+  @Post('balance-transfer')
+  @WriteAccess()
+  @ApiOperation({
+    summary: 'Moves USDT between a trader’s own balances',
+    description:
+      'Any direction between main, insurance pay-in and insurance pay-out; the 14-day delay does not apply. Not enough available is a 409 INSUFFICIENT_BALANCE. Audited as balance.transfer.',
+  })
+  @ApiEnvelopeResponse(AccountTransactionDto, { status: HttpStatus.CREATED })
+  async balanceTransfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminBalanceTransferDto,
+    @CurrentUser() admin: AuthenticatedUser,
+  ): Promise<AccountTransactionDto> {
+    if (dto.from === dto.to) {
+      throw new BadRequestException('The two balances must differ');
+    }
+
+    if (admin.id === id) {
+      throw new ForbiddenException('Cannot transfer on your own account');
+    }
+
+    const trader = await this.directory.findById(id);
+
+    if (!trader) throw new NotFoundException('User not found');
+
+    if (!canIssueRole(admin.role, trader.role)) {
+      throw new ForbiddenException(`Cannot act on a ${trader.role}`);
+    }
+
+    if (trader.role !== Role.Trader) {
+      throw new BadRequestException('The account must be a trader');
+    }
+
+    return toAccountTransactionDto(
+      await this.transfers.transferOwnBalance({
+        userId: id,
+        from: dto.from,
+        to: dto.to,
+        amount: toCrypto(dto.amount),
+        actorUserId: admin.id,
+        impersonatorUserId: admin.impersonatedBy ?? null,
+        comment: dto.comment,
+      }),
+    );
   }
 
   private async requireUser(id: string): Promise<void> {

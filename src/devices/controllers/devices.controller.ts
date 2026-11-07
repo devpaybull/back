@@ -34,11 +34,11 @@ import { OwnDeviceDto, toOwnDeviceDto } from '../dto/own-device.dto';
 import { UpdateDeviceDto } from '../dto/update-device.dto';
 import { Device } from '../entities/device.entity';
 
-@ApiTags('Devices')
+@ApiTags('Trader · Devices')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Trader)
-@Controller('devices')
+@Controller('trader/devices')
 export class DevicesController {
   constructor(
     private readonly devices: DevicesService,
@@ -50,7 +50,7 @@ export class DevicesController {
   @ApiOperation({
     summary: 'Registers a device against the signed-in account',
     description:
-      'The owner supplies a name and the type (android, the default). The phone app reports its model, phone and version when it pairs through POST /devices/:id/pairing.',
+      'The owner supplies a name and the type (android, the default). The phone app reports its model, phone and version when it pairs through POST /trader/devices/:id/pairing.',
   })
   @ApiEnvelopeResponse(OwnDeviceDto, { status: HttpStatus.CREATED })
   async create(

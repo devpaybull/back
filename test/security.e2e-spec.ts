@@ -6,16 +6,16 @@ import { bearer, scan, usdtSun } from './support/flow';
 import { EXTERNAL_SENDER, HOT_ADDRESS } from './support/keys';
 
 const TRADER_ROUTES: [string, string][] = [
-  ['get', '/users/me/deposit-address'],
-  ['post', '/users/me/deposits'],
-  ['get', '/users/me/deposits/1'],
-  ['post', '/users/me/deposits/1/cancel'],
-  ['get', '/users/me/withdrawals/quote'],
-  ['post', '/users/me/withdrawals'],
-  ['get', '/users/me/withdrawals/1'],
-  ['post', '/users/me/withdrawals/1/cancel'],
-  ['get', '/users/me/finance-operations'],
-  ['get', '/users/me/finance-operations/stats'],
+  ['get', '/trader/deposit-address'],
+  ['post', '/trader/deposits'],
+  ['get', '/trader/deposits/1'],
+  ['post', '/trader/deposits/1/cancel'],
+  ['get', '/trader/withdrawals/quote'],
+  ['post', '/trader/withdrawals'],
+  ['get', '/trader/withdrawals/1'],
+  ['post', '/trader/withdrawals/1/cancel'],
+  ['get', '/trader/finance-operations'],
+  ['get', '/trader/finance-operations/stats'],
 ];
 
 const ADMIN_ROUTES: [string, string][] = [
@@ -90,7 +90,7 @@ describe('security of the money endpoints', () => {
       status: UserStatus.Blocked,
     });
 
-    await call('get', '/users/me/finance-operations', blocked).expect(401);
+    await call('get', '/trader/finance-operations', blocked).expect(401);
   });
 
   it('lets a suspended trader read the history and nothing that writes', async () => {
@@ -98,11 +98,11 @@ describe('security of the money endpoints', () => {
       status: UserStatus.Suspended,
     });
 
-    await call('get', '/users/me/finance-operations', suspended).expect(200);
-    await call('get', '/users/me/withdrawals/quote', suspended)
+    await call('get', '/trader/finance-operations', suspended).expect(200);
+    await call('get', '/trader/withdrawals/quote', suspended)
       .query({ address: EXTERNAL_SENDER, amount: '10' })
       .expect(403);
-    await call('post', '/users/me/withdrawals', suspended)
+    await call('post', '/trader/withdrawals', suspended)
       .send({ amount: '10', address: EXTERNAL_SENDER, totp: '123456' })
       .expect(403);
   });
@@ -124,12 +124,10 @@ describe('security of the money endpoints', () => {
       { amount: 10, address: EXTERNAL_SENDER, totp: '123456' },
       { amount: '10', address: EXTERNAL_SENDER, totp: '12345' },
     ]) {
-      await call('post', '/users/me/withdrawals', trader)
-        .send(body)
-        .expect(400);
+      await call('post', '/trader/withdrawals', trader).send(body).expect(400);
     }
 
-    await call('get', '/users/me/deposits/abc', trader).expect(400);
+    await call('get', '/trader/deposits/abc', trader).expect(400);
     await call('post', '/admin/withdrawals/abc/reject', admin)
       .send({ reason: 'x' })
       .expect(400);
@@ -142,11 +140,11 @@ describe('security of the money endpoints', () => {
   });
 
   it('redacts the TOTP in the http audit trail', async () => {
-    await call('post', '/users/me/withdrawals', trader)
+    await call('post', '/trader/withdrawals', trader)
       .send({ amount: '10', address: EXTERNAL_SENDER, totp: '654321' })
       .expect(401);
     const rows = await e2e.dataSource.getRepository(AuditLog).find({
-      where: { path: '/users/me/withdrawals' },
+      where: { path: '/trader/withdrawals' },
     });
 
     expect(rows.length).toBeGreaterThan(0);
@@ -162,11 +160,9 @@ describe('security of the money endpoints', () => {
     const fresh = await e2e.createUser(Role.Trader);
     await e2e.vault.stop();
 
-    const response = await call(
-      'get',
-      '/users/me/deposit-address',
-      fresh,
-    ).expect(503);
+    const response = await call('get', '/trader/deposit-address', fresh).expect(
+      503,
+    );
 
     expect(JSON.stringify(response.body)).not.toMatch(/vault|abandon|token/i);
     await e2e.vault.start();

@@ -63,7 +63,7 @@ describe('requisite selection against Postgres', () => {
     });
     const requisite = (
       await e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(user))
         .send({
           type: 'card_or_sbp',

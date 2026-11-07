@@ -23,10 +23,7 @@ const settle = async (e2e: E2eContext) => {
 
 const depositTo = async (e2e: E2eContext, user: E2eUser, amount: string) => {
   const address = (
-    await e2e.http
-      .get('/users/me/deposit-address')
-      .set(bearer(user))
-      .expect(200)
+    await e2e.http.get('/trader/deposit-address').set(bearer(user)).expect(200)
   ).body.data.address as string;
   e2e.node.externalUsdtTransfer(STRANGER, address, usdtSun(amount));
   await scan(e2e);

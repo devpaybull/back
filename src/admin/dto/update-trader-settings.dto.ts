@@ -21,6 +21,14 @@ export class UpdateTraderSettingsDto {
   @IsBoolean()
   payoutTradingEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Off: the trader can neither withdraw USDT nor transfer to another trader; moving money to their own insurance stays allowed',
+  })
+  @IsOptional()
+  @IsBoolean()
+  withdrawalsEnabled?: boolean;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

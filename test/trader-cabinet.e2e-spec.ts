@@ -134,7 +134,7 @@ describe('the trader cabinet: deals', () => {
     });
     requisiteId = (
       await e2e.http
-        .post('/bank-details')
+        .post('/trader/requisites')
         .set(bearer(trader))
         .send({
           type: 'card_or_sbp',
@@ -459,7 +459,7 @@ describe('the trader cabinet: deals', () => {
     expect(requisite.active).toBe(false);
 
     const history = await e2e.http
-      .get('/bank-details/history')
+      .get('/trader/requisites/history')
       .set(bearer(trader))
       .expect(200);
     expect(JSON.stringify(history.body.data)).toContain(requisiteId);

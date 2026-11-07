@@ -1,3 +1,4 @@
+import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { ApiProperty } from '@nestjs/swagger';
 import { AccountTransaction } from '../../account-transactions/entities/account-transaction.entity';
 import { AccountTransactionStatus } from '../../account-transactions/types/account-transaction-status.enum';
@@ -28,6 +29,20 @@ export class AccountTransactionDto {
   })
   counterpartyUserId: string | null;
 
+  @ApiProperty({
+    enum: BalanceKind,
+    nullable: true,
+    description: 'Set when money moved between one account’s own balances',
+  })
+  fromBalance: BalanceKind | null;
+
+  @ApiProperty({
+    enum: BalanceKind,
+    nullable: true,
+    description: 'Set when money moved between one account’s own balances',
+  })
+  toBalance: BalanceKind | null;
+
   @ApiProperty({ type: String, example: '50.000000', nullable: true })
   amount: string | null;
 
@@ -53,6 +68,8 @@ export const toAccountTransactionDto = (
   statusReason: row.statusReason,
   userId: row.userId,
   counterpartyUserId: row.counterpartyUserId,
+  fromBalance: row.fromBalance,
+  toBalance: row.toBalance,
   amount: row.amount === null ? null : formatCrypto(row.amount),
   comment: row.comment,
   actorUserId: row.actorUserId,

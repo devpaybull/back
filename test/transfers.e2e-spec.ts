@@ -19,7 +19,7 @@ describe('admin transfer between accounts (AT01)', () => {
     const recipient = await e2e.createUser(Role.LeadTrader);
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(sender))
         .expect(200)
     ).body.data.address;

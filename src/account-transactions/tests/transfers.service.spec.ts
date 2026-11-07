@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
+import { BalanceKind } from '../../transactions/types/balance-kind.enum';
 import { TransfersService } from '../services/transfers.service';
 import { AccountTransaction } from '../entities/account-transaction.entity';
 import { AccountTransactionStatus } from '../types/account-transaction-status.enum';
@@ -20,7 +21,10 @@ const build = () => {
       async (work: (entityManager: typeof manager) => unknown) => work(manager),
     ),
   };
-  const wallets = { transferWithin: jest.fn(async () => undefined) };
+  const wallets = {
+    transferWithin: jest.fn(async () => undefined),
+    moveBetweenOwnBalancesWithin: jest.fn(async () => undefined),
+  };
   const audit = { record: jest.fn(async () => undefined) };
   const service = new TransfersService(
     dataSource as never,
@@ -112,6 +116,83 @@ describe('TransfersService.transfer', () => {
     );
 
     await expect(service.transfer(input)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('TransfersService.transferOwnBalance', () => {
+  const own = {
+    userId: SENDER,
+    from: BalanceKind.Main,
+    to: BalanceKind.InsurancePayIn,
+    amount: toCrypto('250.5'),
+    actorUserId: SENDER,
+  };
+
+  it('writes one transfer row naming both balances, the account on both sides', async () => {
+    const { service } = build();
+
+    const row = await service.transferOwnBalance(own);
+
+    expect(row).toMatchObject({
+      id: 41,
+      type: AccountTransactionType.Transfer,
+      status: AccountTransactionStatus.Completed,
+      userId: SENDER,
+      counterpartyUserId: SENDER,
+      fromBalance: BalanceKind.Main,
+      toBalance: BalanceKind.InsurancePayIn,
+      amount: toCrypto('250.5'),
+    });
+  });
+
+  it('moves the money with the row id and passes the delay check on', async () => {
+    const { service, wallets, manager } = build();
+    const now = new Date('2026-11-07T10:00:00Z');
+
+    await service.transferOwnBalance({ ...own, insuranceDelayCheckedAt: now });
+
+    expect(wallets.moveBetweenOwnBalancesWithin).toHaveBeenCalledWith(manager, {
+      userId: SENDER,
+      from: BalanceKind.Main,
+      to: BalanceKind.InsurancePayIn,
+      amount: toCrypto('250.5'),
+      accountTransactionId: 41,
+      insuranceDelayCheckedAt: now,
+    });
+  });
+
+  it('audits the movement with the amount as a formatted string', async () => {
+    const { service, audit, manager } = build();
+
+    await service.transferOwnBalance({ ...own, actorUserId: ADMIN });
+
+    expect(audit.record).toHaveBeenCalledWith(
+      {
+        actorUserId: ADMIN,
+        targetUserId: SENDER,
+        impersonatorUserId: null,
+        action: 'balance.transfer',
+        metadata: {
+          accountTransactionId: 41,
+          from: BalanceKind.Main,
+          to: BalanceKind.InsurancePayIn,
+          amount: '250.500000',
+        },
+      },
+      manager,
+    );
+  });
+
+  it('writes no audit row when the wallet refuses', async () => {
+    const { service, wallets, audit } = build();
+    wallets.moveBetweenOwnBalancesWithin.mockRejectedValueOnce(
+      new ConflictException('Insufficient available balance'),
+    );
+
+    await expect(service.transferOwnBalance(own)).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(audit.record).not.toHaveBeenCalled();

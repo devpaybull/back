@@ -1,3 +1,7 @@
+import { SortOrder } from '../../common/enums/sort-order.enum';
+import { Page } from '../../common/types/page';
+import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
+import { TransactionSortField } from '../types/transaction-sort-field.enum';
 import {
   BadRequestException,
   ConflictException,
@@ -92,11 +96,16 @@ const build = (setup: Setup = {}) => {
       { insurancePayOutBalance: toCrypto(setup.insurance ?? '1000') },
     ]),
     isWithinNightWindow: jest.fn(() => setup.night ?? false),
+    stampAcceptedDealWithin: jest.fn(async () => undefined),
+    findByUserId: jest.fn(async () => ({
+      insurancePayOutBalance: toCrypto(setup.insurance ?? '1000'),
+    })),
   };
   const audit = { record: jest.fn(async () => ({})) };
   const settings = {
     findOrDefaults: jest.fn(async () => ({
       payoutTradingEnabled: true,
+      tradingEnabled: true,
       individualRatesEnabled: false,
       trustedUser: false,
       maxActivePayouts: null,
@@ -111,6 +120,12 @@ const build = (setup: Setup = {}) => {
       switchedOffTraderIds: new Set<string>(),
       ...setup.admission,
     })),
+    exclusionsOfTrader: jest.fn(async () => ({ exclusiveMerchantIds: [] })),
+  };
+  const payouts = {
+    pool: jest.fn(
+      async () => new Page([], { total: 3, page: 1, limit: 1, pages: 3 }),
+    ),
   };
   const pricing = {
     priceFor: jest.fn(async () =>
@@ -151,9 +166,21 @@ const build = (setup: Setup = {}) => {
     pricing as never,
     files as never,
     config as never,
+    payouts as never,
   );
 
-  return { service, deal, manager, transactions, files, queryBuilder, pricing };
+  return {
+    service,
+    deal,
+    manager,
+    transactions,
+    files,
+    queryBuilder,
+    pricing,
+    wallets,
+    payouts,
+    attachments,
+  };
 };
 
 const codeOf = (error: unknown): unknown =>
@@ -161,7 +188,104 @@ const codeOf = (error: unknown): unknown =>
   ((error as ConflictException).getResponse() as { code?: string }).code;
 
 describe('TraderPayoutActionsService', () => {
+  describe('the pool', () => {
+    const query = {
+      page: 1,
+      limit: 1,
+      sortBy: TransactionSortField.CreatedAt,
+      sortOrder: SortOrder.Desc,
+    };
+    const settingsOf = (overrides: Partial<TraderSettings>) =>
+      ({
+        payoutTradingEnabled: true,
+        tradingEnabled: true,
+        trustedUser: false,
+        ...overrides,
+      }) as TraderSettings;
+
+    it('is closed by the access first, then by the trading switch', () => {
+      const { service } = build();
+
+      expect.assertions(3);
+      for (const [settings, code] of [
+        [
+          settingsOf({ payoutTradingEnabled: false, tradingEnabled: false }),
+          'PAYOUTS_ACCESS_DISABLED',
+        ],
+        [settingsOf({ tradingEnabled: false }), 'TRADING_DISABLED'],
+      ] as const) {
+        try {
+          service.assertPoolOpen(settings);
+        } catch (error) {
+          expect(codeOf(error)).toBe(code);
+        }
+      }
+      expect(() => service.assertPoolOpen(settingsOf({}))).not.toThrow();
+    });
+
+    it('is empty below the insurance minimum, without asking for the pool', async () => {
+      const { service, payouts } = build({ insurance: '100' });
+
+      const page = await service.poolOf(TRADER, settingsOf({}), query, NOW);
+
+      expect(page.meta.total).toBe(0);
+      expect(payouts.pool).not.toHaveBeenCalled();
+    });
+
+    it('is limited by the room of a Standard trader and not of a trusted one', async () => {
+      const standard = build({ insurance: '1000', occupied: '400' });
+
+      await standard.service.poolOf(TRADER, settingsOf({}), query, NOW);
+
+      expect(standard.payouts.pool).toHaveBeenCalledWith(
+        query,
+        expect.anything(),
+        toCrypto('600'),
+        NOW,
+      );
+
+      const trusted = build({ insurance: '1000', occupied: '400' });
+
+      await trusted.service.poolOf(
+        TRADER,
+        settingsOf({ trustedUser: true }),
+        query,
+        NOW,
+      );
+
+      expect(trusted.payouts.pool).toHaveBeenCalledWith(
+        query,
+        expect.anything(),
+        null,
+        NOW,
+      );
+    });
+  });
+
   describe('take', () => {
+    it('stamps the last accepted deal for the 14-day insurance rule', async () => {
+      const { service, wallets, manager } = build();
+
+      await service.take(actor, DEAL, NOW);
+
+      expect(wallets.stampAcceptedDealWithin).toHaveBeenCalledWith(
+        manager,
+        TRADER,
+        NOW,
+      );
+    });
+
+    it('refuses while the trading switch is off, and stamps nothing', async () => {
+      const { service, wallets } = build({
+        settings: { tradingEnabled: false },
+      });
+
+      const error = await service.take(actor, DEAL, NOW).catch((e) => e);
+
+      expect(codeOf(error)).toBe('TRADING_DISABLED');
+      expect(wallets.stampAcceptedDealWithin).not.toHaveBeenCalled();
+    });
+
     it('fixes the trader’s price and the payment deadline, then moves to active', async () => {
       const { service, deal, transactions } = build();
 

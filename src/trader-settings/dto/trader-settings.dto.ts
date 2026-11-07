@@ -13,6 +13,12 @@ export class TraderSettingsDto {
   @ApiProperty()
   payoutTradingEnabled: boolean;
 
+  @ApiProperty({
+    description:
+      'Whether the trader may withdraw USDT and transfer to another trader; set by an admin',
+  })
+  withdrawalsEnabled: boolean;
+
   @ApiProperty()
   individualRatesEnabled: boolean;
 
@@ -104,6 +110,7 @@ export const toTraderSettingsDto = (
   userId: row.userId,
   tradingEnabled: row.tradingEnabled,
   payoutTradingEnabled: row.payoutTradingEnabled,
+  withdrawalsEnabled: row.withdrawalsEnabled,
   maxActivePayouts: row.maxActivePayouts,
   individualRatesEnabled: row.individualRatesEnabled,
   autoBuybackEnabled: row.autoBuybackEnabled,

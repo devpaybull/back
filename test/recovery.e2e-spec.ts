@@ -23,7 +23,7 @@ describe('recovery from failures end to end', () => {
 
   const request = async (amount: string) => {
     await e2e.http
-      .get('/users/me/withdrawals/quote')
+      .get('/trader/withdrawals/quote')
       .set(bearer(trader))
       .query({ address: DESTINATION, amount })
       .expect(200);
@@ -32,7 +32,7 @@ describe('recovery from failures end to end', () => {
       .update(trader.user.id, { withdrawalTotpLastStep: null });
     return (
       await e2e.http
-        .post('/users/me/withdrawals')
+        .post('/trader/withdrawals')
         .set(bearer(trader))
         .send({ amount, address: DESTINATION, totp: await e2e.totp(trader) })
         .expect(201)
@@ -41,7 +41,7 @@ describe('recovery from failures end to end', () => {
   const statusOf = async (id: number) =>
     (
       await e2e.http
-        .get(`/users/me/withdrawals/${id}`)
+        .get(`/trader/withdrawals/${id}`)
         .set(bearer(trader))
         .expect(200)
     ).body.data;
@@ -56,7 +56,7 @@ describe('recovery from failures end to end', () => {
     await scan(e2e);
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(trader))
         .expect(200)
     ).body.data.address;
@@ -169,7 +169,7 @@ describe('recovery from failures end to end', () => {
     const owner = await e2e.createUser(Role.Trader);
     const address = (
       await e2e.http
-        .get('/users/me/deposit-address')
+        .get('/trader/deposit-address')
         .set(bearer(owner))
         .expect(200)
     ).body.data.address;
