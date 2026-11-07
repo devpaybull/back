@@ -14,9 +14,11 @@ import { Country } from '../src/countries/entities/country.entity';
 import { Currency } from '../src/currencies/entities/currency.entity';
 import { Bank } from '../src/banks/entities/bank.entity';
 import { Device } from '../src/devices/entities/device.entity';
-import { DeviceModel } from '../src/devices/types/device-model.enum';
 import { DeviceStatus } from '../src/devices/types/device-status.enum';
+import { DeviceType } from '../src/devices/types/device-type.enum';
 import { BankDetails } from '../src/bank-details/entities/bank-details.entity';
+import { BankDetailsType } from '../src/bank-details/types/bank-details-type.enum';
+import { MobileOperator } from '../src/mobile-operators/entities/mobile-operator.entity';
 import { User } from '../src/users/entities/user.entity';
 import { TraderLead } from '../src/users/entities/trader-lead.entity';
 import { UserBackupCode } from '../src/users/entities/user-backup-code.entity';
@@ -426,6 +428,18 @@ async function main(): Promise<void> {
       }),
     );
 
+    const [mts] = await manager.save(
+      MobileOperator,
+      [
+        { code: 'mts', name: 'МТС' },
+        { code: 'beeline', name: 'Билайн' },
+        { code: 'megafon', name: 'МегаФон' },
+        { code: 't2', name: 'T2' },
+      ].map((operator) =>
+        manager.create(MobileOperator, { ...operator, countryId: russia.id }),
+      ),
+    );
+
     const superadmin = await seedUser(manager, passwordHash, {
       email: MARKER_EMAIL,
       telegramUsername: 'superadmin',
@@ -578,7 +592,8 @@ async function main(): Promise<void> {
         userId: trader1.user.id,
         name: 'Pixel 7',
         status: DeviceStatus.On,
-        model: DeviceModel.Android,
+        type: DeviceType.Android,
+        model: 'Google Pixel 7',
       }),
     );
     await manager.save(
@@ -596,7 +611,7 @@ async function main(): Promise<void> {
         userId: trader1.user.id,
         bankId: sberbank.id,
         deviceId: device1.id,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
         cardholderName: 'IVAN PETROV',
         card: '4276000011112222',
         minAmountEnabled: true,
@@ -605,6 +620,8 @@ async function main(): Promise<void> {
         maxAmount: toFiat(50000),
         dailyLimitEnabled: true,
         dailyLimit: 20,
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
         active: true,
       }),
     );
@@ -614,10 +631,12 @@ async function main(): Promise<void> {
         userId: trader1.user.id,
         bankId: tinkoff.id,
         deviceId: device1.id,
-        type: TransactionType.Sbp,
+        type: BankDetailsType.CardOrSbp,
         phone: '+79261234567',
         monthlyAmountLimitEnabled: true,
         monthlyAmountLimit: toFiat(1000000),
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
         active: true,
       }),
     );
@@ -626,11 +645,15 @@ async function main(): Promise<void> {
       manager.create(BankDetails, {
         userId: trader1.user.id,
         bankId: sberbank.id,
-        type: TransactionType.Card,
+        deviceId: device1.id,
+        type: BankDetailsType.CardOrSbp,
         card: '4276000033334444',
         counterpartyOnly: true,
+        maxCounterparties: 8,
         minAmountEnabled: true,
         reserve: true,
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
         active: true,
       }),
     );
@@ -639,11 +662,28 @@ async function main(): Promise<void> {
       manager.create(BankDetails, {
         userId: trader1.user.id,
         bankId: tinkoff.id,
-        type: TransactionType.Sbp,
+        deviceId: device1.id,
+        type: BankDetailsType.CardOrSbp,
         phone: '+79267654321',
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
         active: true,
         bannedAt: new Date(),
         bannedByUserId: admin.user.id,
+      }),
+    );
+    await manager.save(
+      BankDetails,
+      manager.create(BankDetails, {
+        userId: trader1.user.id,
+        mobileOperatorId: mts.id,
+        deviceId: device1.id,
+        type: BankDetailsType.Mobile,
+        cardholderName: 'IVAN PETROV',
+        phone: '+79161234567',
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
+        active: true,
       }),
     );
 

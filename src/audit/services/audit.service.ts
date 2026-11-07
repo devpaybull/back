@@ -4,7 +4,13 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, FindOptionsWhere, In, Repository } from 'typeorm';
+import {
+  EntityManager,
+  FindOptionsWhere,
+  In,
+  MoreThan,
+  Repository,
+} from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { Page, toPage } from '../../common/types/page';
@@ -111,6 +117,9 @@ export class AuditService {
       ...(query.statusCode !== undefined
         ? { statusCode: query.statusCode }
         : {}),
+      ...(query.createdAfter
+        ? { createdAt: MoreThan(query.createdAfter) }
+        : {}),
     };
     const order =
       query.sortBy === AuditSortField.Id
@@ -141,6 +150,7 @@ export class AuditService {
           actions: query.actions,
           source: query.source,
           statusCode: query.statusCode,
+          createdAfter: query.createdAfter,
         });
       } catch (error) {
         this.logger.error(

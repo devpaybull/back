@@ -1,4 +1,4 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -7,14 +7,18 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { REFRESH_COOKIE_NAME } from './auth/refresh-cookie';
 import { NodeEnv } from './common/config/env.validation';
+import { FieldErrorsValidationPipe } from './common/pipes/field-errors-validation.pipe';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { parseCorsOrigin } from './common/utils/parse-cors-origin';
 import { parseTrustProxy } from './common/utils/parse-trust-proxy';
+import { registerBodyParsers } from './merchant-api/utils/register-body-parsers';
 
 async function bootstrap() {
   const logger = new Logger('bootstrap');
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
   const config = app.get(ConfigService);
 
   app.set('trust proxy', parseTrustProxy(config.get<string>('TRUST_PROXY')));
@@ -25,9 +29,10 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+  registerBodyParsers(app);
 
   app.useGlobalPipes(
-    new ValidationPipe({
+    new FieldErrorsValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,

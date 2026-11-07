@@ -8,6 +8,7 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -23,16 +24,30 @@ import { WriteAccess } from '../common/decorators/write-access.decorator';
 import { Role } from '../common/enums/role.enum';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { WriteAccessGuard } from '../common/guards/write-access.guard';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { Page } from '../common/types/page';
 import { AuthenticatedUser } from '../common/types/token';
+import { BankDetailsTurnoverService } from '../transactions/services/bank-details-turnover.service';
 import { BankDetailsService } from './bank-details.service';
+import {
+  BankDetailTagDto,
+  toBankDetailTagDto,
+} from './dto/bank-detail-tag.dto';
+import { BankDetailsStatusCountsDto } from './dto/bank-details-status-counts.dto';
+import { CreateBankDetailTagDto } from './dto/create-bank-detail-tag.dto';
 import { CreateBankDetailsDto } from './dto/create-bank-details.dto';
 import { ListBankDetailsQueryDto } from './dto/list-bank-details-query.dto';
 import {
   OwnBankDetailsDto,
   toOwnBankDetailsDto,
 } from './dto/own-bank-details.dto';
+import {
+  RequisiteHistoryEntryDto,
+  toRequisiteHistoryEntryDto,
+} from './dto/requisite-history-entry.dto';
+import { RequisiteHistoryReadStateDto } from './dto/requisite-history-read-state.dto';
 import { UpdateBankDetailsDto } from './dto/update-bank-details.dto';
+import { BankDetails } from './entities/bank-details.entity';
 import { withFiatLimits } from './utils/with-fiat-limits';
 
 @ApiTags('Bank details')
@@ -41,7 +56,10 @@ import { withFiatLimits } from './utils/with-fiat-limits';
 @Roles(Role.Trader)
 @Controller('bank-details')
 export class BankDetailsController {
-  constructor(private readonly bankDetails: BankDetailsService) {}
+  constructor(
+    private readonly bankDetails: BankDetailsService,
+    private readonly turnover: BankDetailsTurnoverService,
+  ) {}
 
   @Post()
   @WriteAccess()
@@ -51,12 +69,11 @@ export class BankDetailsController {
     @Body() dto: CreateBankDetailsDto,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<OwnBankDetailsDto> {
-    return toOwnBankDetailsDto(
+    return this.withExtrasOf(
       await this.bankDetails.create(
         { ...withFiatLimits(dto), userId: trader.id },
         trader.impersonatedBy ?? null,
       ),
-      this.bankDetails.counterpartyMinAmount,
     );
   }
 
@@ -67,11 +84,107 @@ export class BankDetailsController {
     @Query() query: ListBankDetailsQueryDto,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<Page<OwnBankDetailsDto>> {
-    const { counterpartyMinAmount } = this.bankDetails;
+    const page = await this.bankDetails.list({ ...query, userId: trader.id });
 
-    return (await this.bankDetails.list({ ...query, userId: trader.id })).map(
-      (row) => toOwnBankDetailsDto(row, counterpartyMinAmount),
+    return new Page(await this.withExtras(page.items), page.meta);
+  }
+
+  @Get('counts')
+  @ApiOperation({
+    summary: 'Counts the signed-in account’s bank details per status',
+    description:
+      'The tabs «Все / Активные / Выключеные»: the list filters except status apply.',
+  })
+  @ApiEnvelopeResponse(BankDetailsStatusCountsDto)
+  counts(
+    @Query() query: ListBankDetailsQueryDto,
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<BankDetailsStatusCountsDto> {
+    return this.bankDetails.countByStatus({
+      ...query,
+      status: undefined,
+      userId: trader.id,
+    });
+  }
+
+  @Get('history')
+  @ApiOperation({
+    summary: 'Lists what happened to the signed-in account’s bank details',
+    description:
+      'Created, updated, switched, banned and deleted — by the owner, an administrator or the system; newest first by default.',
+  })
+  @ApiPagedResponse(RequisiteHistoryEntryDto)
+  async history(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<Page<RequisiteHistoryEntryDto>> {
+    return (await this.bankDetails.history(trader.id, query)).map((entry) =>
+      toRequisiteHistoryEntryDto(entry, trader.id),
     );
+  }
+
+  @Get('history/unread')
+  @ApiOperation({ summary: 'Counts the unread rows of the history' })
+  @ApiEnvelopeResponse(RequisiteHistoryReadStateDto)
+  historyReadState(
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<RequisiteHistoryReadStateDto> {
+    return this.bankDetails.historyReadState(trader.id);
+  }
+
+  @Post('history/read')
+  @HttpCode(HttpStatus.OK)
+  @WriteAccess()
+  @ApiOperation({ summary: 'Marks the whole history read, as of now' })
+  @ApiEnvelopeResponse(RequisiteHistoryReadStateDto)
+  markHistoryRead(
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<RequisiteHistoryReadStateDto> {
+    return this.bankDetails.markHistoryRead(trader.id);
+  }
+
+  @Get('tags')
+  @ApiOperation({ summary: 'Lists the signed-in account’s tags' })
+  @ApiPagedResponse(BankDetailTagDto)
+  async listTags(
+    @Query() query: PaginationQueryDto,
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<Page<BankDetailTagDto>> {
+    return (await this.bankDetails.listTags(trader.id, query)).map(
+      toBankDetailTagDto,
+    );
+  }
+
+  @Post('tags')
+  @WriteAccess()
+  @ApiOperation({
+    summary: 'Creates a tag of the signed-in account',
+    description:
+      'A name the account already has, in any letter case, is a 409.',
+  })
+  @ApiEnvelopeResponse(BankDetailTagDto, { status: HttpStatus.CREATED })
+  async createTag(
+    @Body() dto: CreateBankDetailTagDto,
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<BankDetailTagDto> {
+    return toBankDetailTagDto(
+      await this.bankDetails.createTag(trader.id, dto.name),
+    );
+  }
+
+  @Delete('tags/:tagId')
+  @WriteAccess()
+  @ApiOperation({
+    summary: 'Deletes a tag of the signed-in account',
+    description:
+      'The tag comes off every requisite; another account’s tag is a 404.',
+  })
+  @ApiEnvelopeResponse()
+  async deleteTag(
+    @Param('tagId', ParseIntPipe) tagId: number,
+    @CurrentUser() trader: AuthenticatedUser,
+  ): Promise<void> {
+    await this.bankDetails.deleteTag(trader.id, tagId);
   }
 
   @Get(':id')
@@ -87,7 +200,7 @@ export class BankDetailsController {
 
     if (!found) throw new NotFoundException('Bank details not found');
 
-    return toOwnBankDetailsDto(found, this.bankDetails.counterpartyMinAmount);
+    return this.withExtrasOf(found);
   }
 
   @Post(':id/enable')
@@ -103,9 +216,13 @@ export class BankDetailsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<OwnBankDetailsDto> {
-    return toOwnBankDetailsDto(
-      await this.bankDetails.updateOwn(id, trader.id, { active: true }),
-      this.bankDetails.counterpartyMinAmount,
+    return this.withExtrasOf(
+      await this.bankDetails.updateOwn(
+        id,
+        trader.id,
+        { active: true },
+        trader.impersonatedBy ?? null,
+      ),
     );
   }
 
@@ -120,9 +237,13 @@ export class BankDetailsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() trader: AuthenticatedUser,
   ): Promise<OwnBankDetailsDto> {
-    return toOwnBankDetailsDto(
-      await this.bankDetails.updateOwn(id, trader.id, { active: false }),
-      this.bankDetails.counterpartyMinAmount,
+    return this.withExtrasOf(
+      await this.bankDetails.updateOwn(
+        id,
+        trader.id,
+        { active: false },
+        trader.impersonatedBy ?? null,
+      ),
     );
   }
 
@@ -158,9 +279,40 @@ export class BankDetailsController {
       throw new BadRequestException('No changes were given');
     }
 
-    return toOwnBankDetailsDto(
-      await this.bankDetails.updateOwn(id, trader.id, withFiatLimits(dto)),
-      this.bankDetails.counterpartyMinAmount,
+    return this.withExtrasOf(
+      await this.bankDetails.updateOwn(
+        id,
+        trader.id,
+        withFiatLimits(dto),
+        trader.impersonatedBy ?? null,
+      ),
     );
+  }
+
+  private async withExtras(rows: BankDetails[]): Promise<OwnBankDetailsDto[]> {
+    const ids = rows.map((row) => row.id);
+    const now = new Date();
+    const [turnover, usage, bound, tags] = await Promise.all([
+      this.turnover.turnoverOfBankDetails(ids, now),
+      this.turnover.usageOfBankDetails(ids, now),
+      this.bankDetails.boundCounterpartiesOf(ids),
+      this.bankDetails.tagsOf(ids),
+    ]);
+    const { counterpartyMinAmount } = this.bankDetails;
+
+    return rows.map((row) =>
+      toOwnBankDetailsDto(row, counterpartyMinAmount, {
+        turnover: turnover.get(row.id),
+        usage: usage.get(row.id),
+        boundCounterparties: bound.get(row.id) ?? 0,
+        tags: tags.get(row.id) ?? [],
+      }),
+    );
+  }
+
+  private async withExtrasOf(details: BankDetails): Promise<OwnBankDetailsDto> {
+    const [dto] = await this.withExtras([details]);
+
+    return dto;
   }
 }

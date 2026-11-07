@@ -1,18 +1,22 @@
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
+import { BindableRequisite } from '../types/bindable-requisite';
 import { CounterpartyBindingType } from '../types/counterparty-binding-type.enum';
-
-const CHANNELS: Record<CounterpartyBindingType, readonly TransactionType[]> = {
-  [CounterpartyBindingType.CardsOrSbp]: [
-    TransactionType.Card,
-    TransactionType.Sbp,
-  ],
-  [CounterpartyBindingType.Cards]: [TransactionType.Card],
-  [CounterpartyBindingType.Sbp]: [TransactionType.Sbp],
-};
 
 export function bindingTypeAllows(
   bindingType: CounterpartyBindingType,
-  channel: TransactionType,
+  requisite: Pick<BindableRequisite, 'type' | 'card' | 'phone'>,
 ): boolean {
-  return CHANNELS[bindingType].includes(channel);
+  if (requisite.type !== BankDetailsType.CardOrSbp) return false;
+
+  const servesCard = Boolean(requisite.card);
+  const servesSbp = Boolean(requisite.phone);
+
+  switch (bindingType) {
+    case CounterpartyBindingType.CardsOrSbp:
+      return servesCard || servesSbp;
+    case CounterpartyBindingType.Cards:
+      return servesCard;
+    case CounterpartyBindingType.Sbp:
+      return servesSbp;
+  }
 }

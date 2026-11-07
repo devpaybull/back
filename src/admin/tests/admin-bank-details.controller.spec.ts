@@ -10,7 +10,7 @@ import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
@@ -43,7 +43,7 @@ describe('AdminBankDetailsController', () => {
       user: owner,
       bankId: 1,
       bank: { id: 1, bankId: 'kaspi', name: 'Kaspi Bank' },
-      type: TransactionType.Sbp,
+      type: BankDetailsType.CardOrSbp,
       cardholderName: null,
       card: '4400430212345678',
       phone: null,
@@ -79,6 +79,9 @@ describe('AdminBankDetailsController', () => {
     delete: jest.fn(),
     listIds: jest.fn(),
     findByIdsInOrder: jest.fn(),
+    boundCounterpartiesOf: jest.fn(
+      async (ids: string[]) => new Map(ids.map((id) => [id, 2])),
+    ),
     counterpartyMinAmount: toFiat(5000),
   };
 

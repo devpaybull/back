@@ -17,6 +17,8 @@ export interface TransactionListQuery {
   method?: TransactionMethod;
   traderUserId?: string;
   merchantId?: string;
+  merchantIds?: string[];
+  counterpartyIds?: number[];
   createdFrom?: Date;
   createdTo?: Date;
   amountFrom?: Fiat;

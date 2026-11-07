@@ -26,6 +26,7 @@ import { AuthenticatedRequest } from '../../common/types/authenticated-request';
 import { Role } from '../../common/enums/role.enum';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { AuditModule } from '../audit.module';
+import { ActivityRead } from '../entities/activity-read.entity';
 import { AuditInstallation } from '../entities/audit-installation.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { HttpAuditMiddleware } from '../middleware/http-audit.middleware';
@@ -86,6 +87,12 @@ class ProbeController {
     return { id };
   }
 
+  @Post('device/heartbeat')
+  @HttpCode(200)
+  heartbeat() {
+    return { ok: true };
+  }
+
   @Post('boom')
   boom() {
     throw new InternalServerErrorException();
@@ -129,6 +136,8 @@ describe('HttpAuditMiddleware', () => {
         .overrideProvider(getRepositoryToken(AuditLog))
         .useValue({})
         .overrideProvider(getRepositoryToken(AuditInstallation))
+        .useValue({})
+        .overrideProvider(getRepositoryToken(ActivityRead))
         .useValue({})
         .overrideProvider(AuditService)
         .useValue({ recordHttp: (recordHttp = jest.fn(async () => ({}))) })
@@ -252,6 +261,16 @@ describe('HttpAuditMiddleware', () => {
       expect(await recorded()).toEqual([]);
     });
 
+    it('does not record the device heartbeat, which every phone sends every 30 seconds', async () => {
+      await request(app.getHttpServer())
+        .post('/device/heartbeat')
+        .set('Authorization', 'Bearer ok')
+        .send({})
+        .expect(200);
+
+      expect(await recorded()).toEqual([]);
+    });
+
     it('does not record a write to a path no route matches', async () => {
       await request(app.getHttpServer())
         .post('/nowhere')
@@ -334,17 +353,13 @@ describe('HttpAuditMiddleware', () => {
       });
     });
 
-    it('redacts the whitelisted address on the merchant IP route only', () => {
+    it('keeps the whitelisted address whole on the merchant IP route', () => {
       const whitelisted = run({
         route: { path: '/admin/merchants/:id/ip-addresses' },
         body: { ip: '203.0.113.47' },
       });
-      const elsewhere = run({ body: { ip: '203.0.113.47' } });
 
       expect(whitelisted.recordHttp.mock.calls[0][0].body).toEqual({
-        ip: '[REDACTED]',
-      });
-      expect(elsewhere.recordHttp.mock.calls[0][0].body).toEqual({
         ip: '203.0.113.47',
       });
     });

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { isUUID } from 'class-validator';
 import { Repository } from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { Page, toPage } from '../../common/types/page';
@@ -35,9 +36,18 @@ export class MerchantDealsService {
     merchantId: string,
     query: MerchantDealListQuery,
   ): Promise<Page<Transaction>> {
+    const where = transactionListWhere({ ...query, merchantId });
+    const reference = query.reference;
+
     return toPage(
       await this.transactions.findAndCount({
-        where: transactionListWhere({ ...query, merchantId }),
+        where:
+          reference === undefined
+            ? where
+            : [
+                { ...where, merchantTransactionId: reference },
+                ...(isUUID(reference) ? [{ ...where, id: reference }] : []),
+              ],
         order: transactionListOrder({ ...query, merchantId }),
         skip: (query.page - 1) * query.limit,
         take: query.limit,

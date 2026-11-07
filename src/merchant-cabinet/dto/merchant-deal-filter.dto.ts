@@ -16,7 +16,7 @@ import { TransactionKind } from '../../transactions/types/transaction-kind.enum'
 import { TransactionMethod } from '../../transactions/types/transaction-method';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
-import { DEAL_SEARCH_MIN_LENGTH } from '../utils/deal-search-min-length';
+import { DEAL_SEARCH_MIN_LENGTH } from '../../common/utils/deal-search-min-length';
 
 export class MerchantDealFilterDto {
   @ApiPropertyOptional({

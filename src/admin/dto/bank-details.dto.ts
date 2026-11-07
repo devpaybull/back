@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { Fiat } from '../../common/types/fiat';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { loginOf } from '../../common/utils/login-of';
@@ -14,6 +14,17 @@ export class BankDetailsBankDto {
 
   @ApiProperty()
   bankId: string;
+
+  @ApiProperty()
+  name: string;
+}
+
+export class BankDetailsMobileOperatorDto {
+  @ApiProperty()
+  id: number;
+
+  @ApiProperty()
+  code: string;
 
   @ApiProperty()
   name: string;
@@ -51,11 +62,23 @@ export class BankDetailsDto {
   @ApiPropertyOptional({ type: InviteAccountDto, nullable: true })
   user: InviteAccountDto;
 
-  @ApiProperty()
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Null on a mobile requisite',
+  })
   bankId: number;
 
   @ApiPropertyOptional({ type: BankDetailsBankDto, nullable: true })
   bank: BankDetailsBankDto;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Set on a mobile requisite only',
+  })
+  mobileOperatorId: number;
+
+  @ApiPropertyOptional({ type: BankDetailsMobileOperatorDto, nullable: true })
+  mobileOperator: BankDetailsMobileOperatorDto;
 
   @ApiPropertyOptional({ nullable: true })
   deviceId: number;
@@ -63,8 +86,8 @@ export class BankDetailsDto {
   @ApiPropertyOptional({ type: BankDetailsDeviceDto, nullable: true })
   device: BankDetailsDeviceDto;
 
-  @ApiProperty({ enum: TransactionType })
-  type: TransactionType;
+  @ApiProperty({ enum: BankDetailsType })
+  type: BankDetailsType;
 
   @ApiPropertyOptional({ nullable: true })
   cardholderName: string;
@@ -107,16 +130,26 @@ export class BankDetailsDto {
   @ApiPropertyOptional({ nullable: true, description: 'Orders a month' })
   monthlyLimit: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Always true: the daily limit is mandatory' })
   dailyAmountLimitEnabled: boolean;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     type: String,
     example: '300000.00',
-    nullable: true,
     description: 'Turnover a day',
   })
   dailyAmountLimit: string;
+
+  @ApiProperty()
+  hourlyAmountLimitEnabled: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    example: '50000.00',
+    nullable: true,
+    description: 'Turnover of a rolling hour, successful and open deals',
+  })
+  hourlyAmountLimit: string;
 
   @ApiProperty()
   monthlyAmountLimitEnabled: boolean;
@@ -143,6 +176,18 @@ export class BankDetailsDto {
 
   @ApiProperty()
   counterpartyOnly: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Counterparty slots; set exactly while counterpartyOnly is',
+  })
+  maxCounterparties: number;
+
+  @ApiProperty({ description: 'Counterparties bound to this requisite now' })
+  boundCounterparties: number;
+
+  @ApiProperty()
+  sameBankOnly: boolean;
 
   @ApiProperty()
   reserve: boolean;
@@ -191,16 +236,25 @@ export const toBankDetailsDto = (
   details: BankDetails,
   counterpartyMinAmount: Fiat,
   turnover: BankDetailsTurnover,
+  boundCounterparties: number,
 ): BankDetailsDto => ({
   id: details.id,
   userId: details.userId,
   user: details.user ? toInviteAccountDto(details.user) : null,
-  bankId: details.bankId,
+  bankId: details.bankId ?? null,
   bank: details.bank
     ? {
         id: details.bank.id,
         bankId: details.bank.bankId,
         name: details.bank.name,
+      }
+    : null,
+  mobileOperatorId: details.mobileOperatorId ?? null,
+  mobileOperator: details.mobileOperator
+    ? {
+        id: details.mobileOperator.id,
+        code: details.mobileOperator.code,
+        name: details.mobileOperator.name,
       }
     : null,
   deviceId: details.deviceId ?? null,
@@ -232,11 +286,16 @@ export const toBankDetailsDto = (
   dailyAmountLimit: formatFiat(details.dailyAmountLimit),
   monthlyAmountLimitEnabled: Boolean(details.monthlyAmountLimitEnabled),
   monthlyAmountLimit: formatFiat(details.monthlyAmountLimit),
+  hourlyAmountLimitEnabled: Boolean(details.hourlyAmountLimitEnabled),
+  hourlyAmountLimit: formatFiat(details.hourlyAmountLimit),
   maxActiveTransactionsEnabled: Boolean(details.maxActiveTransactionsEnabled),
   maxActiveTransactions: details.maxActiveTransactions ?? null,
   delayBetweenRequestsEnabled: Boolean(details.delayBetweenRequestsEnabled),
   delayBetweenRequests: details.delayBetweenRequests ?? null,
   counterpartyOnly: Boolean(details.counterpartyOnly),
+  maxCounterparties: details.maxCounterparties ?? null,
+  boundCounterparties,
+  sameBankOnly: Boolean(details.sameBankOnly),
   reserve: Boolean(details.reserve),
   active: details.active,
   bannedAt: details.bannedAt ?? null,

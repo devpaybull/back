@@ -11,6 +11,10 @@ import {
 import { Merchant } from './merchant.entity';
 
 @Entity('merchant_api_keys')
+@Index('merchant_api_keys_one_active_per_merchant', ['merchantId'], {
+  unique: true,
+  where: '"active"',
+})
 export class MerchantApiKey {
   @PrimaryGeneratedColumn()
   id: number;

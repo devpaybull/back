@@ -1,5 +1,6 @@
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsStatus } from './bank-details-status.enum';
+import { BankDetailsType } from './bank-details-type.enum';
 import { BankDetailsSortField } from './bank-details-sort-field';
 
 export interface BankDetailsListQuery {
@@ -10,7 +11,9 @@ export interface BankDetailsListQuery {
   sortOrder: SortOrder;
   userId?: string;
   bankId?: number;
-  type?: TransactionType;
+  type?: BankDetailsType;
   active?: boolean;
   banned?: boolean;
+  status?: BankDetailsStatus;
+  tagId?: number;
 }

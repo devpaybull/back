@@ -17,7 +17,8 @@ const UNIQUE_VIOLATION = '23505';
 
 const UNSAVED_DEFAULTS = {
   tradingEnabled: false,
-  payoutTradingEnabled: false,
+  payoutTradingEnabled: true,
+  maxActivePayouts: null,
   individualRatesEnabled: false,
   autoBuybackEnabled: false,
   autoBuybackConcurrent: null,
@@ -140,6 +141,10 @@ export class TraderSettingsService {
 
       if (changes.insurancePayOutMin !== undefined) {
         settings.insurancePayOutMin = changes.insurancePayOutMin;
+      }
+
+      if (changes.maxActivePayouts !== undefined) {
+        settings.maxActivePayouts = changes.maxActivePayouts;
       }
 
       if (changes.nightStopThreshold !== undefined) {

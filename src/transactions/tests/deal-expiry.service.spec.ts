@@ -4,6 +4,7 @@ import {
   Equal,
   FindOperator,
   In,
+  IsNull,
   LessThanOrEqual,
   MoreThan,
 } from 'typeorm';
@@ -19,7 +20,19 @@ import { TransactionStatus } from '../types/transaction-status.enum';
 const NOW = new Date('2026-10-24T12:00:00.000Z');
 const PAST = new Date('2026-10-24T11:59:59.000Z');
 const FUTURE = new Date('2026-10-24T12:00:01.000Z');
-const TICKING = [TransactionStatus.Pending, TransactionStatus.Active];
+const TICKING = [
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
+  TransactionStatus.Pending,
+];
+const PAY_IN_TICKING = In([
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
+]);
+const PAY_OUT_TICKING = In([
+  TransactionStatus.Pending,
+  TransactionStatus.Active,
+]);
 
 const config = (values: Record<string, unknown>) =>
   ({ get: (key: string) => values[key] }) as never;
@@ -50,6 +63,9 @@ const holds = (condition: unknown, actual: unknown): boolean => {
   }
   if (condition.type === 'in') {
     return (condition.value as unknown[]).includes(actual);
+  }
+  if (condition.type === 'isNull') {
+    return actual === null || actual === undefined;
   }
   if (actual === null || actual === undefined) return false;
 
@@ -196,17 +212,27 @@ describe('DealExpiryService', () => {
     jest.restoreAllMocks();
   });
 
-  it('selects only pending and active deals whose deadline has passed', async () => {
+  it('selects the ticking statuses of each kind whose deadline has passed: pay-in active and checking, pay-out pending and active', async () => {
     const { service, repository } = build([]);
 
     await service.run(NOW);
 
     expect(repository.find).toHaveBeenCalledWith({
       select: { id: true, expiresAt: true },
-      where: {
-        status: In(TICKING),
-        expiresAt: LessThanOrEqual(NOW),
-      },
+      where: [
+        {
+          kind: TransactionKind.PayIn,
+          status: PAY_IN_TICKING,
+          payoutTakenAt: IsNull(),
+          expiresAt: LessThanOrEqual(NOW),
+        },
+        {
+          kind: TransactionKind.PayOut,
+          status: PAY_OUT_TICKING,
+          payoutTakenAt: IsNull(),
+          expiresAt: LessThanOrEqual(NOW),
+        },
+      ],
       order: { expiresAt: 'ASC', id: 'ASC' },
       take: 100,
     });
@@ -253,6 +279,18 @@ describe('DealExpiryService', () => {
     ]);
   });
 
+  it('leaves a taken pay-out alone: its own payment timer ends it, not the merchant’s deadline', async () => {
+    const row = deal(1, {
+      kind: TransactionKind.PayOut,
+      status: TransactionStatus.Active,
+      payoutTakenAt: PAST,
+    });
+    const { service } = build([row]);
+
+    await expect(service.run(NOW)).resolves.toBe(0);
+    expect(row.status).toBe(TransactionStatus.Active);
+  });
+
   it('cancels expired pending and active pay-outs without touching a balance', async () => {
     const pending = deal(1, {
       kind: TransactionKind.PayOut,
@@ -285,8 +323,52 @@ describe('DealExpiryService', () => {
     );
   });
 
+  it('moves an expired pay-in in checking to checking_manually, not canceled, without touching the escrow', async () => {
+    const row = deal(1, { status: TransactionStatus.Checking });
+    const { service, wallets, saved } = build([row]);
+
+    await expect(service.run(NOW)).resolves.toBe(1);
+
+    expect(row.status).toBe(TransactionStatus.CheckingManually);
+    expect(row.resolvedAt).toBeUndefined();
+    expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+    expect(eventsOf(saved)).toEqual([
+      expect.objectContaining({
+        fromStatus: TransactionStatus.Checking,
+        toStatus: TransactionStatus.CheckingManually,
+        source: StatusEventSource.AutoTimer,
+        actorUserId: null,
+        reason: 'expired',
+      }),
+    ]);
+  });
+
+  it('leaves a pay-out in checking alone: it does not tick yet', async () => {
+    const row = deal(1, {
+      kind: TransactionKind.PayOut,
+      status: TransactionStatus.Checking,
+    });
+    const { service, transactions } = build([row]);
+    const transition = jest.spyOn(transactions, 'transitionLocked');
+
+    await expect(service.run(NOW)).resolves.toBe(0);
+
+    expect(row.status).toBe(TransactionStatus.Checking);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it('honours an extended deadline: a deal whose expiresAt moved past now is left running', async () => {
+    const row = deal(1, { expiresAt: FUTURE, timerExtendedAt: PAST });
+    const { service } = build([row]);
+
+    await expect(service.run(NOW)).resolves.toBe(0);
+    expect(row.status).toBe(TransactionStatus.Active);
+
+    await expect(service.run(new Date(FUTURE.getTime() + 1))).resolves.toBe(1);
+    expect(row.status).toBe(TransactionStatus.Canceled);
+  });
+
   it.each([
-    TransactionStatus.Checking,
     TransactionStatus.CheckingManually,
     TransactionStatus.ManualReview,
     TransactionStatus.Dispute,
@@ -327,14 +409,14 @@ describe('DealExpiryService', () => {
     expect(row.status).toBe(TransactionStatus.Canceled);
   });
 
-  it('does not touch a deal that moved to checking between selection and the lock', async () => {
+  it('does not touch a deal that moved to dispute between selection and the lock', async () => {
     const row = deal(1);
     const { service, wallets, saved, changedAfterSelection } = build([row]);
-    changedAfterSelection.set(row.id, TransactionStatus.Checking);
+    changedAfterSelection.set(row.id, TransactionStatus.Dispute);
 
     await expect(service.run(NOW)).resolves.toBe(0);
 
-    expect(row.status).toBe(TransactionStatus.Checking);
+    expect(row.status).toBe(TransactionStatus.Dispute);
     expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
     expect(saved).toEqual([]);
   });
@@ -396,17 +478,26 @@ describe('DealExpiryService', () => {
 
     expect(repository.find).toHaveBeenCalledTimes(2);
     const [, second] = repository.find.mock.calls.map(([options]) => options);
-    expect(second.where).toEqual([
-      {
-        status: In(TICKING),
-        expiresAt: And(MoreThan(PAST), LessThanOrEqual(NOW)),
-      },
-      {
-        status: In(TICKING),
-        expiresAt: Equal(PAST),
-        id: MoreThan(uuidOf(100)),
-      },
-    ]);
+    expect(second.where).toEqual(
+      [
+        [TransactionKind.PayIn, PAY_IN_TICKING],
+        [TransactionKind.PayOut, PAY_OUT_TICKING],
+      ].flatMap(([kind, status]) => [
+        {
+          kind,
+          status,
+          payoutTakenAt: IsNull(),
+          expiresAt: And(MoreThan(PAST), LessThanOrEqual(NOW)),
+        },
+        {
+          kind,
+          status,
+          payoutTakenAt: IsNull(),
+          expiresAt: Equal(PAST),
+          id: MoreThan(uuidOf(100)),
+        },
+      ]),
+    );
   });
 
   it('cancels a valid deal queued behind a full batch of permanently failing ones', async () => {

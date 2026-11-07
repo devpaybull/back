@@ -15,10 +15,12 @@ import { EffectiveGeneralRates } from '../types/effective-general-rates';
 import { LeadPercentQuery } from '../types/lead-percent-query';
 import { MethodPercent } from '../types/method-percent';
 import { MethodPercentQuery } from '../types/method-percent-query';
+import { PercentSubject } from '../types/percent-subject';
 import { RateCandidate } from '../types/rate-candidate';
 import { RateKind } from '../types/rate-kind.enum';
 import { RateSubject } from '../types/rate-subject';
 import { RateScope } from '../types/rate-scope.enum';
+import { SubjectPercentQuery } from '../types/subject-percent-query';
 import {
   BaseMethodRate,
   LeadRateAudit,
@@ -29,7 +31,7 @@ import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { bandsAreValid } from '../utils/bands-valid';
 import { findTransactionMethod } from '../utils/find-transaction-method';
-import { resolveRate } from '../utils/resolve-rate';
+import { NoBaseRateError, resolveRate } from '../utils/resolve-rate';
 import { TRANSACTION_METHOD_CODES } from '../utils/transaction-methods';
 import { RapiraRateProvider } from './rapira-rate.provider';
 
@@ -520,13 +522,13 @@ export class RateService {
     });
   }
 
-  async merchantSourceRate(payInMarkupPercent: number): Promise<Rate> {
+  async merchantSourceRate(markupPercent: number): Promise<Rate> {
     const fiatPerUsdt = await this.rapira.getFiatPerUsdt();
 
     return roundRate(
       fiatPerUsdt
         .times(toDecimal(RAPIRA_PLUS_ONE_SOURCE_MARKUP).plus(1))
-        .times(toDecimal(payInMarkupPercent).div(100).plus(1)),
+        .times(toDecimal(markupPercent).div(100).plus(1)),
     );
   }
 
@@ -535,6 +537,58 @@ export class RateService {
     const markup = this.config.get<number>('RATE_MARKUP', 0);
 
     return roundRate(fiatPerUsdt.times(toDecimal(markup).plus(1)));
+  }
+
+  async resolveSubjectPercents(
+    query: SubjectPercentQuery,
+    subjects: readonly PercentSubject[],
+  ): Promise<(number | null)[]> {
+    if (subjects.length === 0) return [];
+
+    const method = knownMethod(query.method);
+    const rows = await this.rates.find({
+      where: [
+        {
+          scope: query.scope,
+          method: query.method,
+          subjectUserId: IsNull(),
+          subjectMerchantId: IsNull(),
+        },
+        {
+          scope: query.scope,
+          method: query.method,
+          subjectUserId: In([...new Set(subjects.map((s) => s.userId))]),
+        },
+      ],
+    });
+    const toCandidate = (row: MethodRate): RateCandidate => ({
+      hasSubject: row.subjectUserId !== null,
+      fromAmount: row.fromAmount ?? null,
+      toAmount: row.toAmount ?? null,
+      bankId: row.bankId ?? null,
+      payInPercent: row.payInPercent,
+      payOutPercent: row.payOutPercent,
+    });
+    const base = rows.filter((row) => row.subjectUserId === null);
+
+    return subjects.map((subject) => {
+      try {
+        return resolveRate({
+          candidates: [
+            ...base,
+            ...rows.filter((row) => row.subjectUserId === subject.userId),
+          ].map(toCandidate),
+          amount: query.amount,
+          bankId: subject.bankId,
+          rateKind: method.rateKind,
+          individualEnabled: subject.individualEnabled,
+          direction: query.direction,
+        });
+      } catch (error) {
+        if (error instanceof NoBaseRateError) return null;
+        throw error;
+      }
+    });
   }
 
   async resolveMethodPercent(query: MethodPercentQuery): Promise<number> {

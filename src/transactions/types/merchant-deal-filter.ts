@@ -7,6 +7,8 @@ export type MerchantDealFilter = Omit<
   | 'sortBy'
   | 'sortOrder'
   | 'merchantId'
+  | 'merchantIds'
+  | 'counterpartyIds'
   | 'traderUserId'
   | 'bankDetailsIds'
   | 'merchantRanks'

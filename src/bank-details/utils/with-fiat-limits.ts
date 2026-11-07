@@ -7,6 +7,7 @@ const AMOUNT_LIMIT_KEYS: AmountLimitKey[] = [
   'maxAmount',
   'dailyAmountLimit',
   'monthlyAmountLimit',
+  'hourlyAmountLimit',
 ];
 
 export function withFiatLimits<

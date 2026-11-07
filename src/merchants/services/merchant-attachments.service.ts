@@ -15,6 +15,7 @@ import { TRANSACTION_METHODS } from '../../transactions/utils/transaction-method
 import { User } from '../../users/entities/user.entity';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import { MerchantAttachmentMethod } from '../entities/merchant-attachment-method.entity';
+import { TraderMerchantExclusions } from '../types/trader-pay-out-exclusions';
 import { MerchantAttachment } from '../entities/merchant-attachment.entity';
 import { Merchant } from '../entities/merchant.entity';
 import { AttachmentChanges } from '../types/attachment-changes';
@@ -23,6 +24,7 @@ import { AttachmentMethodState } from '../types/attachment-method-state';
 import { AttachmentSet } from '../types/attachment-set';
 import { AttachmentView } from '../types/attachment-view';
 import { MerchantAttachmentKind } from '../types/merchant-attachment-kind.enum';
+import { MerchantTraderAdmission } from '../types/merchant-trader-admission';
 import { isUniqueViolation } from '../utils/is-unique-violation';
 
 const REGISTRY: readonly TransactionMethodDefinition[] = TRANSACTION_METHODS;
@@ -97,6 +99,62 @@ export class MerchantAttachmentsService {
     }
 
     return counts;
+  }
+
+  async admissionOf(
+    merchantId: string,
+    method: string,
+  ): Promise<MerchantTraderAdmission> {
+    const merchant = await this.merchants.findOne({
+      where: { id: merchantId },
+      select: { id: true, exclusiveTopUp: true },
+    });
+    const rows = await this.attachments.find({
+      where: { merchantId, kind: MerchantAttachmentKind.Trader },
+      relations: { methods: true },
+    });
+    const attached = new Set<string>();
+    const switchedOff = new Set<string>();
+
+    for (const row of rows) {
+      const methodOn = row.methods.some(
+        (entry) => entry.method === method && entry.enabled,
+      );
+
+      (row.trading && methodOn ? attached : switchedOff).add(row.userId);
+    }
+
+    return {
+      exclusiveTopUp: merchant?.exclusiveTopUp ?? false,
+      attachedTraderIds: attached,
+      switchedOffTraderIds: switchedOff,
+    };
+  }
+
+  async exclusionsOfTrader(
+    traderUserId: string,
+  ): Promise<TraderMerchantExclusions> {
+    const [rows, exclusive] = await Promise.all([
+      this.attachments.find({
+        where: { userId: traderUserId, kind: MerchantAttachmentKind.Trader },
+        relations: { methods: true },
+      }),
+      this.merchants.find({
+        select: { id: true },
+        where: { exclusiveTopUp: true },
+      }),
+    ]);
+    const isOn = (row: (typeof rows)[number], method: string): boolean =>
+      row.trading &&
+      row.methods.some((entry) => entry.method === method && entry.enabled);
+
+    return {
+      exclusiveMerchantIds: exclusive.map((merchant) => merchant.id),
+      attachedMerchantIds: (method) =>
+        rows.filter((row) => isOn(row, method)).map((row) => row.merchantId),
+      switchedOffMerchantIds: (method) =>
+        rows.filter((row) => !isOn(row, method)).map((row) => row.merchantId),
+    };
   }
 
   async list(merchantId: string): Promise<AttachmentView[]> {

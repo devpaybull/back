@@ -1,4 +1,5 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { MINIO_PASSWORD, MINIO_USER, readMinio } from './minio';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { hash } from 'bcryptjs';
 import { execFileSync } from 'child_process';
@@ -8,6 +9,8 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { Role } from '../../src/common/enums/role.enum';
 import { ResponseEnvelopeInterceptor } from '../../src/common/interceptors/response-envelope.interceptor';
+import { FieldErrorsValidationPipe } from '../../src/common/pipes/field-errors-validation.pipe';
+import { registerBodyParsers } from '../../src/merchant-api/utils/register-body-parsers';
 import { User } from '../../src/users/entities/user.entity';
 import { UserStatus } from '../../src/users/types/user-status.enum';
 import { FakeHttpServer } from './fake-http-server';
@@ -109,6 +112,12 @@ export const startE2e = async (
     DEAL_EXPIRY_INTERVAL_SECONDS: '3600',
     DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS: '3600',
     VICTORIA_LOGS_URL: '',
+    S3_ENDPOINT: `http://127.0.0.1:${readMinio().port}`,
+    S3_REGION: 'us-east-1',
+    S3_BUCKET: 'paybull-e2e',
+    S3_ACCESS_KEY_ID: MINIO_USER,
+    S3_SECRET_ACCESS_KEY: MINIO_PASSWORD,
+    S3_FORCE_PATH_STYLE: 'true',
     MAIL_HOST: '',
     RAPIRA_RATE_URL: rapira.url,
     TRON_NETWORK: 'nile',
@@ -149,10 +158,11 @@ export const startE2e = async (
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  const app = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication({ bodyParser: false });
   app.use(cookieParser());
+  registerBodyParsers(app);
   app.useGlobalPipes(
-    new ValidationPipe({
+    new FieldErrorsValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,

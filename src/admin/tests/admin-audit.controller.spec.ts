@@ -39,6 +39,9 @@ const row = {
   updatedAt: new Date('2026-01-01T00:00:00Z'),
 };
 
+const superadmin = { role: Role.Superadmin } as never;
+const admin = { role: Role.Admin } as never;
+
 describe('AdminAuditController', () => {
   let audit: { list: jest.Mock };
   let directory: { findById: jest.Mock; findByIds: jest.Mock };
@@ -67,6 +70,74 @@ describe('AdminAuditController', () => {
     ).toEqual([Role.Admin, Role.Superadmin]);
   });
 
+  describe('a whitelisted merchant address', () => {
+    const domainRow = (action: string) => ({
+      ...row,
+      source: AuditSource.Domain,
+      action,
+      metadata: { merchantId: 'm', ipAddressId: 1, ip: '203.0.113.47' },
+      body: null,
+    });
+    const httpRow = (body: unknown) => ({
+      ...row,
+      action: 'POST /admin/merchants/:id/ip-addresses',
+      body,
+    });
+    const seen = async (record: object, viewer: never) => {
+      audit.list.mockResolvedValue(
+        new Page([record], { total: 1, page: 1, limit: 20, pages: 1 }),
+      );
+
+      return (await controller.listAll(new ListAllAuditQueryDto(), viewer))
+        .items[0];
+    };
+
+    it.each(['merchant.ip_added', 'merchant.ip_removed'])(
+      'is masked in %s for an admin and whole for a superadmin',
+      async (action) => {
+        expect((await seen(domainRow(action), admin)).metadata).toEqual({
+          merchantId: 'm',
+          ipAddressId: 1,
+          ip: '203.0.*.*',
+        });
+        expect((await seen(domainRow(action), superadmin)).metadata).toEqual(
+          domainRow(action).metadata,
+        );
+      },
+    );
+
+    it('is masked in the http row for an admin and whole for a superadmin', async () => {
+      const raw = httpRow({ ip: '::ffff:203.0.113.47' });
+
+      expect((await seen(raw, admin)).body).toEqual({ ip: '203.0.*.*' });
+      expect((await seen(raw, superadmin)).body).toEqual(raw.body);
+    });
+
+    it.each([[{ ip: 42 }], [{ ip: ['203.0.113.47'] }], [{ ip: 'not-an-ip' }]])(
+      'shows an admin nothing of the unreadable body %j',
+      async (body) => {
+        expect((await seen(httpRow(body), admin)).body).toEqual({ ip: '*' });
+      },
+    );
+
+    it('leaves a body without the field, and the ip of the caller, as they are', async () => {
+      const seenRow = await seen(httpRow({}), admin);
+
+      expect(seenRow.body).toEqual({});
+      expect(seenRow.ip).toBe(row.ip);
+    });
+
+    it('does not touch the same field on any other action', async () => {
+      const other = {
+        ...row,
+        action: 'POST /other',
+        body: { ip: '203.0.113.47' },
+      };
+
+      expect((await seen(other, admin)).body).toEqual({ ip: '203.0.113.47' });
+    });
+  });
+
   describe('GET /admin/audit', () => {
     it('passes every filter through and returns the rows without archive bookkeeping', async () => {
       const query = Object.assign(new ListAllAuditQueryDto(), {
@@ -82,7 +153,7 @@ describe('AdminAuditController', () => {
         statusCode: 401,
       });
 
-      const page = await controller.listAll(query);
+      const page = await controller.listAll(query, superadmin);
 
       expect(audit.list).toHaveBeenCalledWith({
         page: 2,
@@ -121,7 +192,7 @@ describe('AdminAuditController', () => {
 
   describe('GET /admin/users/:id/audit', () => {
     it('goes through the same reader with the target fixed to the account', async () => {
-      await controller.list(uuidOf(1), new ListAuditQueryDto());
+      await controller.list(uuidOf(1), new ListAuditQueryDto(), superadmin);
 
       expect(audit.list).toHaveBeenCalledWith({
         page: 1,
@@ -136,7 +207,7 @@ describe('AdminAuditController', () => {
       directory.findById.mockResolvedValue(null);
 
       await expect(
-        controller.list(uuidOf(1), new ListAuditQueryDto()),
+        controller.list(uuidOf(1), new ListAuditQueryDto(), superadmin),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(audit.list).not.toHaveBeenCalled();
     });

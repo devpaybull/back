@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { In } from 'typeorm';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
+import { MerchantApiKey } from '../entities/merchant-api-key.entity';
 import { MerchantGroup } from '../entities/merchant-group.entity';
 import { Merchant } from '../entities/merchant.entity';
 import { MerchantsService } from '../services/merchants.service';
@@ -408,11 +409,16 @@ describe('MerchantsService, API keys', () => {
   const MERCHANT = uuidOf(1);
   const ACTOR = uuidOf(9);
 
-  const build = (merchantExists = true, key: object | null = null) => {
+  const build = (
+    merchantExists = true,
+    key: object | null = null,
+    active: object[] = [],
+  ) => {
     const manager = {
       findOne: jest.fn(async (entity: unknown) =>
         entity === Merchant ? (merchantExists ? { id: MERCHANT } : null) : key,
       ),
+      find: jest.fn(async () => active),
       create: jest.fn((_entity: unknown, data: object) => ({ ...data })),
       save: jest.fn(async (row: object) => ({ id: 5, ...row })),
     };
@@ -421,7 +427,10 @@ describe('MerchantsService, API keys', () => {
         work(manager),
       ),
     };
-    const keys = { find: jest.fn(async () => []) };
+    const keys = {
+      find: jest.fn(async () => []),
+      findOne: jest.fn(async (): Promise<object | null> => key),
+    };
     const audit = { record: jest.fn(async () => undefined) };
 
     return {
@@ -457,6 +466,66 @@ describe('MerchantsService, API keys', () => {
       },
       manager,
     );
+  });
+
+  it('revokes the active key in the transaction that issues the new one, audited as rotated', async () => {
+    const previous = { id: 3, merchantId: MERCHANT, key: 'old', active: true };
+    const { service, manager, audit } = build(true, null, [previous]);
+
+    await service.createKey(MERCHANT, ACTOR);
+
+    expect(manager.find).toHaveBeenCalledWith(MerchantApiKey, {
+      where: { merchantId: MERCHANT, active: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(previous.active).toBe(false);
+    expect((previous as { revokedAt?: Date }).revokedAt).toBeInstanceOf(Date);
+    expect(audit.record).toHaveBeenNthCalledWith(
+      1,
+      {
+        actorUserId: ACTOR,
+        action: 'merchant.api_key_revoked',
+        reason: 'rotated',
+        metadata: { merchantId: MERCHANT, apiKeyId: 3 },
+      },
+      manager,
+    );
+    expect(manager.save.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.create.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('issues the first key without revoking anything', async () => {
+    const { service, audit } = build();
+
+    await service.createKey(MERCHANT, ACTOR);
+
+    expect(audit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('authenticates an active key with its merchant', async () => {
+    const stored = {
+      id: 7,
+      merchantId: MERCHANT,
+      merchant: { id: MERCHANT, active: false },
+    };
+    const { service, keys } = build(true, stored);
+
+    await expect(service.authenticateKey('k')).resolves.toEqual({
+      merchantId: MERCHANT,
+      apiKeyId: 7,
+      merchantActive: false,
+    });
+    expect(keys.findOne).toHaveBeenCalledWith({
+      where: { key: 'k', active: true },
+      relations: { merchant: true },
+    });
+  });
+
+  it('answers null for an unknown or revoked key', async () => {
+    const { service } = build(true, null);
+
+    await expect(service.authenticateKey('k')).resolves.toBeNull();
   });
 
   it('refuses a key for an unknown merchant with a 404', async () => {

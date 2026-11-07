@@ -1,17 +1,23 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
+  IsIn,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { INT4_MAX } from '../../common/utils/int4-max';
+import { DELAY_BETWEEN_REQUESTS_SECONDS } from '../utils/delay-between-requests-seconds';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 
 const MAX_CARDHOLDER_NAME_LENGTH = 100;
 const MAX_CARD_LENGTH = 32;
@@ -30,6 +36,16 @@ export class UpdateBankDetailsDto {
 
   @ApiPropertyOptional({
     example: 1,
+    description: 'Required for a mobile requisite, refused on any other',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  mobileOperatorId?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
     description: 'A device the signed-in account owns',
   })
   @IsOptional()
@@ -38,10 +54,10 @@ export class UpdateBankDetailsDto {
   @Min(1)
   deviceId?: number;
 
-  @ApiPropertyOptional({ enum: TransactionType })
+  @ApiPropertyOptional({ enum: BankDetailsType })
   @IsOptional()
-  @IsEnum(TransactionType)
-  type?: TransactionType;
+  @IsEnum(BankDetailsType)
+  type?: BankDetailsType;
 
   @ApiPropertyOptional({
     example: 'IVAN IVANOV',
@@ -141,20 +157,40 @@ export class UpdateBankDetailsDto {
   monthlyLimit?: number;
 
   @ApiPropertyOptional({
-    description: 'Caps the turnover these details may take in a day',
+    enum: [true],
+    description:
+      'The daily turnover limit is mandatory and cannot be switched off; false is a 400',
   })
   @IsOptional()
-  @IsBoolean()
+  @IsIn([true], { message: 'dailyAmountLimitEnabled cannot be switched off' })
   dailyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
     type: String,
     example: '300000.00',
-    description: 'Turnover a day; null unless dailyAmountLimitEnabled is true',
+    description: 'Turnover a day (fiat)',
   })
   @IsOptional()
   @IsFiatAmount()
   dailyAmountLimit?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Caps the turnover of the last 60 minutes, successful and open deals together',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hourlyAmountLimitEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    example: '50000.00',
+    description:
+      'Turnover a rolling hour; null unless hourlyAmountLimitEnabled is true',
+  })
+  @IsOptional()
+  @IsFiatAmount()
+  hourlyAmountLimit?: string;
 
   @ApiPropertyOptional({
     description: 'Caps the turnover these details may take in a month',
@@ -198,13 +234,14 @@ export class UpdateBankDetailsDto {
   delayBetweenRequestsEnabled?: boolean;
 
   @ApiPropertyOptional({
+    enum: DELAY_BETWEEN_REQUESTS_SECONDS,
     example: 300,
-    description: 'Seconds; null unless delayBetweenRequestsEnabled is true',
+    description:
+      'Seconds, one of 5, 30, 60, 300, 900, 1800, 3600, 10800; null unless delayBetweenRequestsEnabled is true',
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(0)
+  @IsIn(DELAY_BETWEEN_REQUESTS_SECONDS)
   delayBetweenRequests?: number;
 
   @ApiPropertyOptional({
@@ -213,6 +250,40 @@ export class UpdateBankDetailsDto {
   @IsOptional()
   @IsBoolean()
   counterpartyOnly?: boolean;
+
+  @ApiPropertyOptional({
+    example: 8,
+    minimum: 1,
+    description:
+      'Counterparty slots: required while counterpartyOnly is set, refused (400) otherwise',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(INT4_MAX)
+  maxCounterparties?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Takes only deals whose payer bank is the bank of this requisite',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sameBankOnly?: boolean;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    description:
+      'The whole tag set: replaces the current one, [] clears it; another account’s tag is a 404',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(INT4_MAX, { each: true })
+  tagIds?: number[];
 
   @ApiPropertyOptional({
     description: 'Marks these details as a reserve requisite',

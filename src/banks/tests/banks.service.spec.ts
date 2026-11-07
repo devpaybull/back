@@ -243,3 +243,15 @@ describe('BanksService', () => {
     });
   });
 });
+
+describe('BanksService.findActiveByCode', () => {
+  it('looks up an active bank by its code', async () => {
+    const banks = { findOne: jest.fn(async () => null) };
+    const service = new BanksService(banks as never, {} as never, {} as never);
+
+    await expect(service.findActiveByCode('tbank')).resolves.toBeNull();
+    expect(banks.findOne).toHaveBeenCalledWith({
+      where: { code: 'tbank', active: true },
+    });
+  });
+});

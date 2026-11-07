@@ -22,8 +22,11 @@ export class TransactionDto {
   })
   method: string;
 
-  @ApiProperty()
-  traderUserId: string;
+  @ApiProperty({
+    nullable: true,
+    description: 'null while a pay-out has not been taken by a trader',
+  })
+  traderUserId: string | null;
 
   @ApiProperty({ nullable: true })
   bankDetailsId: string;
@@ -108,7 +111,7 @@ export const toTransactionDto = (row: Transaction): TransactionDto => ({
   kind: row.kind,
   status: row.status,
   method: row.method,
-  traderUserId: row.traderUserId,
+  traderUserId: row.traderUserId ?? null,
   bankDetailsId: row.bankDetailsId,
   counterpartyId: row.counterpartyId,
   merchantId: row.merchantId,

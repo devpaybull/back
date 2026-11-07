@@ -5,7 +5,7 @@ import { AdminDevicesController } from '../../admin/controllers/admin-devices.co
 import { BankDetailsController } from '../../bank-details/bank-details.controller';
 import { ROLES_METADATA_KEY } from '../decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../decorators/write-access.decorator';
-import { DevicesController } from '../../devices/devices.controller';
+import { DevicesController } from '../../devices/controllers/devices.controller';
 import { Role } from '../enums/role.enum';
 import { RolesGuard } from '../guards/roles.guard';
 import { WriteAccessGuard } from '../guards/write-access.guard';

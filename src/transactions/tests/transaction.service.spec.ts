@@ -14,7 +14,12 @@ import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { TransactionService } from '../services/transaction.service';
+import { CandidateRejectedError } from '../exceptions/candidate-rejected.exception';
 import { CreateDealInput } from '../types/create-deal-input';
+import { DealCandidate } from '../types/deal-candidate';
+import { IssuedDealInput } from '../types/issued-deal-input';
+import { PayOutRequestInput } from '../types/pay-out-request-input';
+import { SelectionFilter } from '../types/selection-filter.enum';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethod } from '../types/transaction-method';
@@ -95,6 +100,7 @@ const build = () => {
     recordDisputeWithin: jest.fn(async () => undefined),
     recordCompletedWithin: jest.fn(async () => undefined),
   };
+  const audit = { record: jest.fn(async () => undefined) };
   const links = [{ id: 70, leadUserId: LEAD_A } as TraderLead];
   const team = { assignmentsOf: jest.fn(async () => links) };
   const config = {
@@ -112,7 +118,7 @@ const build = () => {
     {} as never,
     wallets as never,
     merchantBalances as never,
-    {} as never,
+    audit as never,
     rates as never,
     team as never,
     merchantSettings as never,
@@ -122,6 +128,7 @@ const build = () => {
 
   return {
     service,
+    audit,
     counterpartyStats,
     manager,
     dataSource,
@@ -406,6 +413,141 @@ describe('TransactionService.createDeal', () => {
   });
 });
 
+describe('TransactionService.createIssuedDeal', () => {
+  const issued: IssuedDealInput = {
+    kind: TransactionKind.PayIn,
+    method: 'sbp',
+    merchantId: uuidOf(3),
+    amountFiat: toFiat(10000),
+    rate: toRate(100),
+    merchantPercent: 10,
+  };
+  const candidate = (n: number, traderPercent = 7): DealCandidate => ({
+    traderUserId: uuidOf(n),
+    bankDetailsId: uuidOf(100 + n),
+    bankId: 4,
+    traderPercent,
+  });
+
+  it('inserts the deal for the first candidate that passes, in the transaction that checked it', async () => {
+    const { service, dataSource, wallets, manager } = build();
+    const checkWithin = jest.fn(async () => undefined);
+    const afterInsertWithin = jest.fn(async () => undefined);
+
+    const result = await service.createIssuedDeal(issued, [candidate(1)], {
+      checkWithin,
+      afterInsertWithin,
+    });
+
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(checkWithin).toHaveBeenCalledWith(manager, candidate(1));
+    expect(wallets.reserveMainEscrowWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(1),
+      expect.anything(),
+    );
+    expect(result.transaction).toMatchObject({
+      traderUserId: uuidOf(1),
+      bankDetailsId: uuidOf(101),
+      traderPercent: 7,
+    });
+    expect(afterInsertWithin).toHaveBeenCalledWith(
+      manager,
+      candidate(1),
+      result.transaction,
+    );
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('moves to the next candidate when the check refuses one under its lock, inserting nothing for it', async () => {
+    const { service, wallets, dataSource } = build();
+    const checkWithin = jest.fn(async (_manager: unknown, c: DealCandidate) => {
+      if (c.traderUserId === uuidOf(1)) {
+        throw new CandidateRejectedError(SelectionFilter.MaxActive);
+      }
+    });
+
+    const result = await service.createIssuedDeal(
+      issued,
+      [candidate(1), candidate(2)],
+      { checkWithin },
+    );
+
+    expect(dataSource.transaction).toHaveBeenCalledTimes(2);
+    expect(wallets.reserveMainEscrowWithin).toHaveBeenCalledTimes(1);
+    expect(result.candidate).toEqual(candidate(2));
+    expect(result.skipped).toEqual([
+      { candidate: candidate(1), reason: SelectionFilter.MaxActive },
+    ]);
+  });
+
+  it('skips a trader whose escrow does not fit under the wallet lock', async () => {
+    const { service, wallets } = build();
+    wallets.reserveMainEscrowWithin.mockRejectedValueOnce(
+      new ConflictException('Insufficient available balance'),
+    );
+
+    const result = await service.createIssuedDeal(
+      issued,
+      [candidate(1), candidate(2)],
+      { checkWithin: async () => undefined },
+    );
+
+    expect(result.candidate).toEqual(candidate(2));
+    expect(result.skipped).toEqual([
+      { candidate: candidate(1), reason: SelectionFilter.InsufficientBalance },
+    ]);
+  });
+
+  it('skips a trader whose leads leave the platform below its minimum, before opening a transaction', async () => {
+    const { service, rates, dataSource } = build();
+    rates.resolveLeadPercents.mockResolvedValueOnce([
+      { leadUserId: LEAD_A, percent: 9.5 },
+    ]);
+
+    const result = await service.createIssuedDeal(
+      issued,
+      [candidate(1, 1), candidate(2)],
+      { checkWithin: async () => undefined },
+    );
+
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(result.skipped).toEqual([
+      { candidate: candidate(1, 1), reason: SelectionFilter.DealRefused },
+    ]);
+  });
+
+  it('answers no deal with every skip when nobody passes', async () => {
+    const { service } = build();
+
+    const result = await service.createIssuedDeal(issued, [candidate(1)], {
+      checkWithin: async () => {
+        throw new CandidateRejectedError(SelectionFilter.DailyAmount);
+      },
+    });
+
+    expect(result).toEqual({
+      transaction: null,
+      candidate: null,
+      skipped: [
+        { candidate: candidate(1), reason: SelectionFilter.DailyAmount },
+      ],
+    });
+  });
+
+  it('lets an unexpected failure through instead of trying the next one', async () => {
+    const { service } = build();
+
+    await expect(
+      service.createIssuedDeal(issued, [candidate(1), candidate(2)], {
+        checkWithin: async () => {
+          throw new Error('connection lost');
+        },
+      }),
+    ).rejects.toThrow('connection lost');
+  });
+});
+
 describe('TransactionService.transition, settling lead shares', () => {
   const deal = (overrides: Partial<Transaction> = {}): Transaction =>
     ({
@@ -686,6 +828,26 @@ describe('TransactionService.transition, the merchant balance', () => {
       uuidOf(50),
     );
     expect(merchantBalances.settlePayOutWithin).not.toHaveBeenCalled();
+  });
+
+  it('touches no trader wallet when a pay-out nobody took is canceled', async () => {
+    const { merchantBalances, wallets, manager } = await settle(
+      deal({
+        kind: TransactionKind.PayOut,
+        status: TransactionStatus.Pending,
+        traderUserId: null,
+      }),
+      TransactionStatus.Canceled,
+    );
+
+    expect(wallets.lockWalletsWithin).not.toHaveBeenCalled();
+    expect(wallets.creditMainWithin).not.toHaveBeenCalled();
+    expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+    expect(merchantBalances.releasePayOutWithin).toHaveBeenCalledWith(
+      manager,
+      MERCHANT,
+      uuidOf(50),
+    );
   });
 
   it('releases nothing for a canceled pay-out without a merchant', async () => {
@@ -1399,5 +1561,540 @@ describe('TransactionService, counterparty statistics', () => {
         built.counterpartyStats.recordCompletedWithin,
       ).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('TransactionService, the merchant API fields of a deal', () => {
+  it('createDeal stores what the merchant sent with the pay-in', async () => {
+    const { service } = build();
+    const payerInfo = { userId: 'client-1', ip: '203.0.113.7' };
+
+    const created = await service.createDeal(
+      input({
+        merchantTransactionId: 'order-1',
+        payerInfo,
+        requestedBankId: 7,
+        requestedOperatorId: 3,
+        payerBankId: 8,
+        callbackUrl: 'https://merchant.example/cb',
+        successUrl: 'https://merchant.example/ok',
+        errorUrl: 'https://merchant.example/err',
+        requestedAmountFiat: toFiat(9990),
+      }),
+    );
+
+    expect(created).toMatchObject({
+      merchantTransactionId: 'order-1',
+      payerInfo,
+      requestedBankId: 7,
+      requestedOperatorId: 3,
+      payerBankId: 8,
+      callbackUrl: 'https://merchant.example/cb',
+      successUrl: 'https://merchant.example/ok',
+      errorUrl: 'https://merchant.example/err',
+      requestedAmountFiat: toFiat(9990),
+    });
+  });
+
+  it('leaves them null for a caller that sends none', async () => {
+    const { service } = build();
+
+    const created = await service.createDeal(input());
+
+    expect(created).toMatchObject({
+      merchantTransactionId: null,
+      payerInfo: null,
+      requestedBankId: null,
+      requestedOperatorId: null,
+      requestedAmountFiat: null,
+    });
+  });
+});
+
+describe('TransactionService, the merchant API lookups', () => {
+  const MERCHANT = uuidOf(3);
+  const buildLookups = () => {
+    const repository = {
+      findOne: jest.fn(async () => null),
+      count: jest.fn(async () => 2),
+    };
+    const service = new TransactionService(
+      {} as never,
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    return { repository, service };
+  };
+
+  it('finds a deal by the merchant’s own key, scoped to the merchant', async () => {
+    const { repository, service } = buildLookups();
+
+    await service.findByMerchantTransactionId(MERCHANT, 'order-1');
+
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: { merchantId: MERCHANT, merchantTransactionId: 'order-1' },
+    });
+  });
+
+  it('a same request is an active pay-in of the client with the same method and requested amount, newest first', async () => {
+    const { repository, service } = buildLookups();
+
+    await service.findActiveSameRequest({
+      merchantId: MERCHANT,
+      counterpartyId: 11,
+      method: 'sbp',
+      requestedAmountFiat: toFiat(2000),
+    });
+
+    expect(repository.findOne).toHaveBeenCalledWith({
+      where: {
+        kind: TransactionKind.PayIn,
+        status: TransactionStatus.Active,
+        merchantId: MERCHANT,
+        counterpartyId: 11,
+        method: 'sbp',
+        requestedAmountFiat: toFiat(2000),
+      },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  });
+
+  it('failed pay-ins are active + canceled pay-ins of the client created since the given moment', async () => {
+    const { repository, service } = buildLookups();
+    const since = new Date('2026-11-04T09:00:00Z');
+
+    await expect(
+      service.countFailedPayInsSince(MERCHANT, 11, since),
+    ).resolves.toBe(2);
+
+    const [options] = repository.count.mock.calls[0] as unknown as [
+      { where: Record<string, unknown> },
+    ];
+    expect(options.where).toMatchObject({
+      kind: TransactionKind.PayIn,
+      merchantId: MERCHANT,
+      counterpartyId: 11,
+      status: In([TransactionStatus.Active, TransactionStatus.Canceled]),
+    });
+    expect(options.where.createdAt).toMatchObject({
+      _type: 'moreThanOrEqual',
+      _value: since,
+    });
+  });
+});
+
+describe('TransactionService: the merchant cancels and extends', () => {
+  const MERCHANT = uuidOf(80);
+  const DEAL = uuidOf(81);
+  const CREATED = new Date('2026-11-04T10:00:00.000Z');
+  const EXPIRES = new Date('2026-11-04T10:15:00.000Z');
+  const NOW = new Date('2026-11-04T10:05:00.000Z');
+
+  const merchantDeal = (overrides: Partial<Transaction> = {}): Transaction =>
+    ({
+      id: DEAL,
+      merchantId: MERCHANT,
+      kind: TransactionKind.PayIn,
+      status: TransactionStatus.Active,
+      traderUserId: TRADER,
+      traderAmount: toCrypto(20),
+      merchantAmount: toCrypto(18),
+      counterpartyId: null,
+      createdAt: CREATED,
+      expiresAt: EXPIRES,
+      timerExtendedAt: null,
+      ...overrides,
+    }) as Transaction;
+
+  const statusEvents = (saved: unknown[]) =>
+    saved.filter(
+      (row) =>
+        (row as { toStatus?: unknown }).toStatus !== undefined &&
+        (row as { transactionId?: unknown }).transactionId === DEAL,
+    );
+
+  describe('cancelByMerchant', () => {
+    it('reads the deal under a row lock scoped to the merchant', async () => {
+      const built = build();
+      built.manager.findOne.mockResolvedValue(merchantDeal());
+
+      await built.service.cancelByMerchant(MERCHANT, DEAL);
+
+      expect(built.manager.findOne).toHaveBeenCalledWith(Transaction, {
+        where: { id: DEAL, merchantId: MERCHANT },
+        lock: { mode: 'pessimistic_write' },
+      });
+    });
+
+    it('is a 404 for a deal that is missing or another merchant’s', async () => {
+      const built = build();
+
+      await expect(
+        built.service.cancelByMerchant(MERCHANT, DEAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(built.audit.record).not.toHaveBeenCalled();
+    });
+
+    it('cancels an active pay-in: escrow released, event from the merchant, audit row without an actor', async () => {
+      const built = build();
+      const deal = merchantDeal();
+      built.manager.findOne.mockResolvedValue(deal);
+
+      const result = await built.service.cancelByMerchant(MERCHANT, DEAL);
+
+      expect(result.status).toBe(TransactionStatus.Canceled);
+      expect(result.resolvedAt).toBeInstanceOf(Date);
+      expect(built.wallets.releaseEscrowWithin).toHaveBeenCalledWith(
+        built.manager,
+        TRADER,
+        toCrypto(20),
+      );
+      expect(statusEvents(built.saved)).toEqual([
+        expect.objectContaining({
+          fromStatus: TransactionStatus.Active,
+          toStatus: TransactionStatus.Canceled,
+          source: StatusEventSource.Merchant,
+          actorUserId: null,
+          reason: 'merchant_canceled',
+        }),
+      ]);
+      expect(built.audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: null,
+          action: 'merchant_api.deal_canceled',
+          metadata: {
+            merchantId: MERCHANT,
+            transactionId: DEAL,
+            fromStatus: TransactionStatus.Active,
+          },
+        },
+        built.manager,
+      );
+    });
+
+    it('cancels a pending pay-out and returns the merchant’s hold', async () => {
+      const built = build();
+      built.manager.findOne.mockResolvedValue(
+        merchantDeal({
+          kind: TransactionKind.PayOut,
+          status: TransactionStatus.Pending,
+        }),
+      );
+
+      const result = await built.service.cancelByMerchant(MERCHANT, DEAL);
+
+      expect(result.status).toBe(TransactionStatus.Canceled);
+      expect(built.merchantBalances.releasePayOutWithin).toHaveBeenCalledWith(
+        built.manager,
+        MERCHANT,
+        DEAL,
+      );
+      expect(built.wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+    });
+
+    it('answers an already canceled deal as it is, moving nothing and auditing nothing', async () => {
+      const built = build();
+      const deal = merchantDeal({ status: TransactionStatus.Canceled });
+      built.manager.findOne.mockResolvedValue(deal);
+
+      await expect(
+        built.service.cancelByMerchant(MERCHANT, DEAL),
+      ).resolves.toBe(deal);
+      expect(built.manager.save).not.toHaveBeenCalled();
+      expect(built.wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+      expect(built.audit.record).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [TransactionKind.PayIn, TransactionStatus.Checking],
+      [TransactionKind.PayIn, TransactionStatus.CheckingManually],
+      [TransactionKind.PayIn, TransactionStatus.Dispute],
+      [TransactionKind.PayIn, TransactionStatus.ManualReview],
+      [TransactionKind.PayIn, TransactionStatus.Success],
+      [TransactionKind.PayIn, TransactionStatus.SuccessChanged],
+      [TransactionKind.PayOut, TransactionStatus.Active],
+      [TransactionKind.PayOut, TransactionStatus.Dispute],
+      [TransactionKind.PayOut, TransactionStatus.Success],
+    ])(
+      'refuses a %s in %s with a 409 and changes nothing',
+      async (kind, status) => {
+        const built = build();
+        const deal = merchantDeal({ kind, status });
+        built.manager.findOne.mockResolvedValue(deal);
+
+        await expect(
+          built.service.cancelByMerchant(MERCHANT, DEAL),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(deal.status).toBe(status);
+        expect(built.manager.save).not.toHaveBeenCalled();
+        expect(built.audit.record).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('extendTimerByMerchant', () => {
+    it.each([TransactionStatus.Active, TransactionStatus.Checking])(
+      'adds the original window once to a pay-in in %s, stamps timerExtendedAt and audits it',
+      async (status) => {
+        const built = build();
+        const deal = merchantDeal({ status });
+        built.manager.findOne.mockResolvedValue(deal);
+
+        const result = await built.service.extendTimerByMerchant(
+          MERCHANT,
+          DEAL,
+          NOW,
+        );
+
+        expect(result.expiresAt).toEqual(new Date('2026-11-04T10:30:00.000Z'));
+        expect(result.timerExtendedAt).toBe(NOW);
+        expect(result.status).toBe(status);
+        expect(built.manager.save).toHaveBeenCalledWith(deal);
+        expect(built.audit.record).toHaveBeenCalledWith(
+          {
+            actorUserId: null,
+            action: 'merchant_api.timer_extended',
+            metadata: {
+              merchantId: MERCHANT,
+              transactionId: DEAL,
+              status,
+              expiresAtBefore: EXPIRES.toISOString(),
+              expiresAt: '2026-11-04T10:30:00.000Z',
+            },
+          },
+          built.manager,
+        );
+      },
+    );
+
+    it.each<[string, Partial<Transaction>]>([
+      ['already extended', { timerExtendedAt: CREATED }],
+      ['a pay-out', { kind: TransactionKind.PayOut }],
+      [
+        'a pending pay-out',
+        { kind: TransactionKind.PayOut, status: TransactionStatus.Pending },
+      ],
+      ['past its deadline', { expiresAt: NOW }],
+      ['without a deadline', { expiresAt: null }],
+      ['in checking_manually', { status: TransactionStatus.CheckingManually }],
+      ['in dispute', { status: TransactionStatus.Dispute }],
+      ['canceled', { status: TransactionStatus.Canceled }],
+      ['successful', { status: TransactionStatus.Success }],
+    ])(
+      'refuses a deal %s with a 409 and moves nothing',
+      async (_, overrides) => {
+        const built = build();
+        const deal = merchantDeal(overrides);
+        const before = deal.expiresAt;
+        built.manager.findOne.mockResolvedValue(deal);
+
+        await expect(
+          built.service.extendTimerByMerchant(MERCHANT, DEAL, NOW),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(deal.expiresAt).toBe(before);
+        expect(built.manager.save).not.toHaveBeenCalled();
+        expect(built.audit.record).not.toHaveBeenCalled();
+      },
+    );
+
+    it('extends once: the second call on the same deal is a 409', async () => {
+      const built = build();
+      const deal = merchantDeal();
+      built.manager.findOne.mockResolvedValue(deal);
+
+      await built.service.extendTimerByMerchant(MERCHANT, DEAL, NOW);
+      await expect(
+        built.service.extendTimerByMerchant(MERCHANT, DEAL, NOW),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(deal.expiresAt).toEqual(new Date('2026-11-04T10:30:00.000Z'));
+    });
+
+    it('is a 404 for a deal that is missing or another merchant’s', async () => {
+      const built = build();
+
+      await expect(
+        built.service.extendTimerByMerchant(MERCHANT, DEAL, NOW),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+});
+
+describe('TransactionService.createPayOutRequest', () => {
+  const NOW = new Date('2026-11-04T12:00:00.000Z');
+
+  const payOut = (
+    overrides: Partial<PayOutRequestInput> = {},
+  ): PayOutRequestInput => ({
+    method: 'card',
+    merchantId: uuidOf(3),
+    merchantTransactionId: 'payout-1',
+    amountFiat: toFiat(10000),
+    rate: toRate(100),
+    merchantPercent: 10,
+    windowMinutes: null,
+    payoutOwnerName: 'PETR PETROV',
+    payoutBankId: 7,
+    payoutCardNumber: '4111111111111111',
+    payoutPhone: null,
+    payerInfo: null,
+    callbackUrl: null,
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('inserts a pending pay-out with no trader, no requisite and no trader pricing, the merchant side fixed', async () => {
+    const { service, team, rates, wallets } = build();
+
+    const created = await service.createPayOutRequest(payOut());
+
+    expect(created).toMatchObject({
+      kind: TransactionKind.PayOut,
+      status: TransactionStatus.Pending,
+      method: 'card',
+      traderUserId: null,
+      merchantId: uuidOf(3),
+      merchantTransactionId: 'payout-1',
+      merchantPercent: 10,
+      payoutOwnerName: 'PETR PETROV',
+      payoutBankId: 7,
+      payoutCardNumber: '4111111111111111',
+      payoutPhone: null,
+    });
+    expect(created.amountCrypto.toFixed(6)).toBe('100.000000');
+    expect(created.merchantCommission.toFixed(6)).toBe('10.000000');
+    expect(created.merchantAmount.toFixed(6)).toBe('110.000000');
+    for (const field of [
+      'bankDetailsId',
+      'traderPercent',
+      'traderEffectivePercent',
+      'traderCommission',
+      'traderAmount',
+      'leadPercent',
+      'leadCommission',
+    ] as const) {
+      expect(created[field]).toBeUndefined();
+    }
+    expect(team.assignmentsOf).not.toHaveBeenCalled();
+    expect(rates.resolveLeadPercents).not.toHaveBeenCalled();
+    expect(wallets.reserveMainEscrowWithin).not.toHaveBeenCalled();
+  });
+
+  it('holds the merchant amount after the insert, in the same transaction, and writes the pending event', async () => {
+    const { service, merchantBalances, merchantSettings, manager, saved } =
+      build();
+
+    const created = await service.createPayOutRequest(payOut());
+
+    expect(merchantBalances.holdPayOutWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+      created.merchantAmount,
+      uuidOf(50),
+      expect.any(Function),
+    );
+    expect(manager.save.mock.invocationCallOrder[0]).toBeLessThan(
+      merchantBalances.holdPayOutWithin.mock.invocationCallOrder[0],
+    );
+    expect(saved).toContainEqual(
+      expect.objectContaining({
+        transactionId: uuidOf(50),
+        fromStatus: null,
+        toStatus: TransactionStatus.Pending,
+        source: StatusEventSource.System,
+      }),
+    );
+
+    const [, , , , allowsOverdraft] = merchantBalances.holdPayOutWithin.mock
+      .calls[0] as unknown as [
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      () => Promise<boolean>,
+    ];
+    await allowsOverdraft();
+    expect(merchantSettings.allowsOverdraftWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+    );
+  });
+
+  it('lets a refused hold fail the whole pay-out', async () => {
+    const { service, merchantBalances } = build();
+    merchantBalances.holdPayOutWithin.mockRejectedValueOnce(
+      new ConflictException('The merchant balance does not cover the pay-out'),
+    );
+
+    await expect(service.createPayOutRequest(payOut())).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('takes the merchant’s timeout first, then the merchant window, then DEAL_TTL_MINUTES', async () => {
+    const { service, merchantSettings } = build();
+
+    const timed = await service.createPayOutRequest(
+      payOut({ windowMinutes: 30 }),
+    );
+    expect(timed.createdAt).toEqual(NOW);
+    expect(timed.expiresAt).toEqual(new Date(NOW.getTime() + 30 * 60_000));
+    expect(merchantSettings.payInWindowMinutesOf).not.toHaveBeenCalled();
+
+    merchantSettings.payInWindowMinutesOf.mockResolvedValueOnce(45);
+    expect((await service.createPayOutRequest(payOut())).expiresAt).toEqual(
+      new Date(NOW.getTime() + 45 * 60_000),
+    );
+
+    expect((await service.createPayOutRequest(payOut())).expiresAt).toEqual(
+      new Date(NOW.getTime() + DEAL_TTL_MINUTES * 60_000),
+    );
+  });
+
+  it('refuses a method without pay-out and a rate finer than its scale before any transaction', async () => {
+    const { service, dataSource } = build();
+
+    await expect(
+      service.createPayOutRequest(payOut({ method: 'counterparty' })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.createPayOutRequest(payOut({ rate: toRate('100.1234567') })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('is canceled back with no trader: the hold returns and no wallet is touched', async () => {
+    const { service, manager, merchantBalances, wallets } = build();
+    const created = await service.createPayOutRequest(payOut());
+    manager.findOne.mockResolvedValueOnce(created);
+
+    const canceled = await service.transition(created.id, {
+      toStatus: TransactionStatus.Canceled,
+      source: StatusEventSource.AutoTimer,
+      reason: 'expired',
+    });
+
+    expect(canceled.status).toBe(TransactionStatus.Canceled);
+    expect(merchantBalances.releasePayOutWithin).toHaveBeenCalledWith(
+      manager,
+      uuidOf(3),
+      created.id,
+    );
+    expect(wallets.releaseEscrowWithin).not.toHaveBeenCalled();
+    expect(wallets.lockWalletsWithin).not.toHaveBeenCalled();
   });
 });

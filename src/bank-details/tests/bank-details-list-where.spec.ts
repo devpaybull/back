@@ -1,11 +1,13 @@
 import { FindOperator, FindOptionsWhere } from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { BankDetails } from '../entities/bank-details.entity';
 import { BankDetailsListQuery } from '../types/bank-details-list-query';
 import { BankDetailsSortField } from '../types/bank-details-sort-field';
 import { bankDetailsListWhere } from '../utils/bank-details-list-where';
+import { BankDetailsStatus } from '../types/bank-details-status.enum';
+import { IsNull, Not } from 'typeorm';
 
 const query = (
   overrides: Partial<BankDetailsListQuery> = {},
@@ -40,8 +42,10 @@ describe('bankDetailsListWhere', () => {
 
   it('filters by bank and by type', () => {
     expect(
-      bankDetailsListWhere(query({ bankId: 2, type: TransactionType.Sbp })),
-    ).toEqual({ bankId: 2, type: TransactionType.Sbp });
+      bankDetailsListWhere(
+        query({ bankId: 2, type: BankDetailsType.CardOrSbp }),
+      ),
+    ).toEqual({ bankId: 2, type: BankDetailsType.CardOrSbp });
   });
 
   describe('the banned filter, which has no column of its own', () => {
@@ -100,5 +104,29 @@ describe('bankDetailsListWhere', () => {
         expect(branch).toMatchObject({ userId: uuidOf(1) });
       }
     });
+  });
+});
+
+describe('bankDetailsListWhere, the owner’s status and tag', () => {
+  it.each([
+    [BankDetailsStatus.Active, { active: true, bannedAt: IsNull() }],
+    [BankDetailsStatus.Disabled, { active: false, bannedAt: IsNull() }],
+    [BankDetailsStatus.Banned, { bannedAt: Not(IsNull()) }],
+  ])('translates status %s into columns', (status, expected) => {
+    expect(bankDetailsListWhere(query({ status }))).toEqual(expected);
+  });
+
+  it('filters by a tag through the link table', () => {
+    expect(bankDetailsListWhere(query({ tagId: 7 }))).toEqual({
+      tagLinks: { tagId: 7 },
+    });
+  });
+
+  it('keeps the tag in every search branch', () => {
+    for (const branch of branches(
+      bankDetailsListWhere(query({ tagId: 7, search: '4400' })),
+    )) {
+      expect(branch.tagLinks).toEqual({ tagId: 7 });
+    }
   });
 });

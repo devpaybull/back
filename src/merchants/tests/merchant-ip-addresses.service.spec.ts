@@ -45,11 +45,18 @@ const build = (
     delete: jest.fn(async () => undefined),
   };
   const dataSource = {
+    manager,
     transaction: jest.fn(async (work: (m: typeof manager) => unknown) =>
       work(manager),
     ),
   };
-  const repository = { find: jest.fn(async () => existing) };
+  const repository = {
+    find: jest.fn(async () => existing),
+    count: jest.fn(
+      async (query: { where: { ip: string } }) =>
+        existing.filter((row) => row.ip === query.where.ip).length,
+    ),
+  };
   const audit = { record: jest.fn(async () => undefined) };
 
   return {
@@ -91,7 +98,7 @@ describe('MerchantIpAddressesService', () => {
       {
         actorUserId: ACTOR,
         action: 'merchant.ip_added',
-        metadata: { merchantId: MERCHANT, ipAddressId: 40, ip: '203.0.*.*' },
+        metadata: { merchantId: MERCHANT, ipAddressId: 40, ip: '203.0.113.47' },
       },
       manager,
     );
@@ -183,7 +190,7 @@ describe('MerchantIpAddressesService', () => {
       {
         actorUserId: ACTOR,
         action: 'merchant.ip_removed',
-        metadata: { merchantId: MERCHANT, ipAddressId: 1, ip: '10.0.*.*' },
+        metadata: { merchantId: MERCHANT, ipAddressId: 1, ip: '10.0.0.1' },
       },
       manager,
     );
@@ -218,5 +225,52 @@ describe('MerchantIpAddressesService', () => {
     await service.remove(MERCHANT, 1, ACTOR);
 
     expect(manager.delete).toHaveBeenCalled();
+  });
+
+  describe('admits', () => {
+    it('lets any address through while the check is off', async () => {
+      const { service, repository } = build({ ipCheckEnabled: false });
+
+      await expect(service.admits(MERCHANT, '198.51.100.1')).resolves.toBe(
+        true,
+      );
+      expect(repository.count).not.toHaveBeenCalled();
+    });
+
+    it('admits a whitelisted address and refuses another while the check is on', async () => {
+      const { service } = build({
+        ipCheckEnabled: true,
+        existing: [address(1, '203.0.113.7')],
+      });
+
+      await expect(service.admits(MERCHANT, '203.0.113.7')).resolves.toBe(true);
+      await expect(service.admits(MERCHANT, '203.0.113.8')).resolves.toBe(
+        false,
+      );
+    });
+
+    it('matches an IPv4-mapped and a differently written IPv6 address', async () => {
+      const { service } = build({
+        ipCheckEnabled: true,
+        existing: [
+          address(1, '203.0.113.7'),
+          address(2, '2001:db8:0:0:0:0:0:1'),
+        ],
+      });
+
+      await expect(
+        service.admits(MERCHANT, '::ffff:203.0.113.7'),
+      ).resolves.toBe(true);
+      await expect(service.admits(MERCHANT, '2001:0DB8::1')).resolves.toBe(
+        true,
+      );
+    });
+
+    it('refuses a missing or unparsable address while the check is on', async () => {
+      const { service } = build({ ipCheckEnabled: true });
+
+      await expect(service.admits(MERCHANT, undefined)).resolves.toBe(false);
+      await expect(service.admits(MERCHANT, 'nonsense')).resolves.toBe(false);
+    });
   });
 });

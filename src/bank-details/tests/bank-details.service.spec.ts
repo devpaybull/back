@@ -7,18 +7,24 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { toFiat } from '../../common/utils/to-fiat';
+import { toPage } from '../../common/types/page';
 import { AuditService } from '../../audit/services/audit.service';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { BanksService } from '../../banks/banks.service';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { DevicesService } from '../../devices/devices.service';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { MobileOperatorsService } from '../../mobile-operators/mobile-operators.service';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
 import { CounterpartyBindingType } from '../../counterparties/types/counterparty-binding-type.enum';
 import { RequisiteEventReason } from '../../counterparties/types/requisite-event-reason.enum';
 import { BankDetailsService } from '../bank-details.service';
 import { BankDetails } from '../entities/bank-details.entity';
+import { BankDetailTagLink } from '../entities/bank-detail-tag-link.entity';
+import { BankDetailTag } from '../entities/bank-detail-tag.entity';
+import { ActivityReadsService } from '../../audit/services/activity-reads.service';
+import { BankDetailsAction } from '../types/bank-details-action.enum';
 import { BankDetailsSortField } from '../types/bank-details-sort-field';
 
 describe('BankDetailsService', () => {
@@ -29,8 +35,24 @@ describe('BankDetailsService', () => {
   let stored: BankDetails[];
   let service: BankDetailsService;
 
+  let links: { bankDetailsId: string; tagId: number }[];
+
+  const tagLinks = {
+    delete: jest.fn(async ({ bankDetailsId }: { bankDetailsId: string }) => {
+      links = links.filter((link) => link.bankDetailsId !== bankDetailsId);
+    }),
+    create: jest.fn((link: { bankDetailsId: string; tagId: number }) => link),
+    save: jest.fn(async (rows: { bankDetailsId: string; tagId: number }[]) => {
+      links.push(...rows);
+
+      return rows;
+    }),
+  };
+
   const manager = {
-    getRepository: jest.fn(() => bankDetails),
+    getRepository: jest.fn((entity: unknown) =>
+      entity === BankDetailTagLink ? tagLinks : bankDetails,
+    ),
     transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => {
       const snapshot = stored.map((row) => ({ ...row }));
 
@@ -58,10 +80,23 @@ describe('BankDetailsService', () => {
         ) ?? null,
     ),
     findAndCount: jest.fn(async () => [stored, stored.length]),
-    find: jest.fn(async (options: { where: { id?: { value: string[] } } }) =>
-      options.where.id
-        ? stored.filter((row) => options.where.id.value.includes(row.id))
-        : stored,
+    count: jest.fn(
+      async ({ where }: { where: Partial<BankDetails> }) =>
+        stored.filter((row) =>
+          Object.entries(where).every(([field, value]) => row[field] === value),
+        ).length,
+    ),
+    find: jest.fn(
+      async (options: {
+        where: { id?: { value: string[] } } & Record<string, unknown>;
+      }) =>
+        options.where.id
+          ? stored.filter((row) => options.where.id.value.includes(row.id))
+          : stored.filter((row) =>
+              Object.entries(options.where).every(
+                ([field, value]) => row[field] === value,
+              ),
+            ),
     ),
     create: jest.fn(
       (data: Partial<BankDetails>) => ({ ...data }) as BankDetails,
@@ -102,12 +137,41 @@ describe('BankDetailsService', () => {
     replaceWithin: jest.fn(async () => ({ id: 1 })),
   };
 
+  const tags = {
+    find: jest.fn(
+      async ({
+        where,
+      }: {
+        where: { id: { value: number[] }; userId: string };
+      }) =>
+        where.userId === owner
+          ? where.id.value.filter((id) => id < 100).map((id) => ({ id }))
+          : [],
+    ),
+    findOne: jest.fn(),
+    create: jest.fn((data: Record<string, unknown>) => data),
+    save: jest.fn(async (data: Record<string, unknown>) => ({
+      id: 7,
+      ...data,
+    })),
+    delete: jest.fn(async () => undefined),
+    findAndCount: jest.fn(async () => [[], 0]),
+  };
+
+  const reads = {
+    lastReadAt: jest.fn(async (): Promise<Date | null> => null),
+    markRead: jest.fn(async (_u: string, _s: string, at: Date) => at),
+  };
+
   const banks = { findById: jest.fn(async () => ({ id: 1 })) };
+
+  const mobileOperators = { findById: jest.fn(async () => ({ id: 4 })) };
 
   const config = { get: jest.fn(() => 5000) };
 
   const devices = {
     findOwn: jest.fn(async () => ({ id: 7 })),
+    findById: jest.fn(async () => ({ id: 7 })),
     delete: jest.fn(async () => undefined),
   };
 
@@ -119,7 +183,7 @@ describe('BankDetailsService', () => {
       id: uuidOf(100),
       userId: owner,
       bankId: 1,
-      type: TransactionType.Card,
+      type: BankDetailsType.CardOrSbp,
       cardholderName: null,
       card: '4400430212345678',
       phone: null,
@@ -132,8 +196,8 @@ describe('BankDetailsService', () => {
       dailyLimit: null,
       monthlyLimitEnabled: false,
       monthlyLimit: null,
-      dailyAmountLimitEnabled: false,
-      dailyAmountLimit: null,
+      dailyAmountLimitEnabled: true,
+      dailyAmountLimit: toFiat(300000),
       monthlyAmountLimitEnabled: false,
       monthlyAmountLimit: null,
       maxActiveTransactionsEnabled: false,
@@ -146,15 +210,20 @@ describe('BankDetailsService', () => {
       bannedAt: null,
       bannedByUserId: null,
       createdAt: new Date(),
+      maxCounterparties: overrides.counterpartyOnly ? 8 : null,
       ...overrides,
     }) as BankDetails;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     banks.findById.mockResolvedValue({ id: 1 });
+    mobileOperators.findById.mockResolvedValue({ id: 4 });
     devices.findOwn.mockResolvedValue({ id: 7 });
+    devices.findById.mockResolvedValue({ id: 7 });
     stored = [card()];
+    links = [];
     audit.record.mockResolvedValue(undefined);
+    reads.lastReadAt.mockResolvedValue(null);
 
     const module = await Test.createTestingModule({
       providers: [
@@ -162,9 +231,12 @@ describe('BankDetailsService', () => {
         { provide: getRepositoryToken(BankDetails), useValue: bankDetails },
         { provide: BanksService, useValue: banks },
         { provide: DevicesService, useValue: devices },
+        { provide: MobileOperatorsService, useValue: mobileOperators },
         { provide: AuditService, useValue: audit },
         { provide: ConfigService, useValue: config },
         { provide: CounterpartiesService, useValue: counterparties },
+        { provide: getRepositoryToken(BankDetailTag), useValue: tags },
+        { provide: ActivityReadsService, useValue: reads },
       ],
     }).compile();
 
@@ -175,8 +247,10 @@ describe('BankDetailsService', () => {
     it('writes a bank_details_added row for the owner, in the creating transaction', async () => {
       const created = await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
         card: '2204321033002239',
         cardholderName: 'IVAN IVANOV',
       });
@@ -189,12 +263,14 @@ describe('BankDetailsService', () => {
           action: ActivityAction.BankDetailsAdded,
           metadata: {
             id: created.id,
-            type: TransactionType.Card,
+            type: BankDetailsType.CardOrSbp,
             card: '2204321033002239',
             phone: null,
             cardholderName: 'IVAN IVANOV',
             bankId: 1,
             bankName: null,
+            mobileOperatorId: null,
+            mobileOperatorName: null,
           },
         },
         manager,
@@ -203,7 +279,14 @@ describe('BankDetailsService', () => {
 
     it('names the superadmin of a login-link session beside the trader', async () => {
       await service.create(
-        { userId: owner, bankId: 1, type: TransactionType.Card },
+        {
+          userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
+          bankId: 1,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
+        },
         uuidOf(5),
       );
 
@@ -216,8 +299,10 @@ describe('BankDetailsService', () => {
     it('keeps the phone in the row of an sbp requisite', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Sbp,
+        type: BankDetailsType.CardOrSbp,
         phone: '+79991234567',
       });
 
@@ -233,8 +318,11 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 1,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
         }),
       ).rejects.toThrow('audit down');
       expect(stored).toHaveLength(1);
@@ -246,8 +334,11 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 9,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
         }),
       ).rejects.toThrow(BadRequestException);
       expect(audit.record).not.toHaveBeenCalled();
@@ -256,8 +347,10 @@ describe('BankDetailsService', () => {
     it('stores the details against the owner it was told', async () => {
       await service.create({
         userId: stranger,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Sbp,
+        type: BankDetailsType.CardOrSbp,
         phone: '+79991234567',
       });
 
@@ -269,8 +362,10 @@ describe('BankDetailsService', () => {
     it('keeps the card whole, digits and all', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
         card: '0000430212345678',
       });
 
@@ -282,32 +377,39 @@ describe('BankDetailsService', () => {
     it('writes the absent optional fields as null', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
       });
 
       expect(bankDetails.create).toHaveBeenCalledWith(
         expect.objectContaining({
           cardholderName: null,
-          card: null,
           phone: null,
+          mobileOperatorId: null,
           minAmount: null,
           maxAmount: null,
           dailyLimit: null,
           monthlyLimit: null,
-          dailyAmountLimit: null,
           monthlyAmountLimit: null,
+          hourlyAmountLimit: null,
           maxActiveTransactions: null,
           delayBetweenRequests: null,
+          maxCounterparties: null,
         }),
       );
     });
 
-    it('starts every toggle off, and the two standing flags with it', async () => {
+    it('starts every toggle off but the daily turnover, and the standing flags with it', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
       });
 
       expect(bankDetails.create).toHaveBeenCalledWith(
@@ -316,11 +418,13 @@ describe('BankDetailsService', () => {
           maxAmountEnabled: false,
           dailyLimitEnabled: false,
           monthlyLimitEnabled: false,
-          dailyAmountLimitEnabled: false,
+          dailyAmountLimitEnabled: true,
           monthlyAmountLimitEnabled: false,
+          hourlyAmountLimitEnabled: false,
           maxActiveTransactionsEnabled: false,
           delayBetweenRequestsEnabled: false,
           counterpartyOnly: false,
+          sameBankOnly: false,
           reserve: false,
         }),
       );
@@ -329,8 +433,11 @@ describe('BankDetailsService', () => {
     it('drops a limit whose toggle was not switched on', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
         minAmount: toFiat(500),
         dailyLimit: 40,
       });
@@ -343,8 +450,11 @@ describe('BankDetailsService', () => {
     it('keeps a limit whose toggle came with it', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
         minAmountEnabled: true,
         minAmount: toFiat(500),
       });
@@ -360,8 +470,11 @@ describe('BankDetailsService', () => {
     it('lets the column default stand when active is absent', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
       });
 
       const [data] = bankDetails.create.mock.calls[0] as [Partial<BankDetails>];
@@ -375,8 +488,11 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 9,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
         }),
       ).rejects.toThrow(BadRequestException);
       expect(bankDetails.save).not.toHaveBeenCalled();
@@ -386,8 +502,11 @@ describe('BankDetailsService', () => {
       for (let n = 0; n < 5; n += 1) {
         await service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 1,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
         });
       }
 
@@ -399,8 +518,10 @@ describe('BankDetailsService', () => {
     it('binds a device the trader owns', async () => {
       await service.create({
         userId: owner,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
         deviceId: 7,
       });
 
@@ -416,8 +537,10 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          dailyAmountLimit: toFiat(300000),
           bankId: 1,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
           deviceId: 7,
         }),
       ).rejects.toThrow(BadRequestException);
@@ -438,17 +561,10 @@ describe('BankDetailsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('asks nothing when no device was named', async () => {
-      await service.create({
-        userId: owner,
-        bankId: 1,
-        type: TransactionType.Card,
-      });
+    it('asks nothing of the devices when a patch names none', async () => {
+      await service.updateOwn(uuidOf(100), owner, { reserve: true });
 
       expect(devices.findOwn).not.toHaveBeenCalled();
-      expect(bankDetails.create).toHaveBeenCalledWith(
-        expect.objectContaining({ deviceId: null }),
-      );
     });
   });
 
@@ -472,12 +588,14 @@ describe('BankDetailsService', () => {
           action: ActivityAction.BankDetailsDeleted,
           metadata: {
             id: uuidOf(100),
-            type: TransactionType.Card,
+            type: BankDetailsType.CardOrSbp,
             card: '4400430212345678',
             phone: null,
             cardholderName: null,
             bankId: 1,
             bankName: 'Sber',
+            mobileOperatorId: null,
+            mobileOperatorName: null,
           },
         },
         manager,
@@ -552,18 +670,26 @@ describe('BankDetailsService', () => {
   });
 
   describe('deleting a device', () => {
-    it('unbinds every requisite first, then deletes the device', async () => {
-      stored = [card({ deviceId: 7 })];
+    it('switches the device’s requisites off and keeps them pointing at it, then deletes the device', async () => {
+      stored = [card({ deviceId: 7 }), card({ id: uuidOf(101), deviceId: 8 })];
 
       await service.deleteDevice(7, admin);
 
-      expect(bankDetails.update).toHaveBeenCalledWith(
-        { deviceId: 7 },
-        { deviceId: null },
-      );
+      expect(stored[0]).toMatchObject({ deviceId: 7, active: false });
+      expect(stored[1]).toMatchObject({ deviceId: 8, active: true });
       expect(devices.delete).toHaveBeenCalledWith(7, admin, manager, null);
-      expect(stored[0].deviceId).toBeNull();
-      expect(stored[0].deletedAt).toBeUndefined();
+      expect(activity()).toEqual([
+        expect.objectContaining({
+          actorUserId: admin,
+          targetUserId: owner,
+          action: BankDetailsAction.Disabled,
+          metadata: expect.objectContaining({
+            id: uuidOf(100),
+            reason: 'device_deleted',
+            deviceId: 7,
+          }),
+        }),
+      ]);
     });
 
     it('checks the owner through the owner-scoped finder', async () => {
@@ -579,14 +705,42 @@ describe('BankDetailsService', () => {
       expect(devices.delete).toHaveBeenCalledWith(7, owner, manager, uuidOf(5));
     });
 
-    it('unbinds inside the same transaction as the device delete, so a failure restores the binding', async () => {
+    it('switches off inside the same transaction as the device delete, so a failure restores the requisite', async () => {
       stored = [card({ deviceId: 7 })];
       devices.delete.mockRejectedValueOnce(new Error('device down'));
 
       await expect(service.deleteDevice(7, admin)).rejects.toThrow(
         'device down',
       );
-      expect(stored[0].deviceId).toBe(7);
+      expect(stored[0].active).toBe(true);
+    });
+
+    it('answers 409 to enabling a requisite whose device is deleted', async () => {
+      stored = [card({ deviceId: 7, active: false })];
+      devices.findOwn.mockResolvedValue(null);
+
+      await expect(
+        service.updateOwn(uuidOf(100), owner, { active: true }),
+      ).rejects.toThrow(ConflictException);
+      expect(stored[0].active).toBe(false);
+    });
+
+    it('answers 409 to an administrator enabling it too', async () => {
+      stored = [card({ deviceId: 7, active: false })];
+      devices.findById.mockResolvedValue(null);
+
+      await expect(
+        service.supervise(uuidOf(100), { active: true }, admin),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('brings it back through a patch to another live device of the owner', async () => {
+      stored = [card({ deviceId: 7, active: false })];
+
+      await service.updateOwn(uuidOf(100), owner, { deviceId: 9 });
+
+      expect(devices.findOwn).toHaveBeenCalledWith(9, owner);
+      expect(stored[0].deviceId).toBe(9);
     });
 
     it('answers 404 when the device belongs to somebody else, and touches nothing', async () => {
@@ -609,14 +763,19 @@ describe('BankDetailsService', () => {
     it('turns the minimum on and leaves the column empty, since the floor lives in config', async () => {
       await service.create({
         userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
         bankId: 1,
-        type: TransactionType.Card,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
         counterpartyOnly: true,
+        maxCounterparties: 8,
       });
 
       expect(bankDetails.create).toHaveBeenCalledWith(
         expect.objectContaining({
           counterpartyOnly: true,
+          maxCounterparties: 8,
           minAmountEnabled: true,
           minAmount: null,
         }),
@@ -627,9 +786,13 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 1,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
           counterpartyOnly: true,
+          maxCounterparties: 8,
           minAmount: toFiat(100),
         }),
       ).rejects.toThrow(ConflictException);
@@ -640,9 +803,13 @@ describe('BankDetailsService', () => {
       await expect(
         service.create({
           userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
           bankId: 1,
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
           counterpartyOnly: true,
+          maxCounterparties: 8,
           minAmountEnabled: false,
         }),
       ).rejects.toThrow(ConflictException);
@@ -660,6 +827,7 @@ describe('BankDetailsService', () => {
       await expect(
         service.updateOwn(uuidOf(100), owner, {
           counterpartyOnly: true,
+          maxCounterparties: 8,
           minAmount: toFiat(100),
         }),
       ).rejects.toThrow(ConflictException);
@@ -669,7 +837,10 @@ describe('BankDetailsService', () => {
       stored = [card({ minAmountEnabled: true, minAmount: toFiat(700) })];
 
       await expect(
-        service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true }),
+        service.updateOwn(uuidOf(100), owner, {
+          counterpartyOnly: true,
+          maxCounterparties: 8,
+        }),
       ).resolves.toMatchObject({ minAmountEnabled: true, minAmount: null });
     });
 
@@ -703,6 +874,7 @@ describe('BankDetailsService', () => {
       await expect(
         service.updateOwn(uuidOf(100), owner, {
           counterpartyOnly: true,
+          maxCounterparties: 8,
           maxAmountEnabled: true,
           maxAmount: toFiat(100000),
         }),
@@ -740,6 +912,7 @@ describe('BankDetailsService', () => {
         order: { minAmount: 'ASC', id: 'ASC' },
         relations: {
           bank: { country: true, currency: true },
+          mobileOperator: true,
           device: true,
           user: true,
           bannedBy: true,
@@ -747,6 +920,191 @@ describe('BankDetailsService', () => {
         skip: 10,
         take: 10,
       });
+    });
+  });
+
+  describe('the payload a type carries', () => {
+    const mobile = (overrides: Partial<BankDetails> = {}): BankDetails =>
+      card({
+        id: uuidOf(101),
+        type: BankDetailsType.Mobile,
+        bankId: null,
+        bank: null,
+        card: null,
+        phone: '+79161234567',
+        mobileOperatorId: 4,
+        ...overrides,
+      });
+
+    it('creates a mobile requisite with a phone and an operator, and no bank', async () => {
+      await service.create({
+        userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
+        type: BankDetailsType.Mobile,
+        phone: '+79161234567',
+        mobileOperatorId: 4,
+      });
+
+      expect(bankDetails.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: BankDetailsType.Mobile,
+          bankId: null,
+          card: null,
+          phone: '+79161234567',
+          mobileOperatorId: 4,
+        }),
+      );
+      expect(banks.findById).not.toHaveBeenCalled();
+      expect(mobileOperators.findById).toHaveBeenCalledWith(4);
+    });
+
+    it.each([
+      ['a bank', { bankId: 1 }],
+      ['a card', { card: '4400430212345678' }],
+      ['no phone', { phone: undefined }],
+      ['no operator', { mobileOperatorId: undefined }],
+    ])('refuses a mobile requisite with %s', async (_, overrides) => {
+      await expect(
+        service.create({
+          userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
+          type: BankDetailsType.Mobile,
+          phone: '+79161234567',
+          mobileOperatorId: 4,
+          ...overrides,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(bankDetails.save).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['no bank', { bankId: undefined }],
+      ['neither a card nor a phone', { card: undefined }],
+      ['a mobile operator', { mobileOperatorId: 4 }],
+    ])('refuses a card-or-sbp requisite with %s', async (_, overrides) => {
+      await expect(
+        service.create({
+          userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
+          bankId: 1,
+          type: BankDetailsType.CardOrSbp,
+          card: '4400430212345678',
+          ...overrides,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(bankDetails.save).not.toHaveBeenCalled();
+    });
+
+    it('takes a card-or-sbp requisite carrying both a card and a phone', async () => {
+      await service.create({
+        userId: owner,
+        deviceId: 7,
+        dailyAmountLimit: toFiat(300000),
+        bankId: 1,
+        type: BankDetailsType.CardOrSbp,
+        card: '4400430212345678',
+        phone: '+79991234567',
+      });
+
+      expect(bankDetails.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          card: '4400430212345678',
+          phone: '+79991234567',
+        }),
+      );
+    });
+
+    it('answers 400 for a mobile operator that does not exist', async () => {
+      mobileOperators.findById.mockResolvedValue(null);
+
+      await expect(
+        service.create({
+          userId: owner,
+          deviceId: 7,
+          dailyAmountLimit: toFiat(300000),
+          type: BankDetailsType.Mobile,
+          phone: '+79161234567',
+          mobileOperatorId: 9,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('drops the bank and the card when a patch turns a requisite mobile', async () => {
+      stored = [card({ phone: '+79161234567' })];
+
+      await service.updateOwn(uuidOf(100), owner, {
+        type: BankDetailsType.Mobile,
+        mobileOperatorId: 4,
+      });
+
+      expect(stored[0]).toMatchObject({
+        type: BankDetailsType.Mobile,
+        bankId: null,
+        card: null,
+        phone: '+79161234567',
+        mobileOperatorId: 4,
+      });
+    });
+
+    it('refuses to turn a requisite mobile without an operator', async () => {
+      stored = [card({ phone: '+79161234567' })];
+
+      await expect(
+        service.updateOwn(uuidOf(100), owner, { type: BankDetailsType.Mobile }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses a card sent with the switch to mobile, rather than dropping it', async () => {
+      stored = [card({ phone: '+79161234567' })];
+
+      await expect(
+        service.updateOwn(uuidOf(100), owner, {
+          type: BankDetailsType.Mobile,
+          mobileOperatorId: 4,
+          card: '4400430212345678',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('drops the operator and asks for a bank when a mobile requisite turns card-or-sbp', async () => {
+      stored = [mobile()];
+
+      await expect(
+        service.updateOwn(uuidOf(101), owner, {
+          type: BankDetailsType.CardOrSbp,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await service.updateOwn(uuidOf(101), owner, {
+        type: BankDetailsType.CardOrSbp,
+        bankId: 1,
+      });
+
+      expect(stored[0]).toMatchObject({
+        type: BankDetailsType.CardOrSbp,
+        bankId: 1,
+        mobileOperatorId: null,
+        phone: '+79161234567',
+      });
+    });
+
+    it('refuses a bank patched onto a mobile requisite', async () => {
+      stored = [mobile()];
+
+      await expect(
+        service.updateOwn(uuidOf(101), owner, { bankId: 1 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('lets a mobile requisite be switched off without restating its payload', async () => {
+      stored = [mobile()];
+
+      await expect(
+        service.updateOwn(uuidOf(101), owner, { active: false }),
+      ).resolves.toMatchObject({ active: false });
     });
   });
 
@@ -992,13 +1350,19 @@ describe('BankDetailsService', () => {
       it('does not unbind when the flag stays true', async () => {
         stored = [card({ counterpartyOnly: true })];
 
-        await service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true });
+        await service.updateOwn(uuidOf(100), owner, {
+          counterpartyOnly: true,
+          maxCounterparties: 8,
+        });
 
         expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
       });
 
       it('does not unbind when the flag goes from false to true', async () => {
-        await service.updateOwn(uuidOf(100), owner, { counterpartyOnly: true });
+        await service.updateOwn(uuidOf(100), owner, {
+          counterpartyOnly: true,
+          maxCounterparties: 8,
+        });
 
         expect(counterparties.unbindRequisiteWithin).not.toHaveBeenCalled();
       });
@@ -1054,8 +1418,9 @@ describe('BankDetailsService', () => {
           5,
           expect.objectContaining({
             id: uuidOf(100),
-            type: TransactionType.Card,
+            type: BankDetailsType.CardOrSbp,
             counterpartyOnly: true,
+            maxCounterparties: 8,
             userId: owner,
           }),
           CounterpartyBindingType.Sbp,
@@ -1091,8 +1456,9 @@ describe('BankDetailsService', () => {
           5,
           expect.objectContaining({
             id: uuidOf(100),
-            type: TransactionType.Card,
+            type: BankDetailsType.CardOrSbp,
             counterpartyOnly: true,
+            maxCounterparties: 8,
             userId: owner,
           }),
           admin,
@@ -1119,12 +1485,12 @@ describe('BankDetailsService', () => {
       it('adds the channel type when one is asked for', async () => {
         await service.listCounterpartyOnly({
           ...query,
-          type: TransactionType.Sbp,
+          type: BankDetailsType.CardOrSbp,
         });
 
         expect(bankDetails.findAndCount).toHaveBeenCalledWith(
           expect.objectContaining({
-            where: { counterpartyOnly: true, type: TransactionType.Sbp },
+            where: { counterpartyOnly: true, type: BankDetailsType.CardOrSbp },
           }),
         );
       });
@@ -1196,6 +1562,275 @@ describe('BankDetailsService', () => {
         await expect(service.findIdsOfUsers([owner])).resolves.toEqual([
           uuidOf(100),
         ]);
+      });
+    });
+  });
+  describe('trader-cabinet rules (TC07)', () => {
+    const input = (overrides: Record<string, unknown> = {}) => ({
+      userId: owner,
+      deviceId: 7,
+      dailyAmountLimit: toFiat(300000),
+      bankId: 1,
+      type: BankDetailsType.CardOrSbp,
+      card: '4400430212345678',
+      ...overrides,
+    });
+
+    it('refuses a requisite without a daily turnover limit, writing nothing', async () => {
+      await expect(
+        service.create(input({ dailyAmountLimit: undefined })),
+      ).rejects.toThrow(BadRequestException);
+      expect(bankDetails.save).not.toHaveBeenCalled();
+    });
+
+    it('always asks whether the trader owns the device', async () => {
+      await service.create(input());
+
+      expect(devices.findOwn).toHaveBeenCalledWith(7, owner);
+    });
+
+    it('requires maxCounterparties on a counterparty-only requisite', async () => {
+      await expect(
+        service.create(input({ counterpartyOnly: true })),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses maxCounterparties on a requisite that is not counterparty-only', async () => {
+      await expect(
+        service.create(input({ maxCounterparties: 3 })),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.updateOwn(uuidOf(100), owner, { maxCounterparties: 3 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('stores the slots beside the flag', async () => {
+      await service.create(
+        input({ counterpartyOnly: true, maxCounterparties: 3 }),
+      );
+
+      expect(bankDetails.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          counterpartyOnly: true,
+          maxCounterparties: 3,
+        }),
+      );
+    });
+
+    it('drops the slots when the flag is cleared', async () => {
+      stored = [card({ counterpartyOnly: true })];
+
+      await service.updateOwn(uuidOf(100), owner, { counterpartyOnly: false });
+
+      expect(stored[0].maxCounterparties).toBeNull();
+    });
+
+    it('keeps the stored slots while the flag stands and takes new ones', async () => {
+      stored = [card({ counterpartyOnly: true })];
+
+      await service.updateOwn(uuidOf(100), owner, { reserve: true });
+      expect(stored[0].maxCounterparties).toBe(8);
+
+      await service.updateOwn(uuidOf(100), owner, { maxCounterparties: 2 });
+      expect(stored[0].maxCounterparties).toBe(2);
+    });
+
+    it('stores sameBankOnly', async () => {
+      await service.create(input({ sameBankOnly: true }));
+
+      expect(bankDetails.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sameBankOnly: true }),
+      );
+    });
+
+    describe('tags', () => {
+      it('links the tags of the trader to a new requisite', async () => {
+        const created = await service.create(input({ tagIds: [1, 2] }));
+
+        expect(links).toEqual([
+          { bankDetailsId: created.id, tagId: 1 },
+          { bankDetailsId: created.id, tagId: 2 },
+        ]);
+      });
+
+      it('answers 404 for a tag of another trader, writing nothing', async () => {
+        await expect(
+          service.create(input({ tagIds: [1, 500] })),
+        ).rejects.toThrow(NotFoundException);
+        expect(bankDetails.save).not.toHaveBeenCalled();
+      });
+
+      it('replaces the whole set on a patch, and [] clears it', async () => {
+        links = [{ bankDetailsId: uuidOf(100), tagId: 1 }];
+
+        await service.updateOwn(uuidOf(100), owner, { tagIds: [2, 3] });
+        expect(links.map((link) => link.tagId)).toEqual([2, 3]);
+
+        await service.updateOwn(uuidOf(100), owner, { tagIds: [] });
+        expect(links).toEqual([]);
+      });
+
+      it('leaves the tags alone when a patch does not name them', async () => {
+        links = [{ bankDetailsId: uuidOf(100), tagId: 1 }];
+
+        await service.updateOwn(uuidOf(100), owner, { reserve: true });
+
+        expect(links).toEqual([{ bankDetailsId: uuidOf(100), tagId: 1 }]);
+      });
+
+      it('refuses a name the trader already has, whatever its case', async () => {
+        tags.findOne.mockResolvedValueOnce({ id: 1 });
+
+        await expect(service.createTag(owner, 'СБЕР')).rejects.toThrow(
+          ConflictException,
+        );
+        expect(tags.findOne).toHaveBeenCalledWith({
+          where: { userId: owner, normalizedName: 'сбер' },
+        });
+      });
+
+      it('creates a tag keeping the name as typed', async () => {
+        tags.findOne.mockResolvedValueOnce(null);
+
+        await expect(service.createTag(owner, 'Сбер')).resolves.toMatchObject({
+          userId: owner,
+          name: 'Сбер',
+          normalizedName: 'сбер',
+        });
+      });
+
+      it('answers 404 for deleting a tag of another trader', async () => {
+        tags.findOne.mockResolvedValueOnce(null);
+
+        await expect(service.deleteTag(stranger, 7)).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(tags.delete).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('the history rows', () => {
+      it('writes bank_details.updated with the fields a patch sent', async () => {
+        await service.updateOwn(
+          uuidOf(100),
+          owner,
+          { reserve: true, cardholderName: 'IVAN' },
+          uuidOf(5),
+        );
+
+        expect(activity()).toEqual([
+          expect.objectContaining({
+            actorUserId: owner,
+            impersonatorUserId: uuidOf(5),
+            targetUserId: owner,
+            action: BankDetailsAction.Updated,
+            metadata: expect.objectContaining({
+              id: uuidOf(100),
+              fields: ['reserve', 'cardholderName'],
+            }),
+          }),
+        ]);
+      });
+
+      it('writes bank_details.disabled when the owner switches off, and nothing for a no-op', async () => {
+        await service.updateOwn(uuidOf(100), owner, { active: false });
+        await service.updateOwn(uuidOf(100), owner, { active: false });
+
+        expect(activity().map((entry) => entry.action)).toEqual([
+          BankDetailsAction.Disabled,
+        ]);
+      });
+
+      it('writes the administrator’s ban and switch, with the owner as the target', async () => {
+        await service.supervise(
+          uuidOf(100),
+          { active: false, banned: true },
+          admin,
+        );
+
+        expect(activity()).toEqual([
+          expect.objectContaining({
+            actorUserId: admin,
+            targetUserId: owner,
+            action: BankDetailsAction.Disabled,
+          }),
+          expect.objectContaining({
+            actorUserId: admin,
+            targetUserId: owner,
+            action: BankDetailsAction.Banned,
+          }),
+        ]);
+      });
+    });
+
+    describe('the history', () => {
+      const audited = {
+        list: jest.fn(),
+      };
+
+      beforeEach(() => {
+        Object.assign(audit, audited);
+        audited.list.mockReset();
+      });
+
+      it('reads the requisite actions targeting the trader, marking rows newer than the last read', async () => {
+        const lastReadAt = new Date('2026-11-04T10:00:00Z');
+        reads.lastReadAt.mockResolvedValue(lastReadAt);
+        audited.list.mockResolvedValue(
+          toPage(
+            [
+              [
+                { id: 2, createdAt: new Date('2026-11-04T11:00:00Z') },
+                { id: 1, createdAt: new Date('2026-11-04T09:00:00Z') },
+              ],
+              2,
+            ],
+            { page: 1, limit: 20 },
+          ),
+        );
+
+        const page = await service.history(owner, {
+          page: 1,
+          limit: 20,
+          sortOrder: SortOrder.Desc,
+        });
+
+        expect(audited.list).toHaveBeenCalledWith(
+          expect.objectContaining({
+            targetUserId: owner,
+            actions: expect.arrayContaining([
+              ActivityAction.BankDetailsAdded,
+              ActivityAction.BankDetailsDeleted,
+              BankDetailsAction.Updated,
+            ]),
+          }),
+        );
+        expect(page.items.map((entry) => entry.unread)).toEqual([true, false]);
+      });
+
+      it('counts the rows after the last read', async () => {
+        const lastReadAt = new Date('2026-11-04T10:00:00Z');
+        reads.lastReadAt.mockResolvedValue(lastReadAt);
+        audited.list.mockResolvedValue(toPage([[], 4], { page: 1, limit: 1 }));
+
+        await expect(service.historyReadState(owner)).resolves.toEqual({
+          lastReadAt,
+          unreadCount: 4,
+        });
+        expect(audited.list).toHaveBeenCalledWith(
+          expect.objectContaining({ createdAfter: lastReadAt }),
+        );
+      });
+
+      it('marks everything read as of now', async () => {
+        const state = await service.markHistoryRead(owner);
+
+        expect(reads.markRead).toHaveBeenCalledWith(
+          owner,
+          'requisites',
+          state.lastReadAt,
+        );
+        expect(state.unreadCount).toBe(0);
       });
     });
   });

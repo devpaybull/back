@@ -3,8 +3,19 @@ import { TransactionKind } from '../../transactions/types/transaction-kind.enum'
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
 
 export class MerchantDealRequisiteDto {
-  @ApiProperty({ type: Object, description: '{ id, name } of the bank' })
-  bank: { id: number; name: string };
+  @ApiProperty({
+    type: Object,
+    nullable: true,
+    description: '{ id, name } of the bank; null on a mobile requisite',
+  })
+  bank: { id: number; name: string } | null;
+
+  @ApiProperty({
+    type: Object,
+    nullable: true,
+    description: '{ id, name } of the operator of a mobile requisite',
+  })
+  mobileOperator: { id: number; name: string } | null;
 
   @ApiProperty()
   type: string;

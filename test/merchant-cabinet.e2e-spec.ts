@@ -8,6 +8,7 @@ import { TransactionService } from '../src/transactions/services/transaction.ser
 import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
 import { User } from '../src/users/entities/user.entity';
 import { E2eContext, E2eUser, startE2e } from './support/e2e-app';
+import { deviceOf } from './support/device-of';
 import { bearer, payout, usdtSun } from './support/flow';
 import { EXTERNAL_SENDER, HOT_ADDRESS } from './support/keys';
 
@@ -81,7 +82,13 @@ describe('the merchant cabinet', () => {
       await e2e.http
         .post('/bank-details')
         .set(bearer(trader))
-        .send({ bankId: bank.body.data.id, type: 'sbp', phone: '+79012345678' })
+        .send({
+          bankId: bank.body.data.id,
+          deviceId: await deviceOf(e2e, trader),
+          dailyAmountLimit: '300000.00',
+          type: 'card_or_sbp',
+          phone: '+79012345678',
+        })
         .expect(201)
     ).body.data.id;
     await e2e.dataSource

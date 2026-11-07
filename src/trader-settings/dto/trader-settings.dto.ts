@@ -35,6 +35,13 @@ export class TraderSettingsDto {
   trustedUser: boolean;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'null means PAYOUT_MAX_ACTIVE_PER_TRADER',
+  })
+  maxActivePayouts: number | null;
+
+  @ApiProperty({
     type: String,
     nullable: true,
     example: '500.000000',
@@ -97,6 +104,7 @@ export const toTraderSettingsDto = (
   userId: row.userId,
   tradingEnabled: row.tradingEnabled,
   payoutTradingEnabled: row.payoutTradingEnabled,
+  maxActivePayouts: row.maxActivePayouts,
   individualRatesEnabled: row.individualRatesEnabled,
   autoBuybackEnabled: row.autoBuybackEnabled,
   autoBuybackConcurrent: row.autoBuybackConcurrent,

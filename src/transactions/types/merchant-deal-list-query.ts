@@ -7,4 +7,5 @@ export interface MerchantDealListQuery extends MerchantDealFilter {
   limit: number;
   sortBy: TransactionSortField;
   sortOrder: SortOrder;
+  reference?: string;
 }

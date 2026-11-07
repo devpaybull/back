@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { ActivityRead } from '../../audit/entities/activity-read.entity';
 import { AuditInstallation } from '../../audit/entities/audit-installation.entity';
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
@@ -26,6 +27,14 @@ import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { UserBackupCode } from '../../users/entities/user-backup-code.entity';
 import { User } from '../../users/entities/user.entity';
 import { UserTeamService } from '../../users/services/user-team.service';
+import { BankDetailTagLink } from '../../bank-details/entities/bank-detail-tag-link.entity';
+import { BankDetailTag } from '../../bank-details/entities/bank-detail-tag.entity';
+import { BankDetails } from '../../bank-details/entities/bank-details.entity';
+import { DeviceCredential } from '../../devices/entities/device-credential.entity';
+import { DevicePairing } from '../../devices/entities/device-pairing.entity';
+import { Device } from '../../devices/entities/device.entity';
+import { MobileOperator } from '../../mobile-operators/entities/mobile-operator.entity';
+import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
 import { LeadRate } from '../entities/lead-rate.entity';
 import { MerchantBalanceOperation } from '../entities/merchant-balance-operation.entity';
@@ -34,8 +43,13 @@ import { MethodRate } from '../entities/method-rate.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
+import { SelectionAttempt } from '../entities/selection-attempt.entity';
+import { FileStorage } from '../../file-storage/types/file-storage';
+import { PayoutDecline } from '../entities/payout-decline.entity';
+import { TransactionFile } from '../entities/transaction-file.entity';
 import { Wallet } from '../entities/wallet.entity';
 import { RateService } from '../services/rate.service';
+import { RequisiteSelectionService } from '../services/requisite-selection.service';
 import { TransactionService } from '../services/transaction.service';
 import { WalletService } from '../services/wallet.service';
 import { TransactionsModule } from '../transactions.module';
@@ -100,6 +114,8 @@ describe('the transactions module graph', () => {
       .useValue(repository)
       .overrideProvider(getRepositoryToken(AuditInstallation))
       .useValue(repository)
+      .overrideProvider(getRepositoryToken(ActivityRead))
+      .useValue(repository)
       .overrideProvider(getRepositoryToken(Bank))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(Country))
@@ -129,6 +145,28 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(MerchantCurrency))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(MerchantIpAddress))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(SelectionAttempt))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(TransactionFile))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(PayoutDecline))
+      .useValue(repository)
+      .overrideProvider(FileStorage)
+      .useValue({})
+      .overrideProvider(getRepositoryToken(BankDetails))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(BankDetailTag))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(BankDetailTagLink))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(Device))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(DevicePairing))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(DeviceCredential))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MobileOperator))
       .useValue(repository)
       .overrideProvider(ConfigService)
       .useValue({
@@ -162,5 +200,16 @@ describe('the transactions module graph', () => {
     expect(
       module.get(MerchantSettingsService, { strict: false }),
     ).toBeInstanceOf(MerchantSettingsService);
+  });
+
+  it('reaches the requisites through the bank-details module, which owns them', async () => {
+    const module = await compile();
+
+    expect(module.get(RequisiteSelectionService)).toBeInstanceOf(
+      RequisiteSelectionService,
+    );
+    expect(module.get(BankDetailsService, { strict: false })).toBeInstanceOf(
+      BankDetailsService,
+    );
   });
 });

@@ -1,8 +1,11 @@
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 
 export interface BindableRequisite {
   id: string;
-  type: TransactionType;
+  type: BankDetailsType;
+  card: string | null;
+  phone: string | null;
   counterpartyOnly: boolean;
+  maxCounterparties: number | null;
   userId: string;
 }

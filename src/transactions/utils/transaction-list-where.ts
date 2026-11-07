@@ -32,6 +32,10 @@ export const transactionListWhere = (
   if (query.method !== undefined) where.method = query.method;
   if (query.traderUserId !== undefined) where.traderUserId = query.traderUserId;
   if (query.merchantId !== undefined) where.merchantId = query.merchantId;
+  if (query.merchantIds !== undefined) where.merchantId = In(query.merchantIds);
+  if (query.counterpartyIds !== undefined) {
+    where.counterpartyId = In(query.counterpartyIds);
+  }
 
   const createdAt = inclusiveRange(query.createdFrom, query.createdTo);
   if (createdAt) where.createdAt = createdAt;

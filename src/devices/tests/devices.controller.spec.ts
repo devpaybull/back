@@ -9,7 +9,7 @@ import { toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
-import { DevicesController } from '../devices.controller';
+import { DevicesController } from '../controllers/devices.controller';
 import { DevicesService } from '../devices.service';
 import { ListDevicesQueryDto } from '../dto/list-devices-query.dto';
 import { Device } from '../entities/device.entity';
@@ -44,9 +44,15 @@ describe('DevicesController', () => {
     findOwn: jest.fn(),
     updateOwn: jest.fn(),
     delete: jest.fn(),
+    issuePairing: jest.fn(),
+    countsOf: jest.fn(),
+    onlineSince: jest.fn(() => new Date('2026-11-04T11:58:00.000Z')),
   };
 
-  const bankDetails = { deleteOwnDevice: jest.fn() };
+  const bankDetails = {
+    deleteOwnDevice: jest.fn(),
+    countByDevices: jest.fn(async () => new Map<number, number>()),
+  };
 
   const query = (
     overrides: Record<string, unknown> = {},
@@ -80,7 +86,7 @@ describe('DevicesController', () => {
     ]);
   });
 
-  it.each(['create', 'update'])('marks %s as a write', (handler) => {
+  it.each(['create', 'update', 'pairing'])('marks %s as a write', (handler) => {
     expect(
       Reflect.getMetadata(
         WRITE_ACCESS_METADATA_KEY,
@@ -89,7 +95,7 @@ describe('DevicesController', () => {
     ).toBe(true);
   });
 
-  it.each(['list', 'findOne'])(
+  it.each(['list', 'findOne', 'counts'])(
     'leaves %s unmarked, so a suspended trader still reads',
     (handler) => {
       expect(
@@ -214,10 +220,65 @@ describe('DevicesController', () => {
   it('reports a device the app has never checked in from as off and empty', async () => {
     await expect(controller.findOne(100, trader)).resolves.toMatchObject({
       status: DeviceStatus.Off,
+      network: 'offline',
       model: null,
-      type: null,
       phone: null,
+      activatedAt: null,
       lastActivity: null,
+      requisiteCount: 0,
+    });
+  });
+
+  describe('the network status and the requisite count', () => {
+    it('shows a device online while its heartbeat is inside the window', async () => {
+      devices.findOwn.mockResolvedValue(
+        device({ lastActivity: new Date('2026-11-04T11:58:00.000Z') }),
+      );
+
+      await expect(controller.findOne(100, trader)).resolves.toMatchObject({
+        network: 'online',
+      });
+    });
+
+    it('shows a device offline once its heartbeat falls out of the window', async () => {
+      devices.findOwn.mockResolvedValue(
+        device({ lastActivity: new Date('2026-11-04T11:57:59.999Z') }),
+      );
+
+      await expect(controller.findOne(100, trader)).resolves.toMatchObject({
+        network: 'offline',
+      });
+    });
+
+    it('asks bank-details once for the whole page', async () => {
+      devices.list.mockResolvedValue(
+        toPage([[device(), device({ id: 101 })], 2], { page: 1, limit: 20 }),
+      );
+      bankDetails.countByDevices.mockResolvedValue(new Map([[101, 3]]));
+
+      const page = await controller.list(query(), trader);
+
+      expect(bankDetails.countByDevices).toHaveBeenCalledTimes(1);
+      expect(bankDetails.countByDevices).toHaveBeenCalledWith([100, 101]);
+      expect(page.items.map((row) => row.requisiteCount)).toEqual([0, 3]);
+    });
+  });
+
+  describe('pairing and counts are scoped to the signed-in trader', () => {
+    it('issues a pairing only through the owner-scoped service call', async () => {
+      await controller.pairing(100, { ...trader, impersonatedBy: uuidOf(5) });
+
+      expect(devices.issuePairing).toHaveBeenCalledWith(
+        100,
+        uuidOf(1),
+        uuidOf(5),
+      );
+    });
+
+    it('counts only the trader’s own devices', async () => {
+      await controller.counts(trader);
+
+      expect(devices.countsOf).toHaveBeenCalledWith(uuidOf(1));
     });
   });
 });

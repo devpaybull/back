@@ -28,8 +28,11 @@ export class TraderSettings {
   @Column({ default: false })
   tradingEnabled: boolean;
 
-  @Column({ default: false })
+  @Column({ default: true })
   payoutTradingEnabled: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  maxActivePayouts: number | null;
 
   @Column({ default: false })
   individualRatesEnabled: boolean;

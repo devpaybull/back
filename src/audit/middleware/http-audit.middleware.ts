@@ -9,23 +9,7 @@ const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SECRET_KEY = /password|totp|code|token|secret/i;
 const REDACTED = '[REDACTED]';
 const ADMIN_USER_ROUTE = /^\/admin\/users\/:id(\/|$)/;
-const REDACTED_BODY_FIELDS: Record<string, readonly string[]> = {
-  '/admin/merchants/:id/ip-addresses': ['ip'],
-};
-
-const redactRouteFields = (route: string, body: unknown): unknown => {
-  const fields = REDACTED_BODY_FIELDS[route];
-
-  if (!fields || body === null || typeof body !== 'object') return body;
-
-  return Object.fromEntries(
-    Object.entries(body).map(([key, value]) => [
-      key,
-      fields.includes(key) ? REDACTED : value,
-    ]),
-  );
-};
-
+const UNAUDITED_ACTIONS = new Set(['POST /device/heartbeat']);
 const redactSecrets = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value === null || typeof value !== 'object') return value;
@@ -82,6 +66,7 @@ export class HttpAuditMiddleware implements NestMiddleware {
     const route: unknown = request.route?.path;
 
     if (typeof route !== 'string') return null;
+    if (UNAUDITED_ACTIONS.has(`${request.method} ${route}`)) return null;
 
     const params: Record<string, unknown> = { ...(request.params ?? {}) };
     const targetId = params.id;
@@ -108,7 +93,7 @@ export class HttpAuditMiddleware implements NestMiddleware {
       ip: request.ip ?? null,
       userAgent: request.get('user-agent') ?? null,
       login: anonymousLogin,
-      body: redactSecrets(redactRouteFields(route, body)),
+      body: redactSecrets(body),
     };
   }
 

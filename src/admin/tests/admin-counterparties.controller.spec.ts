@@ -3,7 +3,7 @@ import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page } from '../../common/types/page';
 import { toFiat } from '../../common/utils/to-fiat';
@@ -45,7 +45,7 @@ const counterparty = (overrides: Partial<Counterparty> = {}): Counterparty =>
 
 const requisite = {
   id: REQUISITE,
-  type: TransactionType.Sbp,
+  type: BankDetailsType.CardOrSbp,
   card: null,
   phone: '+79012345678',
   cardholderName: 'Шевченко Д.',

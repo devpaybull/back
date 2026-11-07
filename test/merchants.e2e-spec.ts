@@ -8,6 +8,7 @@ import { TransactionService } from '../src/transactions/services/transaction.ser
 import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
 import { E2eContext, E2eUser, startE2e } from './support/e2e-app';
 import { bearer } from './support/flow';
+import { deviceOf } from './support/device-of';
 
 describe('the merchants page', () => {
   let e2e: E2eContext;
@@ -65,7 +66,13 @@ describe('the merchants page', () => {
       await e2e.http
         .post('/bank-details')
         .set(bearer(trader))
-        .send({ bankId: bank.body.data.id, type: 'sbp', phone: '+79012345678' })
+        .send({
+          bankId: bank.body.data.id,
+          deviceId: await deviceOf(e2e, trader),
+          dailyAmountLimit: '300000.00',
+          type: 'card_or_sbp',
+          phone: '+79012345678',
+        })
         .expect(201)
     ).body.data.id;
   });
@@ -549,19 +556,19 @@ describe('the merchants page', () => {
     expect(rows[rows.length - 1].escrowAfter).toBe('0.000000');
   });
 
-  it('keeps a whitelisted address out of the audit an admin can read', async () => {
+  it('stores a whitelisted address whole in the audit: an admin reads a mask, a superadmin the address', async () => {
     await e2e.http
       .post(`/admin/merchants/${second}/ip-addresses`)
       .set(bearer(admin))
       .send({ ip: '192.0.2.77' })
       .expect(201);
 
-    const audit = async (action: string) =>
+    const audit = async (action: string, viewer: E2eUser = admin) =>
       (
         await e2e.http
           .get('/admin/audit')
           .query({ action })
-          .set(bearer(admin))
+          .set(bearer(viewer))
           .expect(200)
       ).body.data as { metadata: unknown; body: unknown }[];
     const eventually = async <T>(read: () => Promise<T[]>): Promise<T[]> => {
@@ -585,7 +592,18 @@ describe('the merchants page', () => {
       expect.objectContaining({ ip: '192.0.*.*' }),
     );
     expect(JSON.stringify(http)).not.toContain('192.0.2.77');
-    expect(http[0].body).toEqual({ ip: '[REDACTED]' });
+    expect(http[0].body).toEqual({ ip: '192.0.*.*' });
+
+    const [domainWhole] = await audit('merchant.ip_added', superadmin);
+    const [httpWhole] = await audit(
+      'POST /admin/merchants/:id/ip-addresses',
+      superadmin,
+    );
+
+    expect(domainWhole.metadata).toEqual(
+      expect.objectContaining({ ip: '192.0.2.77' }),
+    );
+    expect(httpWhole.body).toEqual({ ip: '192.0.2.77' });
   });
 
   it('answers a custom period ending on 9999-12-31 without failing, and refuses a zone-less date-time', async () => {

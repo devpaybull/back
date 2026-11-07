@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { ActivityRead } from '../../audit/entities/activity-read.entity';
 import { AuditInstallation } from '../../audit/entities/audit-installation.entity';
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
@@ -39,6 +40,17 @@ import { EmailVerification } from '../../users/entities/email-verification.entit
 import { TraderLead } from '../../users/entities/trader-lead.entity';
 import { UserBackupCode } from '../../users/entities/user-backup-code.entity';
 import { User } from '../../users/entities/user.entity';
+import { BankDetailTagLink } from '../../bank-details/entities/bank-detail-tag-link.entity';
+import { BankDetailTag } from '../../bank-details/entities/bank-detail-tag.entity';
+import { BankDetails } from '../../bank-details/entities/bank-details.entity';
+import { DeviceCredential } from '../../devices/entities/device-credential.entity';
+import { DevicePairing } from '../../devices/entities/device-pairing.entity';
+import { Device } from '../../devices/entities/device.entity';
+import { MobileOperator } from '../../mobile-operators/entities/mobile-operator.entity';
+import { FileStorage } from '../../file-storage/types/file-storage';
+import { PayoutDecline } from '../../transactions/entities/payout-decline.entity';
+import { SelectionAttempt } from '../../transactions/entities/selection-attempt.entity';
+import { TransactionFile } from '../../transactions/entities/transaction-file.entity';
 import { AccountTransactionsModule } from '../account-transactions.module';
 import { AccountTransaction } from '../entities/account-transaction.entity';
 import { DepositAddress } from '../entities/deposit-address.entity';
@@ -80,6 +92,7 @@ describe('the account transactions module graph', () => {
     TraderSettings,
     AuditLog,
     AuditInstallation,
+    ActivityRead,
     Bank,
     Country,
     Currency,
@@ -92,6 +105,16 @@ describe('the account transactions module graph', () => {
     MerchantSettings,
     MerchantCurrency,
     MerchantIpAddress,
+    SelectionAttempt,
+    TransactionFile,
+    PayoutDecline,
+    BankDetails,
+    BankDetailTag,
+    BankDetailTagLink,
+    Device,
+    DevicePairing,
+    DeviceCredential,
+    MobileOperator,
   ];
 
   @Global()
@@ -117,6 +140,8 @@ describe('the account transactions module graph', () => {
     }
 
     return builder
+      .overrideProvider(FileStorage)
+      .useValue({})
       .overrideProvider(ConfigService)
       .useValue({
         get: jest.fn((key: string) => (key === 'VICTORIA_LOGS_URL' ? '' : 0)),

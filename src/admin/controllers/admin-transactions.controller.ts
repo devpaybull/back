@@ -8,10 +8,19 @@ import {
   ParseUUIDPipe,
   Patch,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { attachmentDisposition } from '../../common/utils/attachment-disposition';
+import { TransactionFilesService } from '../../transactions/services/transaction-files.service';
+import { TransactionFileDto } from '../dto/transaction-file.dto';
 import { toFiat } from '../../common/utils/to-fiat';
 import { toInstant } from '../../common/utils/to-instant';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
@@ -55,6 +64,7 @@ export class AdminTransactionsController {
     private readonly merchants: MerchantsService,
     private readonly counterparties: CounterpartiesService,
     private readonly config: ConfigService,
+    private readonly files: TransactionFilesService,
   ) {}
 
   @Get()
@@ -137,7 +147,15 @@ export class AdminTransactionsController {
               card: requisite.card ?? null,
               phone: requisite.phone ?? null,
               cardholderName: requisite.cardholderName ?? null,
-              bank: { id: requisite.bank.id, name: requisite.bank.name },
+              bank: requisite.bank
+                ? { id: requisite.bank.id, name: requisite.bank.name }
+                : null,
+              mobileOperator: requisite.mobileOperator
+                ? {
+                    id: requisite.mobileOperator.id,
+                    name: requisite.mobileOperator.name,
+                  }
+                : null,
             }
           : null,
         counterparty: counterparty
@@ -160,6 +178,45 @@ export class AdminTransactionsController {
     return toTransactionDto(found);
   }
 
+  @Get(':id/files')
+  @ApiOperation({
+    summary: 'The files of a deal, a pay-out’s receipts among them',
+  })
+  @ApiEnvelopeResponse(TransactionFileDto, { isArray: true })
+  async listFiles(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<TransactionFileDto[]> {
+    const files = await this.files.listOf([id]);
+
+    return files.map((file) => ({
+      id: file.id,
+      kind: file.kind,
+      name: file.name,
+      mime: file.mime,
+      size: file.size,
+      uploadedByUserId: file.uploadedByUserId,
+      createdAt: file.createdAt,
+    }));
+  }
+
+  @Get(':id/files/:fileId')
+  @ApiOperation({
+    summary: 'Downloads a file of a deal',
+    description: 'Always an attachment.',
+  })
+  @ApiOkResponse({ description: 'The file, not wrapped in the envelope' })
+  async downloadFile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fileId', ParseUUIDPipe) fileId: string,
+  ): Promise<StreamableFile> {
+    const { file, body } = await this.files.download(id, fileId);
+
+    return new StreamableFile(body, {
+      type: file.mime,
+      disposition: attachmentDisposition(file.name),
+    });
+  }
+
   @Patch(':id/status')
   @WriteAccess()
   @ApiOperation({ summary: 'Changes a transaction status' })
@@ -177,7 +234,9 @@ export class AdminTransactionsController {
       throw new ForbiddenException('Cannot act on your own transaction');
     }
 
-    const trader = await this.directory.findById(transaction.traderUserId);
+    const trader = transaction.traderUserId
+      ? await this.directory.findById(transaction.traderUserId)
+      : null;
 
     if (trader && !canIssueRole(admin.role, trader.role)) {
       throw new ForbiddenException(`Cannot act on a ${trader.role}`);

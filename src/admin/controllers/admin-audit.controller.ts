@@ -10,15 +10,19 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuditService } from '../../audit/services/audit.service';
 import { ACTIVITY_ACTIONS } from '../../audit/types/activity-action.enum';
+import { AuditRecord } from '../../audit/types/audit-record';
 import { AuditSortField } from '../../audit/types/audit-sort-field.enum';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { Page } from '../../common/types/page';
+import { AuthenticatedUser } from '../../common/types/token';
 import { loginOf } from '../../common/utils/login-of';
+import { maskIp } from '../../common/utils/mask-ip';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
 import {
   ActivityEntryDto,
@@ -27,6 +31,46 @@ import {
 import { AuditLogDto, toAuditLogDto } from '../dto/audit-log.dto';
 import { ListAllAuditQueryDto } from '../dto/list-all-audit-query.dto';
 import { ListAuditQueryDto } from '../dto/list-audit-query.dto';
+
+const WHITELIST_DOMAIN_ACTIONS = new Set([
+  'merchant.ip_added',
+  'merchant.ip_removed',
+]);
+const WHITELIST_HTTP_ACTION = 'POST /admin/merchants/:id/ip-addresses';
+const UNREADABLE_IP_MASK = '*';
+
+const withMaskedIp = <T extends object>(holder: T): T =>
+  'ip' in holder
+    ? {
+        ...holder,
+        ip:
+          typeof holder.ip === 'string'
+            ? maskIp(holder.ip)
+            : UNREADABLE_IP_MASK,
+      }
+    : holder;
+
+const auditLogDtoFor =
+  (role: AuthenticatedUser['role']) =>
+  (record: AuditRecord): AuditLogDto => {
+    const dto = toAuditLogDto(record);
+
+    if (role === Role.Superadmin) return dto;
+
+    if (WHITELIST_DOMAIN_ACTIONS.has(record.action) && dto.metadata) {
+      return { ...dto, metadata: withMaskedIp(dto.metadata) };
+    }
+
+    if (
+      record.action === WHITELIST_HTTP_ACTION &&
+      typeof dto.body === 'object' &&
+      dto.body !== null
+    ) {
+      return { ...dto, body: withMaskedIp(dto.body) };
+    }
+
+    return dto;
+  };
 
 @ApiTags('Admin · Audit')
 @ApiBearerAuth()
@@ -42,10 +86,13 @@ export class AdminAuditController {
   @Get('audit')
   @ApiOperation({
     summary: 'Lists the whole audit trail, Postgres and the archive together',
+    description:
+      'A whitelisted merchant address in a row is whole for a superadmin and masked for an admin.',
   })
   @ApiPagedResponse(AuditLogDto)
   async listAll(
     @Query() query: ListAllAuditQueryDto,
+    @CurrentUser() viewer: AuthenticatedUser,
   ): Promise<Page<AuditLogDto>> {
     return (
       await this.audit.list({
@@ -60,7 +107,7 @@ export class AdminAuditController {
         source: query.source,
         statusCode: query.statusCode,
       })
-    ).map(toAuditLogDto);
+    ).map(auditLogDtoFor(viewer.role));
   }
 
   @Get('users/:id/audit')
@@ -69,6 +116,7 @@ export class AdminAuditController {
   async list(
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: ListAuditQueryDto,
+    @CurrentUser() viewer: AuthenticatedUser,
   ): Promise<Page<AuditLogDto>> {
     const user = await this.directory.findById(id);
 
@@ -82,7 +130,7 @@ export class AdminAuditController {
         sortOrder: query.sortOrder,
         targetUserId: id,
       })
-    ).map(toAuditLogDto);
+    ).map(auditLogDtoFor(viewer.role));
   }
 
   @Get('users/:id/activity')

@@ -1,6 +1,6 @@
 import { In, Repository } from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { CounterpartyRequisiteEvent } from '../entities/counterparty-requisite-event.entity';
 import { CounterpartyBindingType } from '../types/counterparty-binding-type.enum';
@@ -14,16 +14,22 @@ import { Counterparty } from '../entities/counterparty.entity';
 describe('CounterpartiesService', () => {
   let repository: {
     findOne: jest.Mock;
-    create: jest.Mock;
-    save: jest.Mock;
+    findOneOrFail: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
+  let insert: { values: jest.Mock; orIgnore: jest.Mock; execute: jest.Mock };
   let service: CounterpartiesService;
 
   beforeEach(() => {
+    insert = {
+      values: jest.fn(() => insert),
+      orIgnore: jest.fn(() => insert),
+      execute: jest.fn(async () => undefined),
+    };
     repository = {
       findOne: jest.fn(),
-      create: jest.fn((row) => row),
-      save: jest.fn(async (row) => ({ id: 1, ...row })),
+      findOneOrFail: jest.fn(async () => ({ id: 1 })),
+      createQueryBuilder: jest.fn(() => ({ insert: () => insert })),
     };
     service = new CounterpartiesService(
       repository as unknown as Repository<Counterparty>,
@@ -42,10 +48,10 @@ describe('CounterpartiesService', () => {
       const result = await service.findOrCreate('merchant-1', 'ext-42');
 
       expect(result).toBe(existing);
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.createQueryBuilder).not.toHaveBeenCalled();
     });
 
-    it('creates a record with our own id when none exists', async () => {
+    it('inserts with ON CONFLICT DO NOTHING and re-reads, so a parallel creation of the same client gets the same row', async () => {
       repository.findOne.mockResolvedValue(null);
 
       const result = await service.findOrCreate('merchant-1', 'ext-42', {
@@ -53,12 +59,16 @@ describe('CounterpartiesService', () => {
         contact: 'ivan@example.com',
       });
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(insert.values).toHaveBeenCalledWith({
         merchantId: 'merchant-1',
         externalId: 'ext-42',
         name: 'Ivan',
         contact: 'ivan@example.com',
         payload: null,
+      });
+      expect(insert.orIgnore).toHaveBeenCalled();
+      expect(repository.findOneOrFail).toHaveBeenCalledWith({
+        where: { merchantId: 'merchant-1', externalId: 'ext-42' },
       });
       expect(result.id).toBe(1);
     });
@@ -78,7 +88,7 @@ describe('CounterpartiesService', () => {
 
       await service.findOrCreate('merchant-1', 'ext-1');
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(insert.values).toHaveBeenCalledWith({
         merchantId: 'merchant-1',
         externalId: 'ext-1',
         name: null,
@@ -129,6 +139,7 @@ describe('CounterpartiesService mutations and reads', () => {
   let manager: {
     findOne: jest.Mock;
     find: jest.Mock;
+    count: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
     transaction: jest.Mock;
@@ -158,8 +169,11 @@ describe('CounterpartiesService mutations and reads', () => {
 
   const requisite = (overrides: Record<string, unknown> = {}) => ({
     id: uuidOf(30),
-    type: TransactionType.Card,
+    type: BankDetailsType.CardOrSbp,
+    card: '4400430212345678',
+    phone: null,
     counterpartyOnly: true,
+    maxCounterparties: null,
     userId: traderId,
     ...overrides,
   });
@@ -177,6 +191,7 @@ describe('CounterpartiesService mutations and reads', () => {
     manager = {
       findOne: jest.fn(async () => stored),
       find: jest.fn(),
+      count: jest.fn(async () => 0),
       save: jest.fn(async (entity) => entity),
       create: jest.fn((_entity, data) => data),
       transaction: jest.fn(),
@@ -353,7 +368,7 @@ describe('CounterpartiesService mutations and reads', () => {
         service.bindWithin(
           manager as never,
           5,
-          requisite({ type: TransactionType.Card }),
+          requisite(),
           CounterpartyBindingType.Sbp,
           actor,
         ),
@@ -375,6 +390,28 @@ describe('CounterpartiesService mutations and reads', () => {
         boundByUserId: actor,
       });
       expect(stored.boundAt).toBeInstanceOf(Date);
+    });
+
+    it('binds as the system when there is no actor, the deal issue being the reason', async () => {
+      await service.bindWithin(
+        manager as never,
+        5,
+        requisite(),
+        CounterpartyBindingType.CardsOrSbp,
+        null,
+      );
+
+      expect(stored).toMatchObject({ boundByUserId: null });
+      expect(eventsSaved()).toEqual([
+        {
+          counterpartyId: 5,
+          bankDetailsId: uuidOf(30),
+          kind: RequisiteEventKind.Bound,
+          source: RequisiteEventSource.System,
+          reason: RequisiteEventReason.DealIssued,
+          actorUserId: null,
+        },
+      ]);
     });
 
     it('writes a manual bound event without a reason', async () => {
@@ -417,6 +454,58 @@ describe('CounterpartiesService mutations and reads', () => {
     });
   });
 
+  describe('counterparty slots', () => {
+    it('refuses a bind with 409 once the requisite holds maxCounterparties', async () => {
+      manager.count.mockResolvedValue(2);
+
+      await expect(
+        service.bindWithin(
+          manager as never,
+          5,
+          requisite({ maxCounterparties: 2 }),
+          CounterpartyBindingType.Cards,
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(manager.count).toHaveBeenCalledWith(Counterparty, {
+        where: { bankDetailsId: uuidOf(30) },
+      });
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('binds while a slot is free', async () => {
+      manager.count.mockResolvedValue(1);
+
+      await service.bindWithin(
+        manager as never,
+        5,
+        requisite({ maxCounterparties: 2 }),
+        CounterpartyBindingType.Cards,
+        actor,
+      );
+
+      expect(stored.bankDetailsId).toBe(uuidOf(30));
+    });
+
+    it('refuses moving a counterparty onto a full requisite', async () => {
+      stored = row({
+        bankDetailsId: uuidOf(31),
+        bindingType: CounterpartyBindingType.Cards,
+      });
+      manager.count.mockResolvedValue(1);
+
+      await expect(
+        service.replaceWithin(
+          manager as never,
+          5,
+          requisite({ maxCounterparties: 1 }),
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(stored.bankDetailsId).toBe(uuidOf(31));
+    });
+  });
+
   describe('replaceWithin', () => {
     const bound = () =>
       row({
@@ -450,7 +539,7 @@ describe('CounterpartiesService mutations and reads', () => {
         service.replaceWithin(
           manager as never,
           5,
-          requisite({ type: TransactionType.Sbp }),
+          requisite({ card: null, phone: '79001234567' }),
           actor,
         ),
       ).rejects.toMatchObject({ status: 400 });

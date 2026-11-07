@@ -10,7 +10,7 @@ import {
 } from 'class-validator';
 import { BankDetailsSortField } from '../../bank-details/types/bank-details-sort-field';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 
 const asBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true') return true;
@@ -32,10 +32,10 @@ export class ListBankDetailsQueryDto extends PaginationQueryDto {
   @Min(1)
   bankId?: number;
 
-  @ApiPropertyOptional({ enum: TransactionType })
+  @ApiPropertyOptional({ enum: BankDetailsType })
   @IsOptional()
-  @IsEnum(TransactionType)
-  type?: TransactionType;
+  @IsEnum(BankDetailsType)
+  type?: BankDetailsType;
 
   @ApiPropertyOptional()
   @IsOptional()

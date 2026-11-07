@@ -10,6 +10,7 @@ import {
   DataSource,
   EntityManager,
   FindOptionsWhere,
+  In,
   MoreThanOrEqual,
   Repository,
 } from 'typeorm';
@@ -24,11 +25,22 @@ import { UserTeamService } from '../../users/services/user-team.service';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
+import { CandidateRejectedError } from '../exceptions/candidate-rejected.exception';
 import { CreateDealInput } from '../types/create-deal-input';
+import { DealCandidate } from '../types/deal-candidate';
+import { DealIssueHooks } from '../types/deal-issue-hooks';
+import { IssuedDeal } from '../types/issued-deal';
+import { IssuedDealInput } from '../types/issued-deal-input';
+import { PayOutRequestInput } from '../types/pay-out-request-input';
+import { PreparedDeal } from '../types/prepared-deal';
+import { SameRequestQuery } from '../types/same-request-query';
+import { SelectionFilter } from '../types/selection-filter.enum';
+import { SkippedCandidate } from '../types/skipped-candidate';
 import { StatusChange } from '../types/status-change';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionListQuery } from '../types/transaction-list-query';
+import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { TransactionSortField } from '../types/transaction-sort-field.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { DealComputation } from '../types/deal-computation';
@@ -36,10 +48,12 @@ import {
   computeDeal,
   PlatformMinimumUnreachableError,
 } from '../utils/compute-deal';
+import { computePayOutRequest } from '../utils/compute-pay-out-request';
 import { countsTowardCounterpartyStats } from '../utils/counts-toward-counterparty-stats';
 import { findTransactionMethod } from '../utils/find-transaction-method';
 import {
   canTransition,
+  expiryTarget,
   isFinalStatus,
   startStatus,
 } from '../utils/status-transitions';
@@ -50,6 +64,11 @@ import { MerchantBalanceService } from './merchant-balance.service';
 import { WalletService } from './wallet.service';
 
 const MINUTE_MS = 60_000;
+const MERCHANT_CANCELED_REASON = 'merchant_canceled';
+const MERCHANT_CANCELABLE_STATUS: Record<TransactionKind, TransactionStatus> = {
+  [TransactionKind.PayIn]: TransactionStatus.Active,
+  [TransactionKind.PayOut]: TransactionStatus.Pending,
+};
 const MERCHANT_NAME_RANK =
   '(CAST(:merchantRankValues AS int[]))[array_position(CAST(:merchantRankIds AS uuid[]), transaction.merchantId)]';
 
@@ -78,6 +97,47 @@ export class TransactionService {
     return this.transactions.find({
       where: { traderUserId: userId, createdAt: MoreThanOrEqual(since) },
       order: { createdAt: 'ASC' },
+    });
+  }
+
+  findByMerchantTransactionId(
+    merchantId: string,
+    merchantTransactionId: string,
+  ): Promise<Transaction | null> {
+    return this.transactions.findOne({
+      where: { merchantId, merchantTransactionId },
+    });
+  }
+
+  findActiveSameRequest(
+    request: SameRequestQuery,
+  ): Promise<Transaction | null> {
+    return this.transactions.findOne({
+      where: {
+        kind: TransactionKind.PayIn,
+        status: TransactionStatus.Active,
+        merchantId: request.merchantId,
+        counterpartyId: request.counterpartyId,
+        method: request.method,
+        requestedAmountFiat: request.requestedAmountFiat,
+      },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  }
+
+  countFailedPayInsSince(
+    merchantId: string,
+    counterpartyId: number,
+    since: Date,
+  ): Promise<number> {
+    return this.transactions.count({
+      where: {
+        kind: TransactionKind.PayIn,
+        merchantId,
+        counterpartyId,
+        status: In([TransactionStatus.Active, TransactionStatus.Canceled]),
+        createdAt: MoreThanOrEqual(since),
+      },
     });
   }
 
@@ -134,6 +194,118 @@ export class TransactionService {
   }
 
   async createDeal(input: CreateDealInput): Promise<Transaction> {
+    const prepared = await this.prepareDeal(input);
+
+    return this.dataSource.transaction((manager) =>
+      this.insertDealWithin(manager, input, prepared),
+    );
+  }
+
+  async createIssuedDeal<C extends DealCandidate>(
+    input: IssuedDealInput,
+    candidates: readonly C[],
+    hooks: DealIssueHooks<C>,
+  ): Promise<IssuedDeal<C>> {
+    const skipped: SkippedCandidate<C>[] = [];
+
+    for (const candidate of candidates) {
+      const dealInput: CreateDealInput = {
+        ...input,
+        traderUserId: candidate.traderUserId,
+        bankDetailsId: candidate.bankDetailsId,
+        traderPercent: candidate.traderPercent,
+        bankId: candidate.bankId,
+      };
+      let prepared: PreparedDeal;
+
+      try {
+        prepared = await this.prepareDeal(dealInput);
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        skipped.push({ candidate, reason: SelectionFilter.DealRefused });
+        continue;
+      }
+
+      try {
+        const transaction = await this.dataSource.transaction(
+          async (manager) => {
+            await hooks.checkWithin(manager, candidate);
+            const inserted = await this.insertDealWithin(
+              manager,
+              dealInput,
+              prepared,
+            );
+            await hooks.afterInsertWithin?.(manager, candidate, inserted);
+
+            return inserted;
+          },
+        );
+
+        return { transaction, candidate, skipped };
+      } catch (error) {
+        if (error instanceof CandidateRejectedError) {
+          skipped.push({ candidate, reason: error.reason });
+        } else if (error instanceof ConflictException) {
+          skipped.push({
+            candidate,
+            reason: SelectionFilter.InsufficientBalance,
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return { transaction: null, candidate: null, skipped };
+  }
+
+  async createPayOutRequest(input: PayOutRequestInput): Promise<Transaction> {
+    this.assertDealShape({ ...input, kind: TransactionKind.PayOut });
+
+    const pricing = computePayOutRequest(input);
+    const windowMinutes =
+      input.windowMinutes ?? (await this.windowMinutesOf(input.merchantId));
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + windowMinutes * MINUTE_MS);
+    const status = startStatus(TransactionKind.PayOut);
+
+    return this.dataSource.transaction(async (manager) => {
+      const transaction = manager.create(Transaction, {
+        kind: TransactionKind.PayOut,
+        status,
+        method: input.method,
+        traderUserId: null,
+        merchantId: input.merchantId,
+        amountFiat: input.amountFiat,
+        amountCrypto: pricing.amountCrypto,
+        rate: input.rate,
+        merchantPercent: input.merchantPercent,
+        merchantCommission: pricing.merchantCommission,
+        merchantAmount: pricing.merchantAmount,
+        merchantTransactionId: input.merchantTransactionId,
+        payerInfo: input.payerInfo,
+        callbackUrl: input.callbackUrl,
+        payoutOwnerName: input.payoutOwnerName,
+        payoutBankId: input.payoutBankId,
+        payoutCardNumber: input.payoutCardNumber,
+        payoutPhone: input.payoutPhone,
+        createdAt,
+        expiresAt,
+      });
+      await manager.save(transaction);
+      await this.holdPayOutWithin(manager, transaction);
+      await this.writeEvent(manager, transaction.id, null, {
+        toStatus: status,
+        source: StatusEventSource.System,
+      });
+
+      return transaction;
+    });
+  }
+
+  private assertDealShape(
+    input: Pick<CreateDealInput, 'kind' | 'method' | 'amountFiat' | 'rate'>,
+  ): TransactionMethodDefinition {
     const method = findTransactionMethod(input.method);
 
     if (!method) {
@@ -157,6 +329,40 @@ export class TransactionService {
         `rate must have at most ${RATE_SCALE} decimal places`,
       );
     }
+
+    return method;
+  }
+
+  private async windowMinutesOf(merchantId: string | null): Promise<number> {
+    const merchantWindowMinutes = merchantId
+      ? await this.merchantSettings.payInWindowMinutesOf(merchantId)
+      : null;
+
+    return (
+      merchantWindowMinutes ??
+      this.config.getOrThrow<number>('DEAL_TTL_MINUTES')
+    );
+  }
+
+  private holdPayOutWithin(
+    manager: EntityManager,
+    transaction: Transaction,
+  ): Promise<unknown> {
+    return this.merchantBalances.holdPayOutWithin(
+      manager,
+      transaction.merchantId,
+      transaction.merchantAmount,
+      transaction.id,
+      () =>
+        this.merchantSettings.allowsOverdraftWithin(
+          manager,
+          transaction.merchantId,
+        ),
+    );
+  }
+
+  private async prepareDeal(input: CreateDealInput): Promise<PreparedDeal> {
+    const method = this.assertDealShape(input);
 
     const leads = await this.rates.resolveLeadPercents({
       links: await this.team.assignmentsOf(input.traderUserId),
@@ -186,89 +392,88 @@ export class TransactionService {
       }
       throw error;
     }
-    const holdsMerchant =
-      input.kind === TransactionKind.PayOut && Boolean(input.merchantId);
     const status = startStatus(input.kind);
-    const merchantWindowMinutes = input.merchantId
-      ? await this.merchantSettings.payInWindowMinutesOf(input.merchantId)
-      : null;
-    const ttlMinutes =
-      merchantWindowMinutes ??
-      this.config.getOrThrow<number>('DEAL_TTL_MINUTES');
+    const ttlMinutes = await this.windowMinutesOf(input.merchantId);
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + ttlMinutes * MINUTE_MS);
 
-    return this.dataSource.transaction(async (manager) => {
-      if (input.kind === TransactionKind.PayIn) {
-        await this.wallets.reserveMainEscrowWithin(
-          manager,
-          input.traderUserId,
-          computation.traderAmount,
-        );
-      }
+    return { computation, status, createdAt, expiresAt };
+  }
 
-      const transaction = manager.create(Transaction, {
-        kind: input.kind,
-        status,
-        method: input.method,
-        traderUserId: input.traderUserId,
-        bankDetailsId: input.bankDetailsId,
-        merchantId: input.merchantId,
-        counterpartyId: input.counterpartyId ?? null,
-        amountFiat: input.amountFiat,
-        amountCrypto: computation.amountCrypto,
-        rate: input.rate,
-        merchantPercent: input.merchantPercent,
-        traderPercent: input.traderPercent,
-        traderEffectivePercent: computation.traderEffectivePercent,
-        leadPercent: computation.leadPercent,
-        merchantCommission: computation.merchantCommission,
-        traderCommission: computation.traderCommission,
-        leadCommission: computation.leadCommission,
-        traderAmount: computation.traderAmount,
-        merchantAmount: computation.merchantAmount,
-        comment: input.comment ?? null,
-        createdAt,
-        expiresAt,
-      });
-      await manager.save(transaction);
-      if (holdsMerchant) {
-        await this.merchantBalances.holdPayOutWithin(
-          manager,
-          input.merchantId,
-          computation.merchantAmount,
-          transaction.id,
-          () =>
-            this.merchantSettings.allowsOverdraftWithin(
-              manager,
-              input.merchantId,
-            ),
-        );
-      }
-      if (computation.leadShares.length) {
-        await manager.save(
-          computation.leadShares.map((share) =>
-            manager.create(TransactionLeadShare, {
-              transactionId: transaction.id,
-              leadUserId: share.leadUserId,
-              percent: share.percent,
-              amount: share.amount,
-            }),
-          ),
-        );
-      }
-      await this.writeEvent(manager, transaction.id, null, {
-        toStatus: status,
-        source: StatusEventSource.System,
-      });
-      if (countsTowardCounterpartyStats(transaction)) {
-        await this.counterpartyStats.recordDealCreatedWithin(
-          manager,
-          transaction.counterpartyId,
-        );
-      }
-      return transaction;
+  private async insertDealWithin(
+    manager: EntityManager,
+    input: CreateDealInput,
+    { computation, status, createdAt, expiresAt }: PreparedDeal,
+  ): Promise<Transaction> {
+    const holdsMerchant =
+      input.kind === TransactionKind.PayOut && Boolean(input.merchantId);
+
+    if (input.kind === TransactionKind.PayIn) {
+      await this.wallets.reserveMainEscrowWithin(
+        manager,
+        input.traderUserId,
+        computation.traderAmount,
+      );
+    }
+
+    const transaction = manager.create(Transaction, {
+      kind: input.kind,
+      status,
+      method: input.method,
+      traderUserId: input.traderUserId,
+      bankDetailsId: input.bankDetailsId,
+      merchantId: input.merchantId,
+      counterpartyId: input.counterpartyId ?? null,
+      amountFiat: input.amountFiat,
+      amountCrypto: computation.amountCrypto,
+      rate: input.rate,
+      merchantPercent: input.merchantPercent,
+      traderPercent: input.traderPercent,
+      traderEffectivePercent: computation.traderEffectivePercent,
+      leadPercent: computation.leadPercent,
+      merchantCommission: computation.merchantCommission,
+      traderCommission: computation.traderCommission,
+      leadCommission: computation.leadCommission,
+      traderAmount: computation.traderAmount,
+      merchantAmount: computation.merchantAmount,
+      comment: input.comment ?? null,
+      merchantTransactionId: input.merchantTransactionId ?? null,
+      payerInfo: input.payerInfo ?? null,
+      requestedBankId: input.requestedBankId ?? null,
+      requestedOperatorId: input.requestedOperatorId ?? null,
+      payerBankId: input.payerBankId ?? null,
+      callbackUrl: input.callbackUrl ?? null,
+      successUrl: input.successUrl ?? null,
+      errorUrl: input.errorUrl ?? null,
+      requestedAmountFiat: input.requestedAmountFiat ?? null,
+      createdAt,
+      expiresAt,
     });
+    await manager.save(transaction);
+    if (holdsMerchant) await this.holdPayOutWithin(manager, transaction);
+    if (computation.leadShares.length) {
+      await manager.save(
+        computation.leadShares.map((share) =>
+          manager.create(TransactionLeadShare, {
+            transactionId: transaction.id,
+            leadUserId: share.leadUserId,
+            percent: share.percent,
+            amount: share.amount,
+          }),
+        ),
+      );
+    }
+    await this.writeEvent(manager, transaction.id, null, {
+      toStatus: status,
+      source: StatusEventSource.System,
+    });
+    if (countsTowardCounterpartyStats(transaction)) {
+      await this.counterpartyStats.recordDealCreatedWithin(
+        manager,
+        transaction.counterpartyId,
+      );
+    }
+    return transaction;
   }
 
   async transition(
@@ -282,8 +487,131 @@ export class TransactionService {
       });
       if (!transaction) throw new NotFoundException('Transaction not found');
 
+      this.assertHandMoveKeepsTrader(transaction, change);
+
       return this.transitionLocked(manager, transaction, change);
     });
+  }
+
+  private assertHandMoveKeepsTrader(
+    transaction: Transaction,
+    change: StatusChange,
+  ): void {
+    const untaken =
+      transaction.status === TransactionStatus.Pending &&
+      transaction.traderUserId === null &&
+      change.toStatus === TransactionStatus.Active;
+    const taken =
+      transaction.status === TransactionStatus.Active &&
+      transaction.payoutTakenAt !== null &&
+      transaction.payoutTakenAt !== undefined &&
+      change.toStatus === TransactionStatus.Pending;
+
+    if (untaken || taken) {
+      throw new ConflictException(
+        'A trader takes or releases a pay-out only through its own actions',
+      );
+    }
+  }
+
+  async cancelByMerchant(
+    merchantId: string,
+    transactionId: string,
+  ): Promise<Transaction> {
+    return this.dataSource.transaction(async (manager) => {
+      const deal = await this.lockMerchantDeal(
+        manager,
+        merchantId,
+        transactionId,
+      );
+
+      if (deal.status === TransactionStatus.Canceled) return deal;
+      if (deal.status !== MERCHANT_CANCELABLE_STATUS[deal.kind]) {
+        throw new ConflictException('The deal cannot be canceled');
+      }
+
+      const fromStatus = deal.status;
+      const canceled = await this.transitionLocked(manager, deal, {
+        toStatus: TransactionStatus.Canceled,
+        source: StatusEventSource.Merchant,
+        actorUserId: null,
+        reason: MERCHANT_CANCELED_REASON,
+      });
+
+      await this.audit.record(
+        {
+          actorUserId: null,
+          action: 'merchant_api.deal_canceled',
+          metadata: { merchantId, transactionId, fromStatus },
+        },
+        manager,
+      );
+
+      return canceled;
+    });
+  }
+
+  async extendTimerByMerchant(
+    merchantId: string,
+    transactionId: string,
+    now: Date = new Date(),
+  ): Promise<Transaction> {
+    return this.dataSource.transaction(async (manager) => {
+      const deal = await this.lockMerchantDeal(
+        manager,
+        merchantId,
+        transactionId,
+      );
+      const expiresAt = deal.expiresAt;
+
+      if (
+        deal.kind !== TransactionKind.PayIn ||
+        deal.timerExtendedAt ||
+        !expiresAt ||
+        expiresAt.getTime() <= now.getTime() ||
+        !expiryTarget(deal.kind, deal.status)
+      ) {
+        throw new ConflictException('The timer cannot be extended');
+      }
+
+      deal.expiresAt = new Date(
+        2 * expiresAt.getTime() - deal.createdAt.getTime(),
+      );
+      deal.timerExtendedAt = now;
+      await manager.save(deal);
+
+      await this.audit.record(
+        {
+          actorUserId: null,
+          action: 'merchant_api.timer_extended',
+          metadata: {
+            merchantId,
+            transactionId,
+            status: deal.status,
+            expiresAtBefore: expiresAt.toISOString(),
+            expiresAt: deal.expiresAt.toISOString(),
+          },
+        },
+        manager,
+      );
+
+      return deal;
+    });
+  }
+
+  private async lockMerchantDeal(
+    manager: EntityManager,
+    merchantId: string,
+    transactionId: string,
+  ): Promise<Transaction> {
+    const deal = await manager.findOne(Transaction, {
+      where: { id: transactionId, merchantId },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (!deal) throw new NotFoundException('Deal not found');
+
+    return deal;
   }
 
   async transitionLocked(
@@ -298,7 +626,14 @@ export class TransactionService {
       return transaction;
     }
 
-    if (!canTransition(transaction.kind, transaction.status, change.toStatus)) {
+    if (
+      !canTransition(
+        transaction.kind,
+        transaction.status,
+        change.toStatus,
+        change.source,
+      )
+    ) {
       throw new ConflictException('Illegal status transition');
     }
 

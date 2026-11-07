@@ -13,6 +13,8 @@ export interface BankDetailsLimits {
   dailyAmountLimit: Fiat;
   monthlyAmountLimitEnabled: boolean;
   monthlyAmountLimit: Fiat;
+  hourlyAmountLimitEnabled: boolean;
+  hourlyAmountLimit: Fiat;
   maxActiveTransactionsEnabled: boolean;
   maxActiveTransactions: number;
   delayBetweenRequestsEnabled: boolean;

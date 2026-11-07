@@ -13,4 +13,5 @@ export interface VictoriaAuditQuery {
   actions?: readonly string[];
   source?: AuditSource;
   statusCode?: number;
+  createdAfter?: Date;
 }

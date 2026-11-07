@@ -5,7 +5,7 @@ import { Role } from '../../common/enums/role.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page } from '../../common/types/page';
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { AuthenticatedUser } from '../../common/types/token';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { toFiat } from '../../common/utils/to-fiat';
@@ -93,6 +93,7 @@ describe('AdminTransactionsController', () => {
       merchants as never,
       counterparties as never,
       { getOrThrow: () => 'Europe/Moscow' } as never,
+      { listOf: jest.fn(async () => []) } as never,
     );
   });
 
@@ -278,7 +279,7 @@ describe('AdminTransactionsController', () => {
       bankDetails.findByIdsWithDeleted.mockResolvedValue([
         {
           id: uuidOf(40),
-          type: TransactionType.Sbp,
+          type: BankDetailsType.CardOrSbp,
           card: null,
           phone: '+79990000000',
           cardholderName: 'Ivan I.',
@@ -286,7 +287,7 @@ describe('AdminTransactionsController', () => {
         },
         {
           id: uuidOf(41),
-          type: TransactionType.Card,
+          type: BankDetailsType.CardOrSbp,
           card: '4111111111111111',
           phone: null,
           cardholderName: null,
@@ -322,11 +323,12 @@ describe('AdminTransactionsController', () => {
           merchant: { id: uuidOf(3), name: 'Acme' },
           bankDetails: {
             id: uuidOf(40),
-            type: TransactionType.Sbp,
+            type: BankDetailsType.CardOrSbp,
             card: null,
             phone: '+79990000000',
             cardholderName: 'Ivan I.',
             bank: { id: 7, name: 'Sber' },
+            mobileOperator: null,
           },
           counterparty: { id: 5, name: 'Client A' },
         }),
@@ -371,6 +373,25 @@ describe('AdminTransactionsController', () => {
           counterparty: null,
           expiresAt: null,
         }),
+      );
+    });
+
+    it('answers trader null for a pay-out nobody has taken yet', async () => {
+      transactions.list.mockResolvedValue(
+        page([
+          transaction({
+            kind: TransactionKind.PayOut,
+            status: TransactionStatus.Pending,
+            traderUserId: null,
+          }),
+        ]),
+      );
+
+      const result = await controller.list(query());
+
+      expect(directory.findByIds).toHaveBeenCalledWith([]);
+      expect(result.items[0]).toEqual(
+        expect.objectContaining({ traderUserId: null, trader: null }),
       );
     });
 
@@ -427,6 +448,32 @@ describe('AdminTransactionsController', () => {
         controller.changeStatus(uuidOf(100), dto, admin),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(transactions.transition).not.toHaveBeenCalled();
+    });
+
+    it('looks no trader up for a pay-out nobody has taken yet', async () => {
+      transactions.findById.mockResolvedValue(
+        transaction({
+          kind: TransactionKind.PayOut,
+          status: TransactionStatus.Pending,
+          traderUserId: null,
+        }),
+      );
+      transactions.transition.mockResolvedValue(
+        transaction({
+          kind: TransactionKind.PayOut,
+          status: TransactionStatus.Canceled,
+          traderUserId: null,
+        }),
+      );
+
+      const result = await controller.changeStatus(
+        uuidOf(100),
+        { status: TransactionStatus.Canceled, reason: 'no trader' },
+        admin,
+      );
+
+      expect(directory.findById).not.toHaveBeenCalled();
+      expect(result.traderUserId).toBeNull();
     });
 
     it('transitions with source admin, the acting admin and the reason', async () => {

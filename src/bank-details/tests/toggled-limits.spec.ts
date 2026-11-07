@@ -8,8 +8,8 @@ describe('toggledLimits', () => {
     ['maxAmountEnabled', 'maxAmount'],
     ['dailyLimitEnabled', 'dailyLimit'],
     ['monthlyLimitEnabled', 'monthlyLimit'],
-    ['dailyAmountLimitEnabled', 'dailyAmountLimit'],
     ['monthlyAmountLimitEnabled', 'monthlyAmountLimit'],
+    ['hourlyAmountLimitEnabled', 'hourlyAmountLimit'],
     ['maxActiveTransactionsEnabled', 'maxActiveTransactions'],
     ['delayBetweenRequestsEnabled', 'delayBetweenRequests'],
   ];
@@ -72,6 +72,36 @@ describe('toggledLimits', () => {
     },
   );
 
+  describe('the daily turnover limit is always on', () => {
+    it('is on with no value when nothing was given, for the service to refuse', () => {
+      expect(toggledLimits({}, {})).toMatchObject({
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: null,
+      });
+    });
+
+    it('keeps a value given without the switch', () => {
+      expect(
+        toggledLimits({}, { dailyAmountLimit: toFiat(300000) }),
+      ).toMatchObject({
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(300000),
+      });
+    });
+
+    it('stays on and keeps its value when asked to switch off', () => {
+      expect(
+        toggledLimits(
+          { dailyAmountLimitEnabled: true, dailyAmountLimit: toFiat(7) },
+          { dailyAmountLimitEnabled: false },
+        ),
+      ).toMatchObject({
+        dailyAmountLimitEnabled: true,
+        dailyAmountLimit: toFiat(7),
+      });
+    });
+  });
+
   it('takes zero as a real value rather than an absent one', () => {
     expect(
       toggledLimits({}, { dailyLimitEnabled: true, dailyLimit: 0 }),
@@ -126,7 +156,7 @@ describe('toggledLimits', () => {
       ).toMatchObject({ minAmountEnabled: true, minAmount: toFiat(700) });
     });
 
-    it('leaves the other seven pairs to the ordinary rules', () => {
+    it('leaves the other pairs to the ordinary rules', () => {
       expect(
         toggledLimits(
           {},

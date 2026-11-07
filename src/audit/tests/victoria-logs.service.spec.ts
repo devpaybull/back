@@ -167,6 +167,31 @@ describe('VictoriaLogsService', () => {
     });
   });
 
+  describe('insertLines', () => {
+    it('posts foreign lines to the same stream, stamped with the installation', async () => {
+      await victoriaAt('http://localhost:9428').insertLines([
+        {
+          source: 'merchant_api',
+          message: 'GET /v1/merchant/balance',
+          createdAt: '2026-11-04T10:00:00.000Z',
+          requestId: uuidOf(3),
+        },
+      ]);
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(
+        'http://localhost:9428/insert/jsonline?_stream_fields=source%2CinstallationId&_time_field=createdAt&_msg_field=message',
+      );
+      expect(JSON.parse((init.body as string).trim())).toEqual({
+        source: 'merchant_api',
+        message: 'GET /v1/merchant/balance',
+        createdAt: '2026-11-04T10:00:00.000Z',
+        requestId: uuidOf(3),
+        installationId: INSTALLATION_ID,
+      });
+    });
+  });
+
   describe('find', () => {
     const service = () => victoriaAt('http://vl:9428');
     const queriesSent = (): string[] =>

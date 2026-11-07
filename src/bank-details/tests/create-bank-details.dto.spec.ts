@@ -1,14 +1,16 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 import { CreateBankDetailsDto } from '../dto/create-bank-details.dto';
 
 const body = (
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
   bankId: 1,
-  type: TransactionType.Card,
+  deviceId: 1,
+  type: BankDetailsType.CardOrSbp,
   card: '4400430212345678',
+  dailyAmountLimit: '300000.00',
   ...overrides,
 });
 
@@ -23,11 +25,24 @@ describe('CreateBankDetailsDto', () => {
     expect(failedProperties(body())).toEqual([]);
   });
 
-  it.each(['bankId', 'type'])('requires %s', (field) => {
-    expect(failedProperties(body({ [field]: undefined }))).toEqual([field]);
+  it('requires type', () => {
+    expect(failedProperties(body({ type: undefined }))).toEqual(['type']);
   });
 
-  it.each(Object.values(TransactionType))('accepts the type %s', (type) => {
+  it.each(['bankId', 'mobileOperatorId'])(
+    'leaves %s to the service, which knows what the type needs',
+    (field) => {
+      expect(failedProperties(body({ [field]: undefined }))).toEqual([]);
+    },
+  );
+
+  it('refuses a mobile operator id that is not a positive integer', () => {
+    expect(failedProperties(body({ mobileOperatorId: 0 }))).toEqual([
+      'mobileOperatorId',
+    ]);
+  });
+
+  it.each(Object.values(BankDetailsType))('accepts the type %s', (type) => {
     expect(failedProperties(body({ type }))).toEqual([]);
   });
 
@@ -110,14 +125,10 @@ describe('CreateBankDetailsDto', () => {
       'maxAmount',
       'dailyAmountLimit',
       'monthlyAmountLimit',
+      'hourlyAmountLimit',
     ];
-    const counts = [
-      'dailyLimit',
-      'monthlyLimit',
-      'maxActiveTransactions',
-      'delayBetweenRequests',
-    ];
-    const values = [...amounts, ...counts];
+    const counts = ['dailyLimit', 'monthlyLimit', 'maxActiveTransactions'];
+    const values = [...amounts, ...counts, 'delayBetweenRequests'];
 
     const toggles = values.map((field) => `${field}Enabled`);
 
@@ -153,7 +164,7 @@ describe('CreateBankDetailsDto', () => {
     });
 
     it('leaves every one of them absent when they were not given', () => {
-      const parsed = parse(body());
+      const parsed = parse(body({ dailyAmountLimit: undefined }));
 
       for (const field of [...values, ...toggles]) {
         expect(parsed[field]).toBeUndefined();
@@ -167,8 +178,73 @@ describe('CreateBankDetailsDto', () => {
     });
   });
 
+  describe('what a requisite must carry', () => {
+    it('requires a device', () => {
+      expect(failedProperties(body({ deviceId: undefined }))).toEqual([
+        'deviceId',
+      ]);
+    });
+
+    it('requires the daily turnover limit', () => {
+      expect(failedProperties(body({ dailyAmountLimit: undefined }))).toEqual([
+        'dailyAmountLimit',
+      ]);
+    });
+
+    it('refuses to switch the daily turnover limit off', () => {
+      expect(
+        failedProperties(body({ dailyAmountLimitEnabled: false })),
+      ).toEqual(['dailyAmountLimitEnabled']);
+    });
+  });
+
+  describe('delayBetweenRequests', () => {
+    it.each([5, 30, 60, 300, 900, 1800, 3600, 10800])(
+      'takes %s seconds',
+      (seconds) => {
+        expect(
+          failedProperties(body({ delayBetweenRequests: seconds })),
+        ).toEqual([]);
+        expect(
+          parse(body({ delayBetweenRequests: String(seconds) }))
+            .delayBetweenRequests,
+        ).toBe(seconds);
+      },
+    );
+
+    it.each([0, 10, 120, 10801, -5])('refuses %s seconds', (seconds) => {
+      expect(failedProperties(body({ delayBetweenRequests: seconds }))).toEqual(
+        ['delayBetweenRequests'],
+      );
+    });
+  });
+
+  describe('maxCounterparties', () => {
+    it('takes a positive integer with no ceiling below int4', () => {
+      expect(failedProperties(body({ maxCounterparties: 2147483647 }))).toEqual(
+        [],
+      );
+    });
+
+    it.each([0, -1, 1.5, 2147483648])('refuses %s', (value) => {
+      expect(failedProperties(body({ maxCounterparties: value }))).toEqual([
+        'maxCounterparties',
+      ]);
+    });
+  });
+
+  describe('tagIds', () => {
+    it('takes a list of distinct ids', () => {
+      expect(failedProperties(body({ tagIds: [1, 2] }))).toEqual([]);
+    });
+
+    it.each([[[1, 1]], [[0]], [['a']], ['1']])('refuses %p', (tagIds) => {
+      expect(failedProperties(body({ tagIds }))).toEqual(['tagIds']);
+    });
+  });
+
   describe('the standing flags', () => {
-    it.each(['counterpartyOnly', 'reserve'])(
+    it.each(['counterpartyOnly', 'reserve', 'sameBankOnly'])(
       'takes %s as a boolean',
       (field) => {
         expect(failedProperties(body({ [field]: true }))).toEqual([]);

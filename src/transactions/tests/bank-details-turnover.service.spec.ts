@@ -1,3 +1,4 @@
+import { toFiat } from '../../common/utils/to-fiat';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { BankDetailsTurnoverService } from '../services/bank-details-turnover.service';
@@ -124,6 +125,84 @@ describe('BankDetailsTurnoverService', () => {
       const { service, transactions } = build();
 
       await expect(service.turnoverOfBankDetails([], now)).resolves.toEqual(
+        new Map(),
+      );
+      expect(transactions.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('issueUsageOf', () => {
+    it('reads every window of every requisite in one grouped query, the amount as a fiat string', async () => {
+      const { service, builder, transactions } = build([
+        {
+          bankDetailsId: uuidOf(1),
+          dealsToday: '2',
+          dealsMonth: '9',
+          amountToday: '3000.50',
+          amountMonth: '12000.00',
+          amountLastHour: '1000.00',
+          openDeals: '1',
+          openWithSameAmount: '1',
+          lastDealAt: '2026-03-10T22:00:00.000Z',
+        },
+      ]);
+
+      const usage = await service.issueUsageOf(
+        [uuidOf(1), uuidOf(2)],
+        toFiat('1000.5'),
+        now,
+      );
+
+      expect(transactions.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(builder.setParameters).toHaveBeenCalledWith(
+        expect.objectContaining({
+          canceled: TransactionStatus.Canceled,
+          final: [
+            TransactionStatus.Success,
+            TransactionStatus.SuccessChanged,
+            TransactionStatus.Canceled,
+          ],
+          amount: '1000.50',
+          dayStart: new Date('2026-03-10T21:00:00Z'),
+          hourStart: new Date('2026-03-10T21:30:00Z'),
+        }),
+      );
+      expect(usage.get(uuidOf(1))).toEqual({
+        dealsToday: 2,
+        dealsMonth: 9,
+        amountToday: toFiat('3000.50'),
+        amountMonth: toFiat('12000'),
+        amountLastHour: toFiat('1000'),
+        openDeals: 1,
+        openWithSameAmount: true,
+        lastDealAt: new Date('2026-03-10T22:00:00Z'),
+      });
+      expect(usage.get(uuidOf(2))).toMatchObject({
+        dealsToday: 0,
+        openDeals: 0,
+        openWithSameAmount: false,
+        lastDealAt: null,
+      });
+    });
+
+    it('reads through the given manager, under the caller’s lock', async () => {
+      const { service, transactions, builder } = build();
+      const manager = {
+        getRepository: jest.fn(() => ({
+          createQueryBuilder: jest.fn(() => builder),
+        })),
+      };
+
+      await service.issueUsageOf([uuidOf(1)], toFiat(1), now, manager as never);
+
+      expect(manager.getRepository).toHaveBeenCalled();
+      expect(transactions.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('answers an empty id list without querying', async () => {
+      const { service, transactions } = build();
+
+      await expect(service.issueUsageOf([], toFiat(1), now)).resolves.toEqual(
         new Map(),
       );
       expect(transactions.createQueryBuilder).not.toHaveBeenCalled();

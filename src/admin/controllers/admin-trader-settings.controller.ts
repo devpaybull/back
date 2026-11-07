@@ -90,6 +90,12 @@ export class AdminTraderSettingsController {
       changes.autoBuybackEnabled !== undefined ||
       changes.autoBuybackConcurrent !== undefined;
 
+    if (changes.maxActivePayouts !== undefined && !reason) {
+      throw new BadRequestException(
+        'A reason is required to change the pay-out limit',
+      );
+    }
+
     if (touchesAutoBuyback && !reason) {
       throw new BadRequestException(
         'A reason is required to change auto-buyback',

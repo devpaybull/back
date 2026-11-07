@@ -153,27 +153,34 @@ export class AdminBankDetailsController {
   private async withTurnover(
     page: Page<BankDetails>,
   ): Promise<Page<BankDetailsDto>> {
-    const turnover = await this.turnover.turnoverOfBankDetails(
-      page.items.map((row) => row.id),
-      new Date(),
-    );
+    const ids = page.items.map((row) => row.id);
+    const [turnover, bound] = await Promise.all([
+      this.turnover.turnoverOfBankDetails(ids, new Date()),
+      this.bankDetails.boundCounterpartiesOf(ids),
+    ]);
     const { counterpartyMinAmount } = this.bankDetails;
 
     return page.map((row) =>
-      toBankDetailsDto(row, counterpartyMinAmount, turnover.get(row.id)),
+      toBankDetailsDto(
+        row,
+        counterpartyMinAmount,
+        turnover.get(row.id),
+        bound.get(row.id) ?? 0,
+      ),
     );
   }
 
   private async withTurnoverOf(details: BankDetails): Promise<BankDetailsDto> {
-    const turnover = await this.turnover.turnoverOfBankDetails(
-      [details.id],
-      new Date(),
-    );
+    const [turnover, bound] = await Promise.all([
+      this.turnover.turnoverOfBankDetails([details.id], new Date()),
+      this.bankDetails.boundCounterpartiesOf([details.id]),
+    ]);
 
     return toBankDetailsDto(
       details,
       this.bankDetails.counterpartyMinAmount,
       turnover.get(details.id),
+      bound.get(details.id) ?? 0,
     );
   }
 }

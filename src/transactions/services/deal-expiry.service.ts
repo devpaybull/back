@@ -11,14 +11,19 @@ import {
   Equal,
   FindOptionsWhere,
   In,
+  IsNull,
   LessThanOrEqual,
   MoreThan,
   Repository,
 } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { StatusEventSource } from '../types/status-event-source.enum';
-import { TransactionStatus } from '../types/transaction-status.enum';
-import { TICKING_STATUSES } from '../utils/status-transitions';
+import { TransactionKind } from '../types/transaction-kind.enum';
+import {
+  expiryTarget,
+  TICKING_STATUSES,
+  tickingStatuses,
+} from '../utils/status-transitions';
 import { TransactionService } from './transaction.service';
 
 type ExpiryCursor = Pick<Transaction, 'id' | 'expiresAt'>;
@@ -55,7 +60,7 @@ export class DealExpiryService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return 0;
 
     this.running = true;
-    let canceled = 0;
+    let expired = 0;
 
     try {
       let batch: ExpiryCursor[];
@@ -65,7 +70,7 @@ export class DealExpiryService implements OnModuleInit, OnModuleDestroy {
         batch = await this.findExpired(now, after);
 
         for (const { id } of batch) {
-          if (await this.expire(id, now)) canceled++;
+          if (await this.expire(id, now)) expired++;
         }
 
         after = batch[batch.length - 1] ?? null;
@@ -79,29 +84,36 @@ export class DealExpiryService implements OnModuleInit, OnModuleDestroy {
       this.running = false;
     }
 
-    return canceled;
+    return expired;
   }
 
   private findExpired(
     now: Date,
     after: ExpiryCursor | null,
   ): Promise<ExpiryCursor[]> {
-    const ticking = In([...TICKING_STATUSES]);
-    const where:
-      FindOptionsWhere<Transaction> | FindOptionsWhere<Transaction>[] =
-      after?.expiresAt
-        ? [
-            {
-              status: ticking,
-              expiresAt: And(MoreThan(after.expiresAt), LessThanOrEqual(now)),
-            },
-            {
-              status: ticking,
-              expiresAt: Equal(after.expiresAt),
-              id: MoreThan(after.id),
-            },
-          ]
-        : { status: ticking, expiresAt: LessThanOrEqual(now) };
+    const where = Object.values(TransactionKind).flatMap(
+      (kind): FindOptionsWhere<Transaction>[] => {
+        const ticking = {
+          kind,
+          status: In(tickingStatuses(kind)),
+          payoutTakenAt: IsNull(),
+        };
+
+        return after?.expiresAt
+          ? [
+              {
+                ...ticking,
+                expiresAt: And(MoreThan(after.expiresAt), LessThanOrEqual(now)),
+              },
+              {
+                ...ticking,
+                expiresAt: Equal(after.expiresAt),
+                id: MoreThan(after.id),
+              },
+            ]
+          : [{ ...ticking, expiresAt: LessThanOrEqual(now) }];
+      },
+    );
 
     return this.transactions.find({
       select: { id: true, expiresAt: true },
@@ -126,10 +138,13 @@ export class DealExpiryService implements OnModuleInit, OnModuleDestroy {
           .setOnLocked('skip_locked')
           .getOne();
 
-        if (!deal) return false;
+        const toStatus =
+          deal && !deal.payoutTakenAt && expiryTarget(deal.kind, deal.status);
+
+        if (!toStatus) return false;
 
         await this.transactionService.transitionLocked(manager, deal, {
-          toStatus: TransactionStatus.Canceled,
+          toStatus,
           source: StatusEventSource.AutoTimer,
           actorUserId: null,
           reason: EXPIRED_REASON,

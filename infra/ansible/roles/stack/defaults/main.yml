@@ -12,6 +12,10 @@ stack_backend_env:
   TRUST_PROXY: "1"
   APP_URL: "https://{{ paybull_front_domain }}"
   VICTORIA_LOGS_URL: http://victoria-logs:9428
+  S3_ENDPOINT: http://minio:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: paybull
+  S3_FORCE_PATH_STYLE: 'true'
   KEY_SOURCE: env
   TRON_NETWORK: nile
   TRON_API_URL: https://nile.trongrid.io

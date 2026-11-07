@@ -35,7 +35,7 @@ export const merchantDealsCsv = (rows: MerchantDealDto[]): string =>
       row.amountCrypto,
       row.merchantCommission,
       row.merchantAmount,
-      row.requisite?.bank.name ?? '',
+      row.requisite?.bank?.name ?? row.requisite?.mobileOperator?.name ?? '',
       row.requisite?.phone ?? row.requisite?.card ?? '',
     ]),
   ]

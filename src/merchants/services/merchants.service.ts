@@ -11,12 +11,15 @@ import { AuditService } from '../../audit/services/audit.service';
 import { Merchant } from '../entities/merchant.entity';
 import { MerchantApiKey } from '../entities/merchant-api-key.entity';
 import { MerchantGroup } from '../entities/merchant-group.entity';
+import { AuthenticatedApiKey } from '../types/authenticated-api-key';
 import { MerchantChanges } from '../types/merchant-changes';
 import { MerchantListQuery } from '../types/merchant-list-query';
 import { MerchantStatus } from '../types/merchant-status.enum';
 import { MerchantTreeNode } from '../types/merchant-tree-node';
 import { MerchantCurrenciesService } from './merchant-currencies.service';
 import { MerchantGroupsService } from './merchant-groups.service';
+
+const KEY_ROTATED = 'rotated';
 
 const containsFolded = (value: string | null, term: string): boolean =>
   value !== null && value.toLowerCase().includes(term);
@@ -50,6 +53,28 @@ export class MerchantsService {
     if (ids.length === 0) return [];
 
     return this.merchants.find({ where: { id: In(ids) } });
+  }
+
+  async findIdsOfGroup(groupId: number): Promise<string[]> {
+    const rows = await this.merchants.find({
+      select: { id: true },
+      where: { groupId },
+    });
+
+    return rows.map((row) => row.id);
+  }
+
+  async groupsOf(ids: string[]): Promise<Map<string, MerchantGroup>> {
+    if (ids.length === 0) return new Map();
+
+    const rows = await this.merchants.find({
+      where: { id: In(ids) },
+      relations: { group: true },
+    });
+
+    return new Map(
+      rows.flatMap((row) => (row.group ? [[row.id, row.group]] : [])),
+    );
   }
 
   async findIdsMatching(search: string): Promise<string[]> {
@@ -95,6 +120,27 @@ export class MerchantsService {
     return this.dataSource.transaction(async (manager) => {
       await this.requireWithin(manager, merchantId);
 
+      const previous = await manager.find(MerchantApiKey, {
+        where: { merchantId, active: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      for (const row of previous) {
+        row.active = false;
+        row.revokedAt = new Date();
+        await manager.save(row);
+
+        await this.audit.record(
+          {
+            actorUserId,
+            action: 'merchant.api_key_revoked',
+            reason: KEY_ROTATED,
+            metadata: { merchantId, apiKeyId: row.id },
+          },
+          manager,
+        );
+      }
+
       const key = await manager.save(
         manager.create(MerchantApiKey, {
           merchantId,
@@ -114,6 +160,21 @@ export class MerchantsService {
 
       return key;
     });
+  }
+
+  async authenticateKey(key: string): Promise<AuthenticatedApiKey | null> {
+    const row = await this.keys.findOne({
+      where: { key, active: true },
+      relations: { merchant: true },
+    });
+
+    return row
+      ? {
+          merchantId: row.merchantId,
+          apiKeyId: row.id,
+          merchantActive: row.merchant.active,
+        }
+      : null;
   }
 
   newestActiveKey(merchantId: string): Promise<MerchantApiKey | null> {

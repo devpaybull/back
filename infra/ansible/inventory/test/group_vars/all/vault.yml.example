@@ -4,6 +4,8 @@
 # Never commit vault.yml unencrypted.
 
 vault_postgres_password: ""
+vault_s3_access_key: ""
+vault_s3_secret_key: ""
 
 vault_backend_deploy_key: |
   -----BEGIN OPENSSH PRIVATE KEY-----

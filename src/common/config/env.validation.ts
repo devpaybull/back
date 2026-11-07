@@ -190,6 +190,21 @@ export class EnvironmentVariables {
   @Max(60)
   LOGIN_LINK_TTL_MINUTES: number = 15;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEVICE_PAIRING_TTL_MINUTES: number = 10;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEVICE_HEARTBEAT_SECONDS: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEVICE_ONLINE_WINDOW_SECONDS: number = 120;
+
   @IsString()
   APP_URL: string = '';
 
@@ -223,6 +238,65 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   DEAL_TTL_MINUTES: number = DEFAULT_DEAL_TTL_MINUTES;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  TRADER_EXPORT_MAX_ROWS: number = 100000;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_PAYMENT_WINDOW_MINUTES: number = 60;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_REVIEW_MINUTES: number = 1440;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_MAX_ACTIVE_PER_TRADER: number = 3;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAYOUT_INSURANCE_HOLD_MINUTES: number = 120;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DISPUTE_FILE_MAX_BYTES: number = 52428800;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  S3_ENDPOINT: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  S3_REGION: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  S3_BUCKET: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  S3_ACCESS_KEY_ID: string;
+
+  @ToRequiredString()
+  @IsString()
+  @IsNotEmpty()
+  S3_SECRET_ACCESS_KEY: string;
+
+  @ToBoolean()
+  @IsBoolean()
+  S3_FORCE_PATH_STYLE: boolean = true;
 
   @Type(() => Number)
   @IsInt()
@@ -336,6 +410,21 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   AUDIT_RETENTION_DAYS: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_REQUEST_RETENTION_DAYS: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  SELECTION_ATTEMPTS_RETENTION_DAYS: number = 30;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  MERCHANT_REQUEST_LOG_MAX_BYTES: number = 65536;
 
   @Type(() => Number)
   @IsInt()

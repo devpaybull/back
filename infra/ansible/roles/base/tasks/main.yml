@@ -76,6 +76,9 @@
       [sshd]
       enabled = true
       backend = systemd
+      maxretry = 10
+      findtime = 10m
+      bantime = 10m
     mode: "0644"
   notify: Restart fail2ban
 

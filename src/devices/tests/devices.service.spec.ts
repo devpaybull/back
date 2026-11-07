@@ -1,13 +1,16 @@
 import { NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { IsNull } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { ActivityAction } from '../../audit/types/activity-action.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { DevicesService } from '../devices.service';
+import { DeviceCredential } from '../entities/device-credential.entity';
+import { DevicePairing } from '../entities/device-pairing.entity';
 import { Device } from '../entities/device.entity';
-import { DeviceModel } from '../types/device-model.enum';
 import { DeviceSortField } from '../types/device-sort-field';
 import { DeviceStatus } from '../types/device-status.enum';
 
@@ -18,8 +21,15 @@ describe('DevicesService', () => {
   let stored: Device[];
   let service: DevicesService;
 
+  const companions = {
+    update: jest.fn(async () => ({ affected: 0 })),
+    delete: jest.fn(async () => ({ affected: 0 })),
+  };
+
   const manager = {
-    getRepository: jest.fn(() => devices),
+    getRepository: jest.fn((entity: unknown) =>
+      entity === Device ? devices : companions,
+    ),
     transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => {
       const snapshot = stored.map((row) => ({ ...row }));
 
@@ -90,13 +100,16 @@ describe('DevicesService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    stored = [device({ model: DeviceModel.Android })];
+    stored = [device({ model: 'Google Pixel 7' })];
     audit.record.mockResolvedValue(undefined);
 
     const module = await Test.createTestingModule({
       providers: [
         DevicesService,
         { provide: getRepositoryToken(Device), useValue: devices },
+        { provide: getRepositoryToken(DevicePairing), useValue: companions },
+        { provide: getRepositoryToken(DeviceCredential), useValue: companions },
+        { provide: ConfigService, useValue: { get: jest.fn(() => 120) } },
         { provide: AuditService, useValue: audit },
       ],
     }).compile();
@@ -194,10 +207,23 @@ describe('DevicesService', () => {
           impersonatorUserId: null,
           targetUserId: owner,
           action: ActivityAction.DeviceDeleted,
-          metadata: { id: 100, name: 'Pixel 7', model: DeviceModel.Android },
+          metadata: { id: 100, name: 'Pixel 7', model: 'Google Pixel 7' },
         },
         manager,
       );
+    });
+
+    it('revokes the device tokens and voids the open QR code of a deleted device', async () => {
+      await service.delete(100, owner, manager as never);
+
+      expect(companions.update).toHaveBeenCalledWith(
+        { deviceId: 100, revokedAt: IsNull() },
+        { revokedAt: expect.any(Date) },
+      );
+      expect(companions.delete).toHaveBeenCalledWith({
+        deviceId: 100,
+        usedAt: IsNull(),
+      });
     });
 
     it('answers 404 and writes nothing for a device nobody holds', async () => {

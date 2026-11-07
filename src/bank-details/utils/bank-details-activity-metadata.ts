@@ -8,6 +8,8 @@ export const bankDetailsActivityMetadata = (
   card: details.card ?? null,
   phone: details.phone ?? null,
   cardholderName: details.cardholderName ?? null,
-  bankId: details.bankId,
+  bankId: details.bankId ?? null,
   bankName: details.bank?.name ?? null,
+  mobileOperatorId: details.mobileOperatorId ?? null,
+  mobileOperatorName: details.mobileOperator?.name ?? null,
 });

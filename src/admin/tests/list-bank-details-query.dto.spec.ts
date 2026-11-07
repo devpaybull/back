@@ -2,7 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { BankDetailsSortField } from '../../bank-details/types/bank-details-sort-field';
 import { SortOrder } from '../../common/enums/sort-order.enum';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { ListBankDetailsQueryDto } from '../dto/list-bank-details-query.dto';
 
@@ -33,7 +33,7 @@ describe('ListBankDetailsQueryDto', () => {
     expect(failedProperties({ userId: '7' })).toEqual(['userId']);
   });
 
-  it.each(Object.values(TransactionType))('filters by the type %s', (type) => {
+  it.each(Object.values(BankDetailsType))('filters by the type %s', (type) => {
     expect(failedProperties({ type })).toEqual([]);
   });
 

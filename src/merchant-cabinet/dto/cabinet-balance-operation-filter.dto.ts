@@ -10,7 +10,7 @@ import {
 import { IsDateFilter } from '../../common/decorators/is-date-filter.decorator';
 import { toQueryList } from '../../common/utils/to-query-list';
 import { MerchantBalanceOperationType } from '../../transactions/types/merchant-balance-operation-type.enum';
-import { DEAL_SEARCH_MIN_LENGTH } from '../utils/deal-search-min-length';
+import { DEAL_SEARCH_MIN_LENGTH } from '../../common/utils/deal-search-min-length';
 
 export class CabinetBalanceOperationFilterDto {
   @ApiPropertyOptional({

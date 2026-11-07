@@ -13,6 +13,7 @@ describe('UpdateBankDetailsDto, the amount limits', () => {
     'maxAmount',
     'dailyAmountLimit',
     'monthlyAmountLimit',
+    'hourlyAmountLimit',
   ];
 
   it.each(amounts)('takes %s as a fiat string with kopecks', (field) => {
@@ -34,4 +35,34 @@ describe('UpdateBankDetailsDto, the amount limits', () => {
       expect(failedProperties({ [field]: null })).toEqual([]);
     },
   );
+});
+
+describe('UpdateBankDetailsDto, the trader-cabinet fields', () => {
+  it('refuses to switch the daily turnover limit off', () => {
+    expect(failedProperties({ dailyAmountLimitEnabled: false })).toEqual([
+      'dailyAmountLimitEnabled',
+    ]);
+    expect(failedProperties({ dailyAmountLimitEnabled: true })).toEqual([]);
+  });
+
+  it('takes a delay only from the set', () => {
+    expect(failedProperties({ delayBetweenRequests: 1800 })).toEqual([]);
+    expect(failedProperties({ delayBetweenRequests: 120 })).toEqual([
+      'delayBetweenRequests',
+    ]);
+  });
+
+  it('takes an empty tag list, which clears the tags', () => {
+    expect(failedProperties({ tagIds: [] })).toEqual([]);
+  });
+
+  it('takes the slots, the same-bank flag and the hourly switch', () => {
+    expect(
+      failedProperties({
+        maxCounterparties: 5,
+        sameBankOnly: true,
+        hourlyAmountLimitEnabled: true,
+      }),
+    ).toEqual([]);
+  });
 });

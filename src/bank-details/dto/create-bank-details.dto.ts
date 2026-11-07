@@ -1,17 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
+  IsIn,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { IsFiatAmount } from '../../common/decorators/is-fiat-amount.decorator';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { INT4_MAX } from '../../common/utils/int4-max';
+import { DELAY_BETWEEN_REQUESTS_SECONDS } from '../utils/delay-between-requests-seconds';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 
 const MAX_CARDHOLDER_NAME_LENGTH = 100;
 const MAX_CARD_LENGTH = 32;
@@ -21,25 +27,40 @@ const trimmed = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 export class CreateBankDetailsDto {
-  @ApiProperty({ example: 1 })
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  bankId: number;
-
   @ApiPropertyOptional({
     example: 1,
-    description: 'A device the signed-in account owns; optional',
+    description:
+      'Required for a card_or_sbp requisite, refused on a mobile one',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  deviceId?: number;
+  bankId?: number;
 
-  @ApiProperty({ enum: TransactionType, example: TransactionType.Card })
-  @IsEnum(TransactionType)
-  type: TransactionType;
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Required for a mobile requisite, refused on any other',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  mobileOperatorId?: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'A device the signed-in account owns; required',
+  })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(INT4_MAX)
+  deviceId: number;
+
+  @ApiProperty({ enum: BankDetailsType, example: BankDetailsType.CardOrSbp })
+  @IsEnum(BankDetailsType)
+  type: BankDetailsType;
 
   @ApiPropertyOptional({
     example: 'IVAN IVANOV',
@@ -143,21 +164,41 @@ export class CreateBankDetailsDto {
   monthlyLimit?: number;
 
   @ApiPropertyOptional({
+    enum: [true],
+    default: true,
+    description:
+      'The daily turnover limit is mandatory and cannot be switched off; false is a 400',
+  })
+  @IsOptional()
+  @IsIn([true], { message: 'dailyAmountLimitEnabled cannot be switched off' })
+  dailyAmountLimitEnabled?: boolean;
+
+  @ApiProperty({
+    type: String,
+    example: '300000.00',
+    description: 'Turnover a day (fiat); required',
+  })
+  @IsFiatAmount()
+  dailyAmountLimit: string;
+
+  @ApiPropertyOptional({
     default: false,
-    description: 'Caps the turnover these details may take in a day',
+    description:
+      'Caps the turnover of the last 60 minutes, successful and open deals together',
   })
   @IsOptional()
   @IsBoolean()
-  dailyAmountLimitEnabled?: boolean;
+  hourlyAmountLimitEnabled?: boolean;
 
   @ApiPropertyOptional({
     type: String,
-    example: '300000.00',
-    description: 'Turnover a day; null unless dailyAmountLimitEnabled is true',
+    example: '50000.00',
+    description:
+      'Turnover a rolling hour; null unless hourlyAmountLimitEnabled is true',
   })
   @IsOptional()
   @IsFiatAmount()
-  dailyAmountLimit?: string;
+  hourlyAmountLimit?: string;
 
   @ApiPropertyOptional({
     default: false,
@@ -204,13 +245,14 @@ export class CreateBankDetailsDto {
   delayBetweenRequestsEnabled?: boolean;
 
   @ApiPropertyOptional({
+    enum: DELAY_BETWEEN_REQUESTS_SECONDS,
     example: 300,
-    description: 'Seconds; null unless delayBetweenRequestsEnabled is true',
+    description:
+      'Seconds, one of 5, 30, 60, 300, 900, 1800, 3600, 10800; null unless delayBetweenRequestsEnabled is true',
   })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(0)
+  @IsIn(DELAY_BETWEEN_REQUESTS_SECONDS)
   delayBetweenRequests?: number;
 
   @ApiPropertyOptional({
@@ -220,6 +262,41 @@ export class CreateBankDetailsDto {
   @IsOptional()
   @IsBoolean()
   counterpartyOnly?: boolean;
+
+  @ApiPropertyOptional({
+    example: 8,
+    minimum: 1,
+    description:
+      'Counterparty slots: required while counterpartyOnly is set, refused (400) otherwise',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(INT4_MAX)
+  maxCounterparties?: number;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Takes only deals whose payer bank is the bank of this requisite',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sameBankOnly?: boolean;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    description:
+      'Tags of the signed-in account; another account’s tag is a 404',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(INT4_MAX, { each: true })
+  tagIds?: number[];
 
   @ApiPropertyOptional({
     default: false,

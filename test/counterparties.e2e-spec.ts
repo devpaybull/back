@@ -10,6 +10,7 @@ import { TransactionService } from '../src/transactions/services/transaction.ser
 import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
 import { E2eContext, E2eUser, startE2e } from './support/e2e-app';
 import { bearer } from './support/flow';
+import { deviceOf } from './support/device-of';
 
 describe('the counterparties page', () => {
   let e2e: E2eContext;
@@ -17,6 +18,7 @@ describe('the counterparties page', () => {
   let trader: E2eUser;
   let merchantId: string;
   let bankId: number;
+  let deviceId: number;
   let sbpRequisite: string;
   let cardRequisite: string;
   let plainRequisite: string;
@@ -44,7 +46,13 @@ describe('the counterparties page', () => {
       await e2e.http
         .post('/bank-details')
         .set(bearer(trader))
-        .send({ bankId, ...body })
+        .send({
+          bankId,
+          deviceId,
+          dailyAmountLimit: '300000.00',
+          ...(body.counterpartyOnly ? { maxCounterparties: 8 } : {}),
+          ...body,
+        })
         .expect(201)
     ).body.data.id as string;
 
@@ -82,6 +90,7 @@ describe('the counterparties page', () => {
     e2e = await startE2e();
     admin = await e2e.createUser(Role.Admin);
     trader = await e2e.createUser(Role.Trader);
+    deviceId = await deviceOf(e2e, trader);
     merchantId = (await e2e.app.get(MerchantsService).create('Мерчант A7')).id;
 
     const country = await e2e.http
@@ -109,17 +118,20 @@ describe('the counterparties page', () => {
     ).body.data.id;
 
     sbpRequisite = await requisite({
-      type: 'sbp',
+      type: 'card_or_sbp',
       phone: '+79012345678',
       cardholderName: 'Шевченко Д.',
       counterpartyOnly: true,
     });
     cardRequisite = await requisite({
-      type: 'card',
+      type: 'card_or_sbp',
       card: '4276000033335654',
       counterpartyOnly: true,
     });
-    plainRequisite = await requisite({ type: 'sbp', phone: '+79010000000' });
+    plainRequisite = await requisite({
+      type: 'card_or_sbp',
+      phone: '+79010000000',
+    });
 
     await e2e.dataSource
       .getRepository(Wallet)
@@ -441,14 +453,14 @@ describe('the counterparties page', () => {
     expect(offered.data.map((row: { id: string }) => row.id)).toEqual([]);
 
     const another = await requisite({
-      type: 'sbp',
+      type: 'card_or_sbp',
       phone: '+79015550000',
       cardholderName: 'Сергеев С.',
       counterpartyOnly: true,
     });
     const found = (
       await e2e.http
-        .get('/admin/counterparty-requisites?search=Сергеев&type=sbp')
+        .get('/admin/counterparty-requisites?search=Сергеев&type=card_or_sbp')
         .set(bearer(admin))
         .expect(200)
     ).body.data;

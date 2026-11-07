@@ -14,6 +14,7 @@ describe('toBankDetailsDto, the amounts', () => {
       { id: 'bd-1', counterpartyOnly: true, minAmount: null } as BankDetails,
       toFiat('5000.5'),
       turnover,
+      0,
     );
 
     expect(dto.minAmountEnabled).toBe(true);
@@ -30,8 +31,10 @@ describe('toBankDetailsDto, the amounts', () => {
       } as BankDetails,
       toFiat(5000),
       turnover,
+      3,
     );
 
+    expect(dto.boundCounterparties).toBe(3);
     expect(dto.maxAmount).toBe('100000.00');
     expect(dto.turnoverTotal).toBe('1500.50');
     expect(dto.turnoverToday).toBe('0.00');

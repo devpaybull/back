@@ -1,3 +1,4 @@
+import { FileStorage } from '../../file-storage/types/file-storage';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -37,6 +38,8 @@ describe('the debts module graph', () => {
         DebtsModule,
       ],
     })
+      .overrideProvider(FileStorage)
+      .useValue({})
       .overrideProvider(ConfigService)
       .useValue({
         get: jest.fn((key: string) => (key === 'VICTORIA_LOGS_URL' ? '' : 60)),

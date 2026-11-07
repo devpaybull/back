@@ -74,6 +74,10 @@ export class BanksService {
     return this.banks.findOne({ where: { id }, relations: RELATIONS });
   }
 
+  findActiveByCode(code: string): Promise<Bank | null> {
+    return this.banks.findOne({ where: { code, active: true } });
+  }
+
   async findByIds(ids: number[]): Promise<Bank[]> {
     if (ids.length === 0) return [];
 

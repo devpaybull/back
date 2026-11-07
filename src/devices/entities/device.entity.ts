@@ -11,8 +11,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { DeviceModel } from '../types/device-model.enum';
 import { DeviceStatus } from '../types/device-status.enum';
+import { DeviceType } from '../types/device-type.enum';
 
 @Entity('devices')
 export class Device {
@@ -38,17 +38,23 @@ export class Device {
   @Column({ type: 'enum', enum: DeviceStatus, default: DeviceStatus.Off })
   status: DeviceStatus;
 
-  @Column({ type: 'enum', enum: DeviceModel, nullable: true })
-  model: DeviceModel;
+  @Column({ type: 'enum', enum: DeviceType, default: DeviceType.Android })
+  type: DeviceType;
 
   @Column({ nullable: true })
-  type: string;
+  model: string;
 
   @Column({ nullable: true })
   phone: string;
 
   @Column({ type: 'timestamptz', nullable: true })
   lastActivity: Date;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  activatedAt: Date;
+
+  @Column({ nullable: true })
+  appVersion: string;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

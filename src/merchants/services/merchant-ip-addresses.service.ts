@@ -5,69 +5,27 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { isIP } from 'node:net';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
-import { maskIp } from '../../common/utils/mask-ip';
+import { canonicalIp } from '../../common/utils/canonical-ip';
 import { MerchantIpAddress } from '../entities/merchant-ip-address.entity';
 import { MerchantSettings } from '../entities/merchant-settings.entity';
 import { Merchant } from '../entities/merchant.entity';
 
 const MERCHANT_IP_ADDRESSES_MAX = 50;
 
-const IPV6_GROUPS = 8;
-const IPV4_MAPPED_PREFIX = ['0', '0', '0', '0', '0', 'ffff'];
-const DOTTED_TAIL = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/;
-
-const hexPair = (high: string, low: string): string =>
-  ((Number(high) << 8) | Number(low)).toString(16);
-
-const normalizeIpv6 = (value: string): string => {
-  const dotted = value.match(DOTTED_TAIL);
-  const text = dotted
-    ? `${value.slice(0, -dotted[0].length)}${hexPair(dotted[1], dotted[2])}:${hexPair(dotted[3], dotted[4])}`
-    : value;
-  const [head, tail] = text.includes('::') ? text.split('::') : [text];
-  const left = head ? head.split(':') : [];
-  const right = tail ? tail.split(':') : [];
-  const groups =
-    tail === undefined
-      ? left
-      : [
-          ...left,
-          ...Array<string>(IPV6_GROUPS - left.length - right.length).fill('0'),
-          ...right,
-        ];
-
-  const normalized = groups.map((group) => parseInt(group, 16).toString(16));
-  const mapped = IPV4_MAPPED_PREFIX.every(
-    (group, index) => normalized[index] === group,
-  );
-
-  if (!mapped) return normalized.join(':');
-
-  const [high, low] = normalized
-    .slice(IPV4_MAPPED_PREFIX.length)
-    .map((group) => parseInt(group, 16));
-
-  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
-};
-
 const normalizeIp = (raw: string): string => {
-  const value = raw.trim().toLowerCase();
-
-  if (value.includes('%')) {
+  if (raw.includes('%')) {
     throw new BadRequestException('An IP address with a zone is not accepted');
   }
 
-  switch (isIP(value)) {
-    case 4:
-      return value;
-    case 6:
-      return normalizeIpv6(value);
-    default:
-      throw new BadRequestException(`${raw} is not an IP address`);
+  const ip = canonicalIp(raw);
+
+  if (ip === null) {
+    throw new BadRequestException(`${raw} is not an IP address`);
   }
+
+  return ip;
 };
 
 @Injectable()
@@ -85,6 +43,27 @@ export class MerchantIpAddressesService {
       where: { merchantId },
       order: { id: 'ASC' },
     });
+  }
+
+  async admits(
+    merchantId: string,
+    rawIp: string | undefined,
+  ): Promise<boolean> {
+    const settings = await this.dataSource.manager.findOne(MerchantSettings, {
+      where: { merchantId },
+    });
+
+    if (!settings?.ipCheckEnabled) return true;
+
+    let ip: string;
+
+    try {
+      ip = normalizeIp(rawIp ?? '');
+    } catch {
+      return false;
+    }
+
+    return (await this.addresses.count({ where: { merchantId, ip } })) > 0;
   }
 
   async add(
@@ -123,7 +102,7 @@ export class MerchantIpAddressesService {
         {
           actorUserId,
           action: 'merchant.ip_added',
-          metadata: { merchantId, ipAddressId: saved.id, ip: maskIp(ip) },
+          metadata: { merchantId, ipAddressId: saved.id, ip },
         },
         manager,
       );
@@ -171,7 +150,7 @@ export class MerchantIpAddressesService {
           metadata: {
             merchantId,
             ipAddressId: row.id,
-            ip: maskIp(row.ip),
+            ip: row.ip,
           },
         },
         manager,

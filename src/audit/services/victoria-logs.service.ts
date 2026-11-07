@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { AuditLog } from '../entities/audit-log.entity';
+import { ArchiveLine } from '../types/archive-line';
 import { AuditRecord } from '../types/audit-record';
 import { AuditSource } from '../types/audit-source.enum';
 import { VictoriaAuditQuery } from '../types/victoria-audit-query';
@@ -40,14 +41,23 @@ export class VictoriaLogsService {
 
   async insert(rows: AuditLog[]): Promise<void> {
     const installationId = await this.installation.installationId();
+
+    await this.send(rows.map((row) => toLine(row, installationId)));
+  }
+
+  async insertLines(lines: ArchiveLine[]): Promise<void> {
+    const installationId = await this.installation.installationId();
+
+    await this.send(lines.map((line) => ({ ...line, installationId })));
+  }
+
+  private async send(lines: Record<string, unknown>[]): Promise<void> {
     const params = new URLSearchParams({
       _stream_fields: 'source,installationId',
       _time_field: 'createdAt',
       _msg_field: 'message',
     });
-    const body = rows
-      .map((row) => JSON.stringify(toLine(row, installationId)))
-      .join('\n');
+    const body = lines.map((line) => JSON.stringify(line)).join('\n');
 
     await this.request(`/insert/jsonline?${params.toString()}`, {
       headers: { 'Content-Type': 'application/stream+json' },
@@ -117,6 +127,9 @@ const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
     ),
     ...(query.action === undefined && query.actions
       ? [toActionsFilter(query.actions)]
+      : []),
+    ...(query.createdAfter
+      ? [`_time:>${query.createdAfter.toISOString()}`]
       : []),
   ].join(' ');
 

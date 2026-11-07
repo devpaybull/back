@@ -241,7 +241,15 @@ export class MerchantDealsController {
         merchantCommission: formatCrypto(row.merchantCommission),
         requisite: requisite
           ? {
-              bank: { id: requisite.bank.id, name: requisite.bank.name },
+              bank: requisite.bank
+                ? { id: requisite.bank.id, name: requisite.bank.name }
+                : null,
+              mobileOperator: requisite.mobileOperator
+                ? {
+                    id: requisite.mobileOperator.id,
+                    name: requisite.mobileOperator.name,
+                  }
+                : null,
               type: requisite.type,
               cardholderName: requisite.cardholderName ?? null,
               phone: requisite.phone ?? null,

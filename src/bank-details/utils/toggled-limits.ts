@@ -37,8 +37,15 @@ export const toggledLimits = (
   );
 
   const [dailyAmountLimitEnabled, dailyAmountLimit] = settled(
-    changes.dailyAmountLimitEnabled ?? current.dailyAmountLimitEnabled ?? false,
+    true,
     changes.dailyAmountLimit ?? current.dailyAmountLimit,
+  );
+
+  const [hourlyAmountLimitEnabled, hourlyAmountLimit] = settled(
+    changes.hourlyAmountLimitEnabled ??
+      current.hourlyAmountLimitEnabled ??
+      false,
+    changes.hourlyAmountLimit ?? current.hourlyAmountLimit,
   );
 
   const [monthlyAmountLimitEnabled, monthlyAmountLimit] = settled(
@@ -75,6 +82,8 @@ export const toggledLimits = (
     dailyAmountLimit,
     monthlyAmountLimitEnabled,
     monthlyAmountLimit,
+    hourlyAmountLimitEnabled,
+    hourlyAmountLimit,
     maxActiveTransactionsEnabled,
     maxActiveTransactions,
     delayBetweenRequestsEnabled,

@@ -10,6 +10,7 @@ import { EntityManager, In, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { Page, toPage } from '../../common/types/page';
 import { calendarDateIn } from '../../common/utils/calendar-date-in';
+import { INT4_MAX } from '../../common/utils/int4-max';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { toFiat } from '../../common/utils/to-fiat';
 import { CounterpartyDailyVolume } from '../entities/counterparty-daily-volume.entity';
@@ -55,6 +56,19 @@ export class CounterpartiesService {
     if (ids.length === 0) return [];
 
     return this.counterparties.find({ where: { id: In(ids) } });
+  }
+
+  async findIdsByReference(reference: string): Promise<number[]> {
+    const id = /^[1-9]\d*$/.test(reference) ? Number(reference) : null;
+    const rows = await this.counterparties.find({
+      select: { id: true },
+      where: [
+        { externalId: reference },
+        ...(id !== null && id <= INT4_MAX ? [{ id }] : []),
+      ],
+    });
+
+    return rows.map((row) => row.id);
   }
 
   async list(
@@ -227,7 +241,7 @@ export class CounterpartiesService {
     counterpartyId: number,
     requisite: BindableRequisite,
     bindingType: CounterpartyBindingType,
-    actorUserId: string,
+    actorUserId: string | null,
   ): Promise<Counterparty> {
     const counterparty = await this.lockWithin(manager, counterpartyId);
 
@@ -237,6 +251,7 @@ export class CounterpartiesService {
       );
     }
     this.assertBindable(requisite, bindingType);
+    await this.assertSlotFree(manager, requisite);
 
     counterparty.bankDetailsId = requisite.id;
     counterparty.bindingType = bindingType;
@@ -248,8 +263,10 @@ export class CounterpartiesService {
       counterpartyId,
       bankDetailsId: requisite.id,
       kind: RequisiteEventKind.Bound,
-      source: RequisiteEventSource.Manual,
-      reason: null,
+      source: actorUserId
+        ? RequisiteEventSource.Manual
+        : RequisiteEventSource.System,
+      reason: actorUserId ? null : RequisiteEventReason.DealIssued,
       actorUserId,
     });
     await this.audit.record(
@@ -288,6 +305,7 @@ export class CounterpartiesService {
       throw new ConflictException('This requisite is already bound');
     }
     this.assertBindable(requisite, counterparty.bindingType);
+    await this.assertSlotFree(manager, requisite);
 
     counterparty.bankDetailsId = requisite.id;
     counterparty.boundAt = new Date();
@@ -389,6 +407,28 @@ export class CounterpartiesService {
     }
   }
 
+  async countBoundByRequisites(
+    bankDetailsIds: readonly string[],
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>(bankDetailsIds.map((id) => [id, 0]));
+
+    if (bankDetailsIds.length === 0) return counts;
+
+    const rows = await this.counterparties
+      .createQueryBuilder('counterparty')
+      .select('counterparty.bankDetailsId', 'bankDetailsId')
+      .addSelect('COUNT(*)', 'bound')
+      .where('counterparty.bankDetailsId IN (:...ids)', {
+        ids: [...bankDetailsIds],
+      })
+      .groupBy('counterparty.bankDetailsId')
+      .getRawMany<{ bankDetailsId: string; bound: string }>();
+
+    rows.forEach((row) => counts.set(row.bankDetailsId, Number(row.bound)));
+
+    return counts;
+  }
+
   async listRequisiteEvents(
     counterpartyId: number,
     query: RequisiteEventListQuery,
@@ -416,15 +456,22 @@ export class CounterpartiesService {
     });
     if (existing) return existing;
 
-    return this.counterparties.save(
-      this.counterparties.create({
+    await this.counterparties
+      .createQueryBuilder()
+      .insert()
+      .values({
         merchantId,
         externalId,
         name: data.name ?? null,
         contact: data.contact ?? null,
         payload: data.payload ?? null,
-      }),
-    );
+      })
+      .orIgnore()
+      .execute();
+
+    return this.counterparties.findOneOrFail({
+      where: { merchantId, externalId },
+    });
   }
 
   private today(now: Date): string {
@@ -454,9 +501,26 @@ export class CounterpartiesService {
         'Only a counterparty-only requisite can be bound to a counterparty',
       );
     }
-    if (!bindingTypeAllows(bindingType, requisite.type)) {
+    if (!bindingTypeAllows(bindingType, requisite)) {
       throw new BadRequestException(
-        `A ${requisite.type} requisite does not fit the binding type ${bindingType}`,
+        `The requisite carries nothing the binding type ${bindingType} serves`,
+      );
+    }
+  }
+
+  private async assertSlotFree(
+    manager: EntityManager,
+    requisite: BindableRequisite,
+  ): Promise<void> {
+    if (requisite.maxCounterparties === null) return;
+
+    const bound = await manager.count(Counterparty, {
+      where: { bankDetailsId: requisite.id },
+    });
+
+    if (bound >= requisite.maxCounterparties) {
+      throw new ConflictException(
+        `The requisite already holds its ${requisite.maxCounterparties} counterparties`,
       );
     }
   }

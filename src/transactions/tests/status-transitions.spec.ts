@@ -1,10 +1,14 @@
+import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import {
   canTransition,
+  expiryTarget,
   FINAL_STATUSES,
   isFinalStatus,
   startStatus,
+  TICKING_STATUSES,
+  tickingStatuses,
 } from '../utils/status-transitions';
 
 describe('status transitions', () => {
@@ -79,6 +83,90 @@ describe('status transitions', () => {
       ).toBe(false);
     });
 
+    it.each([
+      TransactionStatus.Active,
+      TransactionStatus.Checking,
+      TransactionStatus.CheckingManually,
+    ])('lets only the trader close %s as success_changed', (from) => {
+      expect(
+        canTransition(
+          TransactionKind.PayIn,
+          from,
+          TransactionStatus.SuccessChanged,
+          StatusEventSource.Trader,
+        ),
+      ).toBe(true);
+      for (const source of [
+        StatusEventSource.Admin,
+        StatusEventSource.Merchant,
+        StatusEventSource.AutoTimer,
+        StatusEventSource.System,
+      ]) {
+        expect(
+          canTransition(
+            TransactionKind.PayIn,
+            from,
+            TransactionStatus.SuccessChanged,
+            source,
+          ),
+        ).toBe(false);
+      }
+    });
+
+    it('lets only the trader send a pay-out on review; review ends in success or a dispute', () => {
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Active,
+          TransactionStatus.Checking,
+          StatusEventSource.Trader,
+        ),
+      ).toBe(true);
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Active,
+          TransactionStatus.Checking,
+          StatusEventSource.Admin,
+        ),
+      ).toBe(false);
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Checking,
+          TransactionStatus.Success,
+        ),
+      ).toBe(true);
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Checking,
+          TransactionStatus.Dispute,
+        ),
+      ).toBe(true);
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Checking,
+          TransactionStatus.Canceled,
+        ),
+      ).toBe(false);
+      expect(
+        expiryTarget(TransactionKind.PayOut, TransactionStatus.Checking),
+      ).toBeUndefined();
+    });
+
+    it('gives the trader no such edge on a pay-out', () => {
+      expect(
+        canTransition(
+          TransactionKind.PayOut,
+          TransactionStatus.Active,
+          TransactionStatus.SuccessChanged,
+          StatusEventSource.Trader,
+        ),
+      ).toBe(false);
+    });
+
     it('has no outgoing edge from a final status', () => {
       expect(
         canTransition(
@@ -109,6 +197,60 @@ describe('status transitions', () => {
           TransactionStatus.Checking,
         ),
       ).toBe(false);
+    });
+  });
+
+  describe('the expiry table', () => {
+    it.each([
+      [
+        TransactionKind.PayIn,
+        TransactionStatus.Active,
+        TransactionStatus.Canceled,
+      ],
+      [
+        TransactionKind.PayIn,
+        TransactionStatus.Checking,
+        TransactionStatus.CheckingManually,
+      ],
+      [
+        TransactionKind.PayOut,
+        TransactionStatus.Pending,
+        TransactionStatus.Canceled,
+      ],
+      [
+        TransactionKind.PayOut,
+        TransactionStatus.Active,
+        TransactionStatus.Canceled,
+      ],
+    ])(
+      'expires a %s in %s to %s, along a legal transition',
+      (kind, from, to) => {
+        expect(expiryTarget(kind, from)).toBe(to);
+        expect(canTransition(kind, from, to)).toBe(true);
+      },
+    );
+
+    it.each([
+      [TransactionKind.PayIn, TransactionStatus.CheckingManually],
+      [TransactionKind.PayIn, TransactionStatus.Dispute],
+      [TransactionKind.PayIn, TransactionStatus.ManualReview],
+      [TransactionKind.PayIn, TransactionStatus.Success],
+      [TransactionKind.PayOut, TransactionStatus.Checking],
+      [TransactionKind.PayOut, TransactionStatus.Dispute],
+      [TransactionKind.PayOut, TransactionStatus.Canceled],
+    ])('does not tick a %s in %s', (kind, status) => {
+      expect(expiryTarget(kind, status)).toBeUndefined();
+      expect(tickingStatuses(kind)).not.toContain(status);
+    });
+
+    it('lists every status that ticks for some kind once', () => {
+      expect([...TICKING_STATUSES].sort()).toEqual(
+        [
+          TransactionStatus.Active,
+          TransactionStatus.Checking,
+          TransactionStatus.Pending,
+        ].sort(),
+      );
     });
   });
 });

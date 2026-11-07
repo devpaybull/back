@@ -23,6 +23,7 @@ paybull_front_node_image: node:22-bookworm-slim
 
 paybull_postgres_image: postgres:16-alpine
 paybull_victoria_logs_image: victoriametrics/victoria-logs:v1.53.0
+paybull_minio_image: ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
 paybull_caddy_image: caddy:2.10
 
 paybull_backend_env:

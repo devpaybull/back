@@ -6,6 +6,8 @@
          | combine(paybull_backend_env, paybull_backend_optional_env,
                    vault_backend_env, vault_backend_optional_env)
          | combine({'DB_PASSWORD': vault_postgres_password,
+                    'S3_ACCESS_KEY_ID': vault_s3_access_key,
+                    'S3_SECRET_ACCESS_KEY': vault_s3_secret_key,
                     'SEED_PASSWORD': vault_seed_password,
                     'SEED_TOTP_SECRET': vault_seed_totp_secret}) }}
   no_log: true

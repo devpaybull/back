@@ -14,4 +14,5 @@ export interface AuditListQuery {
   actions?: readonly string[];
   source?: AuditSource;
   statusCode?: number;
+  createdAfter?: Date;
 }

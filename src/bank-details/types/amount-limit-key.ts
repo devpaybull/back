@@ -1,2 +1,6 @@
 export type AmountLimitKey =
-  'minAmount' | 'maxAmount' | 'dailyAmountLimit' | 'monthlyAmountLimit';
+  | 'minAmount'
+  | 'maxAmount'
+  | 'dailyAmountLimit'
+  | 'monthlyAmountLimit'
+  | 'hourlyAmountLimit';

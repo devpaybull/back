@@ -31,6 +31,18 @@ export class UpdateTraderSettingsDto {
   @IsBoolean()
   autoBuybackEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    description:
+      'How many pay-outs this trader may hold in work; null is PAYOUT_MAX_ACTIVE_PER_TRADER. Needs a reason',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  maxActivePayouts?: number | null;
+
   @ApiPropertyOptional({ minimum: 1 })
   @IsOptional()
   @IsInt()

@@ -156,6 +156,7 @@ describe('MerchantDealsController', () => {
       merchantCommission: '0.389245',
       requisite: {
         bank: { id: 4, name: 'Т-банк' },
+        mobileOperator: null,
         type: 'phone',
         cardholderName: 'Шевченко Д.',
         phone: '+79012345678',

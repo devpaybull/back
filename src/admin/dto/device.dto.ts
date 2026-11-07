@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Device } from '../../devices/entities/device.entity';
-import { DeviceModel } from '../../devices/types/device-model.enum';
 import { DeviceStatus } from '../../devices/types/device-status.enum';
+import { DeviceType } from '../../devices/types/device-type.enum';
 import { InviteAccountDto, toInviteAccountDto } from './invite-account.dto';
 
 export class DeviceDto {
@@ -23,17 +23,23 @@ export class DeviceDto {
   @ApiProperty({ enum: DeviceStatus })
   status: DeviceStatus;
 
-  @ApiPropertyOptional({ enum: DeviceModel, nullable: true })
-  model: DeviceModel;
+  @ApiProperty({ enum: DeviceType })
+  type: DeviceType;
 
   @ApiPropertyOptional({ nullable: true })
-  type: string;
+  model: string;
 
   @ApiPropertyOptional({ nullable: true })
   phone: string;
 
   @ApiPropertyOptional({ nullable: true })
   lastActivity: Date;
+
+  @ApiPropertyOptional({ nullable: true })
+  activatedAt: Date;
+
+  @ApiPropertyOptional({ nullable: true })
+  appVersion: string;
 
   @ApiProperty()
   createdAt: Date;
@@ -47,8 +53,10 @@ export const toDeviceDto = (device: Device): DeviceDto => ({
   name: device.name,
   status: device.status,
   model: device.model ?? null,
-  type: device.type ?? null,
+  type: device.type,
   phone: device.phone ?? null,
   lastActivity: device.lastActivity ?? null,
+  activatedAt: device.activatedAt ?? null,
+  appVersion: device.appVersion ?? null,
   createdAt: device.createdAt,
 });

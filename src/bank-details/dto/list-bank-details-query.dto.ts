@@ -1,8 +1,17 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  Max,
+  Min,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { INT4_MAX } from '../../common/utils/int4-max';
+import { BankDetailsStatus } from '../types/bank-details-status.enum';
+import { BankDetailsType } from '../types/bank-details-type.enum';
 import { BankDetailsSortField } from '../types/bank-details-sort-field';
 
 const asBoolean = ({ value }: { value: unknown }): unknown => {
@@ -20,16 +29,33 @@ export class ListBankDetailsQueryDto extends PaginationQueryDto {
   @Min(1)
   bankId?: number;
 
-  @ApiPropertyOptional({ enum: TransactionType })
+  @ApiPropertyOptional({ enum: BankDetailsType })
   @IsOptional()
-  @IsEnum(TransactionType)
-  type?: TransactionType;
+  @IsEnum(BankDetailsType)
+  type?: BankDetailsType;
 
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(asBoolean)
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({
+    enum: BankDetailsStatus,
+    description:
+      'active = switched on and not banned, disabled = switched off and not banned, banned = banned by an administrator',
+  })
+  @IsOptional()
+  @IsEnum(BankDetailsStatus)
+  status?: BankDetailsStatus;
+
+  @ApiPropertyOptional({ example: 1, description: 'One of the caller’s tags' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(INT4_MAX)
+  tagId?: number;
 
   @ApiPropertyOptional({
     enum: BankDetailsSortField,

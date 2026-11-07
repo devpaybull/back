@@ -1,9 +1,10 @@
 import { Fiat } from '../../common/types/fiat';
 import { Rate } from '../../common/types/rate';
+import { MerchantDealFields } from './merchant-deal-fields';
 import { TransactionKind } from './transaction-kind.enum';
 import { TransactionMethod } from './transaction-method';
 
-export interface CreateDealInput {
+export interface CreateDealInput extends MerchantDealFields {
   kind: TransactionKind.PayIn | TransactionKind.PayOut;
   method: TransactionMethod;
   traderUserId: string;

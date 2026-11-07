@@ -9,6 +9,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BankDetailsModule } from './bank-details/bank-details.module';
 import { BanksModule } from './banks/banks.module';
+import { MobileOperatorsModule } from './mobile-operators/mobile-operators.module';
 import { validateEnv } from './common/config/env.validation';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { CounterpartiesModule } from './counterparties/counterparties.module';
@@ -17,7 +18,9 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { DebtsModule } from './debts/debts.module';
 import { DevicesModule } from './devices/devices.module';
 import { InvitesModule } from './invites/invites.module';
+import { MerchantApiModule } from './merchant-api/merchant-api.module';
 import { MerchantCabinetModule } from './merchant-cabinet/merchant-cabinet.module';
+import { TraderCabinetModule } from './trader-cabinet/trader-cabinet.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { TraderSettingsModule } from './trader-settings/trader-settings.module';
 import { TransactionsModule } from './transactions/transactions.module';
@@ -53,6 +56,7 @@ import { UsersModule } from './users/users.module';
     CountriesModule,
     CurrenciesModule,
     BanksModule,
+    MobileOperatorsModule,
     DevicesModule,
     BankDetailsModule,
     MerchantsModule,
@@ -67,6 +71,8 @@ import { UsersModule } from './users/users.module';
     DebtsModule,
     AdminModule,
     MerchantCabinetModule,
+    TraderCabinetModule,
+    MerchantApiModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],

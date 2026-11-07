@@ -1025,6 +1025,75 @@ describe('RateService rate sets', () => {
     });
   });
 
+  describe('resolveSubjectPercents', () => {
+    const row = (
+      subjectUserId: string | null,
+      overrides: Partial<MethodRate> = {},
+    ): MethodRate =>
+      ({
+        subjectUserId,
+        subjectMerchantId: null,
+        fromAmount: null,
+        toAmount: null,
+        bankId: null,
+        payInPercent: 10,
+        payOutPercent: 3,
+        ...overrides,
+      }) as MethodRate;
+
+    const resolve = (
+      method: TransactionMethod,
+      subjects: {
+        userId: string;
+        individualEnabled: boolean;
+        bankId: number | null;
+      }[],
+    ) =>
+      service.resolveSubjectPercents(
+        {
+          scope: RateScope.Trader,
+          method,
+          amount: toFiat(2000),
+          direction: 'payIn',
+        },
+        subjects,
+      );
+
+    it('resolves every trader from one read: their own rate, the base rate, the bank row', async () => {
+      repository.find.mockResolvedValue([
+        row(null),
+        row(uuidOf(1), { payInPercent: 8 }),
+        row(uuidOf(2), { payInPercent: 5 }),
+        row(uuidOf(2), { bankId: 1, payInPercent: 4 }),
+      ]);
+
+      await expect(
+        resolve(BY_BANK, [
+          { userId: uuidOf(1), individualEnabled: true, bankId: 1 },
+          { userId: uuidOf(2), individualEnabled: true, bankId: 1 },
+          { userId: uuidOf(2), individualEnabled: false, bankId: 1 },
+          { userId: uuidOf(3), individualEnabled: true, bankId: null },
+        ]),
+      ).resolves.toEqual([8, 4, 10, 10]);
+      expect(repository.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers null for a trader when no base rate is configured', async () => {
+      repository.find.mockResolvedValue([]);
+
+      await expect(
+        resolve(BY_BANK, [
+          { userId: uuidOf(1), individualEnabled: true, bankId: null },
+        ]),
+      ).resolves.toEqual([null]);
+    });
+
+    it('reads nothing for no subjects', async () => {
+      await expect(resolve(BY_BANK, [])).resolves.toEqual([]);
+      expect(repository.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resolveMethodPercent', () => {
     const rate = (
       overrides: Partial<MethodRate>,

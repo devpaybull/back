@@ -7,4 +7,5 @@ export enum TransactionSortField {
   Merchant = 'merchant',
   ExpiresAt = 'expiresAt',
   Rate = 'rate',
+  TraderCommission = 'traderCommission',
 }

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
-import { TransactionType } from '../../common/enums/transaction-type.enum';
+import { BankDetailsType } from '../../bank-details/types/bank-details-type.enum';
 import {
   CounterpartyTraderDto,
   toCounterpartyTraderDto,
@@ -12,10 +12,10 @@ export class CounterpartyRequisiteDto {
   id: string;
 
   @ApiProperty({
-    enum: TransactionType,
-    description: 'The channel the client pays through',
+    enum: BankDetailsType,
+    description: 'card_or_sbp or mobile',
   })
-  type: TransactionType;
+  type: BankDetailsType;
 
   @ApiProperty({ nullable: true })
   card: string | null;
@@ -26,8 +26,15 @@ export class CounterpartyRequisiteDto {
   @ApiProperty({ nullable: true })
   cardholderName: string | null;
 
-  @ApiProperty({ type: DealBankDto })
-  bank: DealBankDto;
+  @ApiProperty({ type: DealBankDto, nullable: true })
+  bank: DealBankDto | null;
+
+  @ApiProperty({
+    type: DealBankDto,
+    nullable: true,
+    description: '{ id, name } of the operator of a mobile requisite',
+  })
+  mobileOperator: DealBankDto | null;
 
   @ApiProperty({ type: CounterpartyTraderDto, nullable: true })
   trader: CounterpartyTraderDto | null;
@@ -47,7 +54,12 @@ export const toCounterpartyRequisiteDto = (
   card: requisite.card ?? null,
   phone: requisite.phone ?? null,
   cardholderName: requisite.cardholderName ?? null,
-  bank: { id: requisite.bank.id, name: requisite.bank.name },
+  bank: requisite.bank
+    ? { id: requisite.bank.id, name: requisite.bank.name }
+    : null,
+  mobileOperator: requisite.mobileOperator
+    ? { id: requisite.mobileOperator.id, name: requisite.mobileOperator.name }
+    : null,
   trader: requisite.user ? toCounterpartyTraderDto(requisite.user) : null,
   active: requisite.active,
   banned: Boolean(requisite.bannedAt),

@@ -101,6 +101,55 @@ const entry = (userId: string, enabled = true) => ({
   ],
 });
 
+describe('MerchantAttachmentsService.admissionOf', () => {
+  it('splits the attached traders into the ones serving the method and the ones switched off, with the flag', async () => {
+    const { service, attachments } = build();
+    const merchants = (
+      service as unknown as { merchants: { findOne: jest.Mock } }
+    ).merchants;
+    merchants.findOne.mockResolvedValueOnce({
+      id: MERCHANT,
+      exclusiveTopUp: true,
+    });
+    attachments.find.mockResolvedValueOnce([
+      {
+        userId: uuidOf(61),
+        trading: true,
+        methods: [{ method: 'sbp', enabled: true }],
+      },
+      {
+        userId: uuidOf(62),
+        trading: false,
+        methods: [{ method: 'sbp', enabled: true }],
+      },
+      {
+        userId: uuidOf(63),
+        trading: true,
+        methods: [{ method: 'card', enabled: true }],
+      },
+      {
+        userId: uuidOf(64),
+        trading: true,
+        methods: [{ method: 'sbp', enabled: false }],
+      },
+    ] as never);
+
+    const admission = await service.admissionOf(MERCHANT, 'sbp');
+
+    expect(admission.exclusiveTopUp).toBe(true);
+    expect([...admission.attachedTraderIds]).toEqual([uuidOf(61)]);
+    expect([...admission.switchedOffTraderIds]).toEqual([
+      uuidOf(62),
+      uuidOf(63),
+      uuidOf(64),
+    ]);
+    expect(attachments.find).toHaveBeenCalledWith({
+      where: { merchantId: MERCHANT, kind: MerchantAttachmentKind.Trader },
+      relations: { methods: true },
+    });
+  });
+});
+
 describe('MerchantAttachmentsService.replace', () => {
   it('locks the merchant set first, writes a trader and a cascade with their switches, and audits', async () => {
     const { service, manager, audit } = build();
