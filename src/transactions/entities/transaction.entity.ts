@@ -165,6 +165,9 @@ export class Transaction {
   @Column({ type: 'varchar', nullable: true })
   paymentPageToken: string | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  payerPaidAt: Date | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   payoutOwnerName: string | null;
 

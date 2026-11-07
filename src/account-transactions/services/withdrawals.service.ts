@@ -57,6 +57,13 @@ const DAY_MS = 86_400_000;
 type Destination =
   { kind: 'external' } | { kind: 'internal'; recipientUserId: string };
 
+const withdrawalsDisabled = () =>
+  new ForbiddenException({
+    statusCode: 403,
+    code: 'WITHDRAWALS_DISABLED',
+    message: 'Withdrawals are switched off for this trader',
+  });
+
 @Injectable()
 export class WithdrawalsService {
   private readonly logger = new Logger(WithdrawalsService.name);
@@ -899,19 +906,23 @@ export class WithdrawalsService {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
       `withdrawals:${input.userId}`,
     ]);
+
+    if (
+      !(await this.traderSettings.withdrawalsEnabledWithin(
+        manager,
+        input.userId,
+      ))
+    ) {
+      throw withdrawalsDisabled();
+    }
+
     await this.assertDailyLimit(manager, input.userId, input.amount, now);
   }
 
   private async assertWithdrawalsEnabled(userId: string): Promise<void> {
     const settings = await this.traderSettings.findOrDefaults(userId);
 
-    if (!settings.withdrawalsEnabled) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'WITHDRAWALS_DISABLED',
-        message: 'Withdrawals are switched off for this trader',
-      });
-    }
+    if (!settings.withdrawalsEnabled) throw withdrawalsDisabled();
   }
 
   private async assertDailyLimit(

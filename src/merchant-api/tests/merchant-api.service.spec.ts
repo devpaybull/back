@@ -210,7 +210,11 @@ const build = () => {
     deps.rates as never,
     deps.selection as never,
     { openByMerchant: jest.fn(), cancelByMerchant: jest.fn() } as never,
-    new PaymentViewService(deps.bankDetails as never, deps.banks as never),
+    new PaymentViewService(
+      deps.bankDetails as never,
+      deps.banks as never,
+      { get: () => '' } as never,
+    ),
     { manager: { find: jest.fn(async () => []) } } as never,
   );
   const log: MerchantRequestDetails = {};

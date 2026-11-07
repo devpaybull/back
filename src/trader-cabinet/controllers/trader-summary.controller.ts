@@ -151,9 +151,6 @@ export class TraderSummaryController {
     nightStopped: boolean,
   ): TrafficBlocker[] {
     const insurance = wallet?.insurancePayInBalance ?? toCrypto(0);
-    const available = wallet
-      ? this.wallets.getAvailableMain(wallet)
-      : toCrypto(0);
     const checks: [boolean, TrafficBlocker][] = [
       [trader.status !== UserStatus.Active, TrafficBlocker.TraderNotActive],
       [!settings.tradingEnabled, TrafficBlocker.TradingDisabled],
@@ -162,7 +159,10 @@ export class TraderSummaryController {
         insurance.lt(this.settings.insurancePayInMinOf(settings)),
         TrafficBlocker.InsuranceBelowMinimum,
       ],
-      [available.lte(0), TrafficBlocker.InsufficientBalance],
+      [
+        !wallet || !this.wallets.hasTradingBalance(wallet),
+        TrafficBlocker.BalanceBelowThreshold,
+      ],
     ];
 
     return checks.filter(([applies]) => applies).map(([, blocker]) => blocker);

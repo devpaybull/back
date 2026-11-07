@@ -23,6 +23,8 @@ import { CounterpartyDealStatsService } from './services/counterparty-deal-stats
 import { DealExpiryService } from './services/deal-expiry.service';
 import { MerchantBalanceService } from './services/merchant-balance.service';
 import { MerchantDealsService } from './services/merchant-deals.service';
+import { MerchantRatesService } from './services/merchant-rates.service';
+import { PaymentPageService } from './services/payment-page.service';
 import { MerchantStatsService } from './services/merchant-stats.service';
 import { MerchantVolumeService } from './services/merchant-volume.service';
 import { NightStopService } from './services/night-stop.service';
@@ -87,6 +89,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
     MerchantVolumeService,
     MerchantStatsService,
     MerchantDealsService,
+    MerchantRatesService,
+    PaymentPageService,
     PaymentViewService,
     DealCallbacksService,
     DisputeMoneyService,
@@ -111,6 +115,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
   ],
   exports: [
     PaymentViewService,
+    PaymentPageService,
+    MerchantRatesService,
     DisputesService,
     DisputeDeadlineService,
     TraderDealsService,

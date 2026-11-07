@@ -95,6 +95,7 @@ interface Scenario {
   switchedOff: Set<string>;
   statuses: Map<string, UserStatus>;
   tradingOff: Set<string>;
+  threshold?: number;
   nightStopped: Set<string>;
   wallets: Map<string, Wallet>;
   percents: Map<string, number | null>;
@@ -197,6 +198,8 @@ const build = (scenario: Scenario) => {
     ),
     getAvailableMain: (row: Wallet) =>
       roundCrypto(row.mainBalance.minus(row.mainReserved)),
+    hasTradingBalance: (row: Wallet) =>
+      row.mainBalance.minus(row.mainReserved).gt(scenario.threshold ?? 0),
   };
   const rates = {
     resolveSubjectPercents: jest.fn(
@@ -381,6 +384,23 @@ const FILTER_CASES: [
           [VICTIM, wallet(VICTIM, { insurancePayInBalance: toCrypto(99.99) })],
           [HEALTHY, wallet(HEALTHY)],
         ]),
+      }),
+  ],
+  [
+    SelectionFilter.BalanceBelowThreshold,
+    () =>
+      scenarioOf({
+        wallets: new Map([
+          [
+            VICTIM,
+            wallet(VICTIM, {
+              mainBalance: toCrypto(1000),
+              mainReserved: toCrypto(900),
+            }),
+          ],
+          [HEALTHY, wallet(HEALTHY)],
+        ]),
+        threshold: 100,
       }),
   ],
   [

@@ -1642,6 +1642,28 @@ describe('TransactionService, the merchant API fields of a deal', () => {
       requestedAmountFiat: null,
     });
   });
+
+  it('issues an unguessable payment page token to each merchant pay-in, never the deal id', async () => {
+    const { service } = build();
+
+    const first = await service.createDeal(
+      input({ merchantTransactionId: 'order-1' }),
+    );
+    const second = await service.createDeal(
+      input({ merchantTransactionId: 'order-2' }),
+    );
+
+    expect(first.paymentPageToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second.paymentPageToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.paymentPageToken).not.toBe(second.paymentPageToken);
+    expect(first.paymentPageToken).not.toContain(String(first.id));
+  });
+
+  it('issues no token to a deal made outside the merchant API', async () => {
+    const { service } = build();
+
+    expect((await service.createDeal(input())).paymentPageToken).toBeNull();
+  });
 });
 
 describe('TransactionService, the merchant API lookups', () => {

@@ -3,5 +3,5 @@ export enum TrafficBlocker {
   TradingDisabled = 'trading_disabled',
   NightStop = 'night_stop',
   InsuranceBelowMinimum = 'insurance_below_minimum',
-  InsufficientBalance = 'insufficient_balance',
+  BalanceBelowThreshold = 'balance_below_threshold',
 }

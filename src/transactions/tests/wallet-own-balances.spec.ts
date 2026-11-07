@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
+import { Transaction } from '../entities/transaction.entity';
 import { Wallet } from '../entities/wallet.entity';
 import { WalletService } from '../services/wallet.service';
 import { BalanceKind } from '../types/balance-kind.enum';
@@ -29,7 +30,20 @@ const build = (
   wallet: Wallet | null,
   env: Record<string, unknown> = {},
   insuranceMinimum = '500',
+  latestAssignedDealAt: Date | null = null,
 ) => {
+  const updated = {
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    setParameter: jest.fn().mockReturnThis(),
+    execute: jest.fn(async () => undefined),
+  };
+  const latestDeal = {
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    setParameter: jest.fn().mockReturnThis(),
+    getRawOne: jest.fn(async () => ({ at: latestAssignedDealAt })),
+  };
   const inserted = {
     values: () => ({ orIgnore: () => ({ execute: async () => undefined }) }),
   };
@@ -38,9 +52,14 @@ const build = (
     save: jest.fn(async (value: unknown) => value),
     create: jest.fn((_entity: unknown, value: object) => ({ ...value })),
     update: jest.fn(async () => undefined),
-    createQueryBuilder: jest.fn(() => ({
-      insert: () => ({ into: () => inserted }),
-    })),
+    createQueryBuilder: jest.fn((entity?: unknown) =>
+      entity
+        ? latestDeal
+        : {
+            insert: () => ({ into: () => inserted }),
+            update: () => updated,
+          },
+    ),
   };
   const service = new WalletService(
     {} as never,
@@ -51,7 +70,7 @@ const build = (
     { insurancePayInMinOf: jest.fn(() => toCrypto(insuranceMinimum)) } as never,
   );
 
-  return { service, manager };
+  return { service, manager, updated, latestDeal };
 };
 
 const codeOf = (error: unknown) =>
@@ -170,13 +189,56 @@ describe('WalletService.moveBetweenOwnBalancesWithin', () => {
       expect(wallet.insurancePayInBalance).toEqual(toCrypto('299.5'));
     });
 
-    it('allows it when no deal was ever accepted', async () => {
+    it('allows it when the trader never had a deal', async () => {
       const wallet = walletOf();
       const { service, manager } = build(wallet);
 
       await service.moveBetweenOwnBalancesWithin(manager as never, back);
 
       expect(wallet.mainBalance).toEqual(toCrypto('1200.5'));
+    });
+
+    it('without a stamp, counts from the latest deal assigned to the trader, through the transaction', async () => {
+      const assigned = new Date(NOW.getTime() - 3 * DAY_MS);
+      const wallet = walletOf();
+      const { service, manager, latestDeal } = build(
+        wallet,
+        {},
+        '500',
+        assigned,
+      );
+
+      const error = await service
+        .moveBetweenOwnBalancesWithin(manager as never, back)
+        .catch((e: unknown) => e);
+
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'INSURANCE_WITHDRAWAL_DELAYED',
+        availableAt: new Date(assigned.getTime() + 14 * DAY_MS).toISOString(),
+      });
+      expect(manager.createQueryBuilder).toHaveBeenCalledWith(
+        Transaction,
+        'deal',
+      );
+      expect(latestDeal.where).toHaveBeenCalledWith(
+        'deal."traderUserId" = :traderUserId',
+        { traderUserId: USER },
+      );
+      expect(latestDeal.select.mock.calls[0][0]).toContain(
+        'COALESCE(deal."payoutTakenAt", deal."createdAt")',
+      );
+      expect(wallet.mainBalance).toEqual(toCrypto(1000));
+    });
+
+    it('does not look for a deal when the wallet is stamped', async () => {
+      const wallet = walletOf({
+        lastAcceptedDealAt: new Date(NOW.getTime() - 20 * DAY_MS),
+      });
+      const { service, manager, latestDeal } = build(wallet, {}, '500', NOW);
+
+      await service.moveBetweenOwnBalancesWithin(manager as never, back);
+
+      expect(latestDeal.getRawOne).not.toHaveBeenCalled();
     });
 
     it('is not applied without a check moment: an admin moves any time', async () => {
@@ -264,20 +326,27 @@ describe('WalletService.assertMayEnableTradingWithin', () => {
 
     expect(manager.findOne).toHaveBeenCalledWith(Wallet, {
       where: { userId: USER },
+      lock: { mode: 'pessimistic_read' },
     });
   });
 });
 
 describe('WalletService.stampAcceptedDealWithin', () => {
-  it('writes the moment on the trader’s wallet', async () => {
-    const { service, manager } = build(walletOf());
+  it('never moves the moment backwards', async () => {
+    const { service, manager, updated } = build(walletOf());
 
     await service.stampAcceptedDealWithin(manager as never, USER, NOW);
 
-    expect(manager.update).toHaveBeenCalledWith(
-      Wallet,
-      { userId: USER },
-      { lastAcceptedDealAt: NOW },
+    const [{ lastAcceptedDealAt }] = updated.set.mock.calls[0] as [
+      { lastAcceptedDealAt: () => string },
+    ];
+    expect(lastAcceptedDealAt()).toBe(
+      'GREATEST(COALESCE("lastAcceptedDealAt", :acceptedAt), :acceptedAt)',
     );
+    expect(updated.where).toHaveBeenCalledWith('"userId" = :userId', {
+      userId: USER,
+    });
+    expect(updated.setParameter).toHaveBeenCalledWith('acceptedAt', NOW);
+    expect(updated.execute).toHaveBeenCalledTimes(1);
   });
 });

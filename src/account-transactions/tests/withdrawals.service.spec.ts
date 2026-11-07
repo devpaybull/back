@@ -72,7 +72,12 @@ const withdrawal = (
     ...overrides,
   }) as AccountTransaction;
 
-const build = (setup: { withdrawalsEnabled?: boolean } = {}) => {
+const build = (
+  setup: {
+    withdrawalsEnabled?: boolean;
+    withdrawalsEnabledWithin?: boolean;
+  } = {},
+) => {
   const findOneBy = new Map<unknown, Finder>();
   const findBy = new Map<unknown, Finder>();
   const countBy = new Map<unknown, Finder>();
@@ -197,6 +202,10 @@ const build = (setup: { withdrawalsEnabled?: boolean } = {}) => {
     findOrDefaults: jest.fn(async () => ({
       withdrawalsEnabled: setup.withdrawalsEnabled ?? true,
     })),
+    withdrawalsEnabledWithin: jest.fn(
+      async () =>
+        setup.withdrawalsEnabledWithin ?? setup.withdrawalsEnabled ?? true,
+    ),
   };
   const service = new WithdrawalsService(
     config as never,
@@ -218,6 +227,7 @@ const build = (setup: { withdrawalsEnabled?: boolean } = {}) => {
 
   return {
     service,
+    traderSettings,
     merchantBalances,
     merchantSettings,
     manager,
@@ -1345,6 +1355,41 @@ describe('WithdrawalsService.payableByHand', () => {
   describe('withdrawalsEnabled', () => {
     const codeOf = (error: unknown): unknown =>
       (error as ForbiddenException).getResponse() as { code?: string };
+
+    it('is read again under the trader’s lock: switched off after the early check, nothing is reserved', async () => {
+      const built = build({ withdrawalsEnabledWithin: false });
+      built.quoteRepository.find.mockResolvedValue([liveQuote(toCrypto(100))]);
+
+      const error = await built.service
+        .request(input(), NOW)
+        .catch((e: unknown) => e);
+
+      expect(codeOf(error)).toMatchObject({ code: 'WITHDRAWALS_DISABLED' });
+      expect(
+        built.traderSettings.withdrawalsEnabledWithin,
+      ).toHaveBeenCalledWith(built.manager, TRADER);
+      expect(built.manager.query.mock.invocationCallOrder[0]).toBeLessThan(
+        built.traderSettings.withdrawalsEnabledWithin.mock
+          .invocationCallOrder[0],
+      );
+      expect(built.wallets.reserveMainEscrowWithin).not.toHaveBeenCalled();
+      expect(built.manager.save).not.toHaveBeenCalled();
+    });
+
+    it('is read again under the lock of an internal transfer too', async () => {
+      const built = build({ withdrawalsEnabledWithin: false });
+      platformDeposit(built, OTHER);
+
+      await built.service.request(input({ address: DEPOSIT_OF_OTHER }), NOW);
+      const [, before] = built.transfers.transfer.mock.calls[0] as unknown as [
+        unknown,
+        (manager: unknown) => Promise<void>,
+      ];
+
+      const error = await before(built.manager).catch((e: unknown) => e);
+
+      expect(codeOf(error)).toMatchObject({ code: 'WITHDRAWALS_DISABLED' });
+    });
 
     it('refuses a quote before anything is estimated', async () => {
       const { service, wallets } = build({ withdrawalsEnabled: false });

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EntityManager, In } from 'typeorm';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BanksService } from '../../banks/banks.service';
@@ -20,7 +21,16 @@ export class PaymentViewService {
   constructor(
     private readonly bankDetails: BankDetailsService,
     private readonly banks: BanksService,
+    private readonly config: ConfigService,
   ) {}
+
+  private paymentPageUrlOf(deal: Transaction): string | null {
+    const base = this.config.get<string>('PAYMENT_PAGE_URL', '');
+
+    return base && deal.paymentPageToken
+      ? `${base.replace(/\/+$/, '')}/${deal.paymentPageToken}`
+      : null;
+  }
 
   async paymentsOf(
     manager: EntityManager,
@@ -72,7 +82,7 @@ export class PaymentViewService {
             ? bankOf(deal.requestedBankId)
             : requestedBank,
         payoutBank: bankOf(deal.payoutBankId),
-        paymentPageUrl: null,
+        paymentPageUrl: this.paymentPageUrlOf(deal),
         dispute: latestDispute.get(deal.id) ?? null,
         disputeFiles: files,
       }),

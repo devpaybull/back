@@ -488,6 +488,15 @@ export class EnvironmentVariables {
   @Min(1)
   MERCHANT_REQUEST_LOG_MAX_BYTES: number = 65536;
 
+  @ValidateIf((env: EnvironmentVariables) => Boolean(env.PAYMENT_PAGE_URL))
+  @IsUrl({ require_tld: false, require_protocol: true })
+  PAYMENT_PAGE_URL: string = '';
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  PAY_PAGE_RATE_LIMIT_PER_MINUTE: number = 60;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)

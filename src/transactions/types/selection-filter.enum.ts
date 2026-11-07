@@ -15,6 +15,7 @@ export enum SelectionFilter {
   TradingDisabled = 'trading_disabled',
   NightStop = 'night_stop',
   InsuranceBelowMinimum = 'insurance_below_minimum',
+  BalanceBelowThreshold = 'balance_below_threshold',
   TraderRateMissing = 'trader_rate_missing',
   InsufficientBalance = 'insufficient_balance',
   DailyCount = 'daily_count',

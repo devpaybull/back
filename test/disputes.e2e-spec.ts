@@ -221,6 +221,7 @@ describe('disputes', () => {
     await e2e.dataSource.getRepository(TraderSettings).save({
       userId: trader.user.id,
       tradingEnabled: true,
+      nightStopEnabled: false,
       trustedUser: true,
       maxActivePayouts: 500,
     });

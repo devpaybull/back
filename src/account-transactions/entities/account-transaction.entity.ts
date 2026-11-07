@@ -49,6 +49,10 @@ import { AccountTransactionType } from '../types/account-transaction-type.enum';
   'account_transactions_own_balances_both_or_neither',
   `("fromBalance" IS NULL) = ("toBalance" IS NULL)`,
 )
+@Check(
+  'account_transactions_own_balances_one_account_two_balances',
+  `"fromBalance" IS NULL OR ("fromBalance"::text <> "toBalance"::text AND "userId" = "counterpartyUserId")`,
+)
 export class AccountTransaction {
   @PrimaryGeneratedColumn()
   id: number;

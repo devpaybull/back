@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
 import { Role } from '../src/common/enums/role.enum';
+import { Currency } from '../src/currencies/entities/currency.entity';
 import { toCrypto } from '../src/common/utils/to-crypto';
 import { Device } from '../src/devices/entities/device.entity';
 import { MerchantApiRequest } from '../src/merchant-requests/entities/merchant-api-request.entity';
@@ -663,6 +664,82 @@ describe('the merchant API: keys, access and the request log', () => {
         expect(
           (await get(`/${created.id}`).expect(200)).body.data.expiresAt,
         ).toBe(extended.body.data.expiresAt);
+      });
+    });
+
+    describe('the rate and the methods (MA09)', () => {
+      const markups = (payInPercent: number, payOutPercent: number) =>
+        e2e.dataSource
+          .getRepository(Currency)
+          .findOneOrFail({ where: { isocode: 'RUB' } })
+          .then(async (rub) => {
+            await e2e.http
+              .patch(`/admin/merchants/${merchantId}`)
+              .set(bearer(superadmin))
+              .send({ currencyIds: [rub.id], defaultCurrencyId: rub.id })
+              .expect(200);
+            await e2e.http
+              .put(`/admin/merchants/${merchantId}/markups`)
+              .set(bearer(superadmin))
+              .send({
+                markups: [{ currencyId: rub.id, payInPercent, payOutPercent }],
+              })
+              .expect(200);
+
+            return rub.id;
+          });
+
+      afterAll(() => markups(0, 0));
+
+      it('answers GET /v1/payment/rate per direction: Rapira × 1.01 × (1 + the markup), a negative one too', async () => {
+        await markups(2, -1.5);
+
+        const response = await e2e.http
+          .get('/v1/payment/rate')
+          .set('X-Secure-Key', key)
+          .expect(200);
+
+        expect(response.body).toEqual({
+          data: [
+            { currency: 'RUB', type: 'pay_in', rate: '92.718000' },
+            { currency: 'RUB', type: 'pay_out', rate: '89.536500' },
+          ],
+        });
+      });
+
+      it('answers GET /v1/payment/methods like the cabinet: the switched-on methods with directions and percents', async () => {
+        const rubId = await markups(0, 0);
+        const response = await e2e.http
+          .get('/v1/payment/methods')
+          .set('X-Secure-Key', key)
+          .expect(200);
+
+        expect(response.body.data).toEqual([
+          {
+            currencyId: rubId,
+            isocode: 'RUB',
+            methods: [
+              {
+                method: 'sbp',
+                enabled: { payIn: true, payOut: false },
+                rates: [
+                  {
+                    payInPercent: 10,
+                    payOutPercent: 0,
+                    fromAmount: null,
+                    toAmount: null,
+                    bank: null,
+                  },
+                ],
+              },
+            ],
+          },
+        ]);
+      });
+
+      it('keeps both behind the key', async () => {
+        await e2e.http.get('/v1/payment/rate').expect(401);
+        await e2e.http.get('/v1/payment/methods').expect(401);
       });
     });
 

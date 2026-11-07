@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'node:crypto';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
@@ -70,6 +71,7 @@ import { MerchantBalanceService } from './merchant-balance.service';
 import { WalletService } from './wallet.service';
 
 const MINUTE_MS = 60_000;
+const PAYMENT_PAGE_TOKEN_BYTES = 32;
 const DEFERRED_DEAL_SUCCEEDED = 'deal_succeeded';
 const DEFERRED_DEAL_CANCELED = 'deal_canceled';
 const DEFERRED_STARTED = 'deferred_dispute_started';
@@ -467,6 +469,10 @@ export class TransactionService {
       successUrl: input.successUrl ?? null,
       errorUrl: input.errorUrl ?? null,
       requestedAmountFiat: input.requestedAmountFiat ?? null,
+      paymentPageToken:
+        input.kind === TransactionKind.PayIn && input.merchantTransactionId
+          ? randomBytes(PAYMENT_PAGE_TOKEN_BYTES).toString('base64url')
+          : null,
       createdAt,
       expiresAt,
     });

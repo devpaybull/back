@@ -261,6 +261,8 @@ export class RequisiteSelectionService {
         )
       ) {
         reason = SelectionFilter.InsuranceBelowMinimum;
+      } else if (!this.wallets.hasTradingBalance(wallet)) {
+        reason = SelectionFilter.BalanceBelowThreshold;
       }
 
       if (reason) count(dropped, reason);

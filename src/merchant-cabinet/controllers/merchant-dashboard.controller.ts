@@ -18,6 +18,7 @@ import { MerchantSettingsService } from '../../merchants/services/merchant-setti
 import { MerchantBalanceService } from '../../transactions/services/merchant-balance.service';
 import { MerchantStatsService } from '../../transactions/services/merchant-stats.service';
 import { RateService } from '../../transactions/services/rate.service';
+import { RAPIRA_CURRENCY } from '../../transactions/utils/rapira-currency';
 import { CurrentMerchant } from '../decorators/current-merchant.decorator';
 import { MerchantDashboardQueryDto } from '../dto/merchant-dashboard-query.dto';
 import {
@@ -28,7 +29,6 @@ import {
 import { MerchantScopeGuard } from '../guards/merchant-scope.guard';
 
 const TURNOVER_SERIES_DAYS = 30;
-const RAPIRA_CURRENCY = 'RUB';
 
 @ApiTags('Merchant · Dashboard')
 @ApiBearerAuth()

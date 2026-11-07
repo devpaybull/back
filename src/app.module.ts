@@ -19,6 +19,7 @@ import { DebtsModule } from './debts/debts.module';
 import { DevicesModule } from './devices/devices.module';
 import { InvitesModule } from './invites/invites.module';
 import { MerchantApiModule } from './merchant-api/merchant-api.module';
+import { PaymentPageModule } from './payment-page/payment-page.module';
 import { MerchantCabinetModule } from './merchant-cabinet/merchant-cabinet.module';
 import { TraderCabinetModule } from './trader-cabinet/trader-cabinet.module';
 import { MerchantsModule } from './merchants/merchants.module';
@@ -73,6 +74,7 @@ import { UsersModule } from './users/users.module';
     MerchantCabinetModule,
     TraderCabinetModule,
     MerchantApiModule,
+    PaymentPageModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],

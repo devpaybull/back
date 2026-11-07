@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { BalanceKind } from '../../transactions/types/balance-kind.enum';
@@ -184,6 +184,15 @@ describe('TransfersService.transferOwnBalance', () => {
       },
       manager,
     );
+  });
+
+  it('refuses the same balance on both sides before opening a transaction', async () => {
+    const { service, dataSource } = build();
+
+    await expect(
+      service.transferOwnBalance({ ...own, to: BalanceKind.Main }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('writes no audit row when the wallet refuses', async () => {

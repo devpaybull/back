@@ -16,6 +16,7 @@ import { toCrypto } from '../../common/utils/to-crypto';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
+import { Transaction } from '../entities/transaction.entity';
 import { Wallet } from '../entities/wallet.entity';
 import { BalanceOperationFilter } from '../types/balance-operation-filter';
 import { BalanceOperationListQuery } from '../types/balance-operation-list-query';
@@ -23,6 +24,7 @@ import { balanceOperationWhere } from '../utils/balance-operation-where';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
 import { OwnBalanceMove } from '../types/own-balance-move';
+import { TransactionKind } from '../types/transaction-kind.enum';
 import { canWithdrawInsurance } from '../utils/can-withdraw-insurance';
 import { isNightWindow } from '../utils/is-night-window';
 
@@ -104,7 +106,7 @@ export class WalletService {
   }
 
   async isTradingEnabled(userId: string): Promise<boolean> {
-    return this.isMainAboveThreshold(await this.requireWallet(userId));
+    return this.hasTradingBalance(await this.requireWallet(userId));
   }
 
   async assertMayEnableTradingWithin(
@@ -112,7 +114,10 @@ export class WalletService {
     userId: string,
     settings: TraderSettings,
   ): Promise<void> {
-    const wallet = await manager.findOne(Wallet, { where: { userId } });
+    const wallet = await manager.findOne(Wallet, {
+      where: { userId },
+      lock: { mode: 'pessimistic_read' },
+    });
     const insurance = wallet?.insurancePayInBalance ?? toCrypto(0);
 
     if (insurance.lt(this.traderSettings.insurancePayInMinOf(settings))) {
@@ -123,7 +128,7 @@ export class WalletService {
       });
     }
 
-    if (!wallet || !this.isMainAboveThreshold(wallet)) {
+    if (!wallet || !this.hasTradingBalance(wallet)) {
       throw new ConflictException({
         statusCode: 409,
         code: 'BALANCE_BELOW_THRESHOLD',
@@ -137,11 +142,16 @@ export class WalletService {
     userId: string,
     acceptedAt: Date,
   ): Promise<void> {
-    await manager.update(
-      Wallet,
-      { userId },
-      { lastAcceptedDealAt: acceptedAt },
-    );
+    await manager
+      .createQueryBuilder()
+      .update(Wallet)
+      .set({
+        lastAcceptedDealAt: () =>
+          'GREATEST(COALESCE("lastAcceptedDealAt", :acceptedAt), :acceptedAt)',
+      })
+      .where('"userId" = :userId', { userId })
+      .setParameter('acceptedAt', acceptedAt)
+      .execute();
   }
 
   async hasMinInsurancePayIn(userId: string): Promise<boolean> {
@@ -438,7 +448,11 @@ export class WalletService {
     );
 
     if (move.from !== BalanceKind.Main && move.insuranceDelayCheckedAt) {
-      this.assertInsuranceDelayOver(wallet, move.insuranceDelayCheckedAt);
+      await this.assertInsuranceDelayOverWithin(
+        manager,
+        wallet,
+        move.insuranceDelayCheckedAt,
+      );
     }
 
     if (this.availableOf(wallet, move.from).lt(move.amount)) {
@@ -559,14 +573,20 @@ export class WalletService {
     return manager.save(operation);
   }
 
-  private isMainAboveThreshold(wallet: Wallet): boolean {
+  hasTradingBalance(wallet: Wallet): boolean {
     return this.getAvailableMain(wallet).gt(
       toCrypto(this.config.get<string>('MAIN_BALANCE_MIN_THRESHOLD', '0')),
     );
   }
 
-  private assertInsuranceDelayOver(wallet: Wallet, now: Date): void {
-    const lastAcceptedDealAt = wallet.lastAcceptedDealAt ?? null;
+  private async assertInsuranceDelayOverWithin(
+    manager: EntityManager,
+    wallet: Wallet,
+    now: Date,
+  ): Promise<void> {
+    const lastAcceptedDealAt =
+      wallet.lastAcceptedDealAt ??
+      (await this.latestAssignedDealAtWithin(manager, wallet.userId));
     const delayDays = this.config.get<number>(
       'INSURANCE_WITHDRAWAL_DELAY_DAYS',
       14,
@@ -587,6 +607,23 @@ export class WalletService {
         lastAcceptedDealAt.getTime() + delayDays * DAY_MS,
       ).toISOString(),
     });
+  }
+
+  private async latestAssignedDealAtWithin(
+    manager: EntityManager,
+    traderUserId: string,
+  ): Promise<Date | null> {
+    const row = await manager
+      .createQueryBuilder(Transaction, 'deal')
+      .select(
+        `MAX(CASE WHEN deal.kind = :payOut THEN COALESCE(deal."payoutTakenAt", deal."createdAt") ELSE deal."createdAt" END)`,
+        'at',
+      )
+      .where('deal."traderUserId" = :traderUserId', { traderUserId })
+      .setParameter('payOut', TransactionKind.PayOut)
+      .getRawOne<{ at: Date | string | null }>();
+
+    return row?.at ? new Date(row.at) : null;
   }
 
   private availableOf(wallet: Wallet, kind: BalanceKind): Crypto {

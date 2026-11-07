@@ -36,6 +36,7 @@ const build = (
     wallet?: Wallet | null;
     nightStopped?: boolean;
     pool?: number;
+    threshold?: number;
   } = {},
 ) => {
   const settings = {
@@ -52,6 +53,8 @@ const build = (
     ),
     getAvailableMain: (row: Wallet) =>
       toCrypto(row.mainBalance.minus(row.mainReserved).toString()),
+    hasTradingBalance: (row: Wallet) =>
+      row.mainBalance.minus(row.mainReserved).gt(setup.threshold ?? 0),
   };
   const deals = {
     statusCounts: jest.fn(async () =>
@@ -137,7 +140,7 @@ describe('TraderSummaryController', () => {
     expect(summary.blockers).toEqual([
       TrafficBlocker.TradingDisabled,
       TrafficBlocker.InsuranceBelowMinimum,
-      TrafficBlocker.InsufficientBalance,
+      TrafficBlocker.BalanceBelowThreshold,
     ]);
   });
 
@@ -164,6 +167,14 @@ describe('TraderSummaryController', () => {
     expect(summary.trading).toEqual({ payIn: false, payOut: false });
     expect(summary.counters.availablePayouts).toBe(0);
     expect(payoutActions.poolOf).not.toHaveBeenCalled();
+  });
+
+  it('names the balance at the threshold, the same comparison as the switch', async () => {
+    const { controller } = build({ threshold: 800.5 });
+
+    expect((await controller.summary(trader)).blockers).toEqual([
+      TrafficBlocker.BalanceBelowThreshold,
+    ]);
   });
 
   it('names the suspended account and the night stop among the blockers', async () => {

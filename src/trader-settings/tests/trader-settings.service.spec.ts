@@ -686,6 +686,24 @@ describe('TraderSettingsService', () => {
     });
   });
 
+  describe('withdrawalsEnabledWithin', () => {
+    it.each([
+      [null, true],
+      [{ withdrawalsEnabled: false }, false],
+      [{ withdrawalsEnabled: true }, true],
+    ])('reads %o through the given manager as %s', async (row, expected) => {
+      build(base());
+      const within = { findOne: jest.fn(async () => row) };
+
+      await expect(
+        service.withdrawalsEnabledWithin(within as never, uuidOf(1)),
+      ).resolves.toBe(expected);
+      expect(within.findOne).toHaveBeenCalledWith(TraderSettings, {
+        where: { userId: uuidOf(1) },
+      });
+    });
+  });
+
   describe('switchTrading', () => {
     const mayEnable = jest.fn(async () => undefined);
 

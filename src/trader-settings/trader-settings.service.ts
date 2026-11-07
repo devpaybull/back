@@ -65,6 +65,15 @@ export class TraderSettingsService {
     return this.settings.find({ where: { userId: In(userIds) } });
   }
 
+  async withdrawalsEnabledWithin(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<boolean> {
+    const row = await manager.findOne(TraderSettings, { where: { userId } });
+
+    return row?.withdrawalsEnabled ?? UNSAVED_DEFAULTS.withdrawalsEnabled;
+  }
+
   insurancePayInMinOf(settings: TraderSettings | null | undefined): Crypto {
     return (
       settings?.insurancePayInMin ??

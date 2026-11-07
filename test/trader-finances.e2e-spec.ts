@@ -1,4 +1,8 @@
 import { TronWeb } from 'tronweb';
+import { DataSource } from 'typeorm';
+import { AccountTransaction } from '../src/account-transactions/entities/account-transaction.entity';
+import { AccountTransactionStatus } from '../src/account-transactions/types/account-transaction-status.enum';
+import { AccountTransactionType } from '../src/account-transactions/types/account-transaction-type.enum';
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
 import { Role } from '../src/common/enums/role.enum';
 import { toCrypto } from '../src/common/utils/to-crypto';
@@ -8,6 +12,8 @@ import { MerchantsService } from '../src/merchants/services/merchants.service';
 import { MethodRate } from '../src/transactions/entities/method-rate.entity';
 import { Transaction } from '../src/transactions/entities/transaction.entity';
 import { Wallet } from '../src/transactions/entities/wallet.entity';
+import { WalletService } from '../src/transactions/services/wallet.service';
+import { BalanceKind } from '../src/transactions/types/balance-kind.enum';
 import { RateScope } from '../src/transactions/types/rate-scope.enum';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
 import { User } from '../src/users/entities/user.entity';
@@ -295,6 +301,58 @@ describe('the trader cabinet: the switch, the summary and the balances', () => {
     expect((await createPayIn('9090').expect(403)).body.code).toBe(
       'NO_REQUISITE_FOUND_FOR_THIS_AMOUNT',
     );
+
+    const earlier = new Date(deal.createdAt.getTime() - DAY_MS);
+    await e2e.app
+      .get(DataSource)
+      .transaction((manager) =>
+        e2e.app
+          .get(WalletService)
+          .stampAcceptedDealWithin(manager, trader.user.id, earlier),
+      );
+    expect((await walletOf(trader)).lastAcceptedDealAt).toEqual(deal.createdAt);
+
+    await e2e.dataSource
+      .getRepository(Wallet)
+      .update(
+        { userId: trader.user.id },
+        { lastAcceptedDealAt: null as never },
+      );
+    const fallback = await transfer(
+      trader,
+      'insurance_pay_in_to_main',
+      '1',
+    ).expect(409);
+    expect(fallback.body).toMatchObject({
+      code: 'INSURANCE_WITHDRAWAL_DELAYED',
+      availableAt: new Date(
+        deal.createdAt.getTime() + 14 * DAY_MS,
+      ).toISOString(),
+    });
+  });
+
+  it('the database refuses an own-balance transfer naming one balance twice or two accounts', async () => {
+    const trader = await e2e.createUser(Role.Trader);
+    const other = await e2e.createUser(Role.Trader);
+    const insert = (row: object) =>
+      e2e.dataSource.getRepository(AccountTransaction).insert({
+        type: AccountTransactionType.Transfer,
+        status: AccountTransactionStatus.Completed,
+        userId: trader.user.id,
+        counterpartyUserId: trader.user.id,
+        fromBalance: BalanceKind.Main,
+        toBalance: BalanceKind.InsurancePayIn,
+        amount: toCrypto(1),
+        ...row,
+      });
+
+    await expect(insert({ toBalance: BalanceKind.Main })).rejects.toThrow(
+      /own_balances_one_account_two_balances/,
+    );
+    await expect(insert({ counterpartyUserId: other.user.id })).rejects.toThrow(
+      /own_balances_one_account_two_balances/,
+    );
+    await expect(insert({})).resolves.toBeDefined();
   });
 
   it('a repeated switch is a 200 and writes nothing; an admin’s switch-off can be undone by the trader', async () => {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
@@ -66,9 +66,13 @@ export class TransfersService {
     });
   }
 
-  transferOwnBalance(
+  async transferOwnBalance(
     input: OwnBalanceTransferInput,
   ): Promise<AccountTransaction> {
+    if (input.from === input.to) {
+      throw new BadRequestException('The two balances must differ');
+    }
+
     return this.dataSource.transaction(async (manager) => {
       const transfer = await manager.save(
         manager.create(AccountTransaction, {

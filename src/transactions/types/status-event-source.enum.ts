@@ -4,4 +4,5 @@ export enum StatusEventSource {
   AutoTimer = 'auto_timer',
   Admin = 'admin',
   System = 'system',
+  Payer = 'payer',
 }
