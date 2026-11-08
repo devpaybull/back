@@ -16,6 +16,8 @@ import { CounterpartiesModule } from './counterparties/counterparties.module';
 import { CountriesModule } from './countries/countries.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { DebtsModule } from './debts/debts.module';
+import { DeviceMessagesModule } from './device-messages/device-messages.module';
+import { MessageTemplatesModule } from './message-templates/message-templates.module';
 import { DevicesModule } from './devices/devices.module';
 import { InvitesModule } from './invites/invites.module';
 import { MerchantApiModule } from './merchant-api/merchant-api.module';
@@ -59,6 +61,8 @@ import { UsersModule } from './users/users.module';
     BanksModule,
     MobileOperatorsModule,
     DevicesModule,
+    MessageTemplatesModule,
+    DeviceMessagesModule,
     BankDetailsModule,
     MerchantsModule,
     CounterpartiesModule,

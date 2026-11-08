@@ -7,8 +7,10 @@ import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { toFiat } from '../../common/utils/to-fiat';
 import { toRate } from '../../common/utils/to-rate';
+import { In } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { TraderDealActionsService } from '../services/trader-deal-actions.service';
+import { DeviceMatchOutcome } from '../types/device-match-outcome.enum';
 import { PayInDeclineReason } from '../types/pay-in-decline-reason.enum';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
@@ -369,6 +371,137 @@ describe('TraderDealActionsService', () => {
         service.decline(actor, DEAL, PayInDeclineReason.RequisiteBlocked, null),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(requisites.disableOwnWithin).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmByDeviceWithin', () => {
+    const OTHER = uuidOf(4);
+    const request = {
+      traderUserId: TRADER,
+      deviceId: 7,
+      messageId: 11,
+      bankId: 5,
+      amountFiat: toFiat('1000'),
+      requisites: [
+        { id: REQUISITE, bankId: 5 },
+        { id: OTHER, bankId: 6 },
+      ],
+    };
+
+    it('locks the active and checking pay-ins of the trader on the device’s requisites at exactly the amount', async () => {
+      const { service, manager } = build(null);
+
+      await service.confirmByDeviceWithin(manager as never, request);
+
+      expect(manager.find).toHaveBeenCalledWith(Transaction, {
+        where: {
+          traderUserId: TRADER,
+          kind: TransactionKind.PayIn,
+          bankDetailsId: In([REQUISITE, OTHER]),
+          status: In([TransactionStatus.Active, TransactionStatus.Checking]),
+          amountFiat: request.amountFiat,
+        },
+        order: { id: 'ASC' },
+        lock: { mode: 'pessimistic_write' },
+      });
+    });
+
+    it('confirms the one candidate through transitionLocked with source device and audits the message', async () => {
+      const deal = dealIn(TransactionStatus.Checking);
+      const { service, manager, transactions, audit } = build(null, [deal]);
+
+      const outcome = await service.confirmByDeviceWithin(
+        manager as never,
+        request,
+      );
+
+      expect(outcome).toEqual({
+        outcome: DeviceMatchOutcome.Matched,
+        transactionId: DEAL,
+      });
+      expect(transactions.transitionLocked).toHaveBeenCalledWith(
+        manager,
+        deal,
+        {
+          toStatus: TransactionStatus.Success,
+          source: StatusEventSource.Device,
+          actorUserId: TRADER,
+        },
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        {
+          actorUserId: TRADER,
+          targetUserId: TRADER,
+          action: 'device.deal_confirmed',
+          metadata: {
+            transactionId: DEAL,
+            fromStatus: TransactionStatus.Checking,
+            deviceId: 7,
+            messageId: 11,
+            amountFiat: '1000.00',
+          },
+        },
+        manager,
+      );
+    });
+
+    it('confirms nothing when no deal matches', async () => {
+      const { service, manager, transactions } = build(null, []);
+
+      await expect(
+        service.confirmByDeviceWithin(manager as never, request),
+      ).resolves.toEqual({
+        outcome: DeviceMatchOutcome.NoCandidate,
+        transactionId: null,
+      });
+      expect(transactions.transitionLocked).not.toHaveBeenCalled();
+    });
+
+    it('confirms nothing when two deals of the amount sit on the device, whatever their banks', async () => {
+      const { service, manager, transactions } = build(null, [
+        dealIn(TransactionStatus.Active),
+        dealIn(TransactionStatus.Active, {
+          id: uuidOf(9),
+          bankDetailsId: OTHER,
+        }),
+      ]);
+
+      await expect(
+        service.confirmByDeviceWithin(manager as never, request),
+      ).resolves.toEqual({
+        outcome: DeviceMatchOutcome.Ambiguous,
+        transactionId: null,
+      });
+      expect(transactions.transitionLocked).not.toHaveBeenCalled();
+    });
+
+    it('confirms nothing when the one deal sits on a requisite of another bank than the template’s', async () => {
+      const { service, manager, transactions } = build(null, [
+        dealIn(TransactionStatus.Active, { bankDetailsId: OTHER }),
+      ]);
+
+      await expect(
+        service.confirmByDeviceWithin(manager as never, request),
+      ).resolves.toEqual({
+        outcome: DeviceMatchOutcome.BankMismatch,
+        transactionId: null,
+      });
+      expect(transactions.transitionLocked).not.toHaveBeenCalled();
+    });
+
+    it('does not query at all for a device with no requisites', async () => {
+      const { service, manager } = build(null);
+
+      await expect(
+        service.confirmByDeviceWithin(manager as never, {
+          ...request,
+          requisites: [],
+        }),
+      ).resolves.toEqual({
+        outcome: DeviceMatchOutcome.NoCandidate,
+        transactionId: null,
+      });
+      expect(manager.find).not.toHaveBeenCalled();
     });
   });
 });

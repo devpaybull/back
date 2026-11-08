@@ -5,4 +5,5 @@ export enum StatusEventSource {
   Admin = 'admin',
   System = 'system',
   Payer = 'payer',
+  Device = 'device',
 }

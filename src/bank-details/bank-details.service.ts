@@ -348,6 +348,18 @@ export class BankDetailsService {
     return rows.map((row) => row.id);
   }
 
+  requisitesOfDeviceWithin(
+    manager: EntityManager,
+    deviceId: number,
+    userId: string,
+  ): Promise<Pick<BankDetails, 'id' | 'bankId'>[]> {
+    return manager.getRepository(BankDetails).find({
+      select: { id: true, bankId: true },
+      where: { deviceId, userId },
+      order: { id: 'ASC' },
+    });
+  }
+
   async countByDevices(
     deviceIds: readonly number[],
   ): Promise<Map<number, number>> {

@@ -11,6 +11,7 @@ import { AuthModule } from '../auth/auth.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
+import { MessageTemplatesModule } from '../message-templates/message-templates.module';
 import { MobileOperatorsModule } from '../mobile-operators/mobile-operators.module';
 import { CountriesModule } from '../countries/countries.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
@@ -43,6 +44,7 @@ import { AdminIdentityController } from './controllers/admin-identity.controller
 import { AdminInvitesController } from './controllers/admin-invites.controller';
 import { AdminLeadsController } from './controllers/admin-leads.controller';
 import { AdminMerchantsController } from './controllers/admin-merchants.controller';
+import { AdminMessageTemplatesController } from './controllers/admin-message-templates.controller';
 import { AdminMobileOperatorsController } from './controllers/admin-mobile-operators.controller';
 import { AdminRatesController } from './controllers/admin-rates.controller';
 import { AdminRolesController } from './controllers/admin-roles.controller';
@@ -57,6 +59,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     InvitesModule,
     UsersModule,
     BanksModule,
+    MessageTemplatesModule,
     MobileOperatorsModule,
     DevicesModule,
     BankDetailsModule,
@@ -99,6 +102,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     AdminMerchantGroupsController,
     AdminMerchantAttachmentsController,
     AdminBanksController,
+    AdminMessageTemplatesController,
     AdminMobileOperatorsController,
     AdminDevicesController,
     AdminBankDetailsController,

@@ -209,6 +209,11 @@ export class EnvironmentVariables {
   @Min(1)
   DEVICE_ONLINE_WINDOW_SECONDS: number = 120;
 
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  DEVICE_MESSAGE_RETENTION_DAYS: number = 90;
+
   @IsString()
   APP_URL: string = '';
 

@@ -6,6 +6,8 @@ import { AccountTransactionsModule } from '../account-transactions/account-trans
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
+import { DeviceMessagesModule } from '../device-messages/device-messages.module';
+import { DevicesModule } from '../devices/devices.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
 import { TransactionsModule } from '../transactions/transactions.module';
@@ -14,6 +16,7 @@ import { TraderSummaryController } from './controllers/trader-summary.controller
 import { TraderAppealsController } from './controllers/trader-appeals.controller';
 import { TraderDealsController } from './controllers/trader-deals.controller';
 import { TraderFilesController } from './controllers/trader-files.controller';
+import { TraderMessagesController } from './controllers/trader-messages.controller';
 import { TraderPayoutsController } from './controllers/trader-payouts.controller';
 
 @Module({
@@ -22,6 +25,8 @@ import { TraderPayoutsController } from './controllers/trader-payouts.controller
     BankDetailsModule,
     BanksModule,
     CounterpartiesModule,
+    DeviceMessagesModule,
+    DevicesModule,
     MerchantsModule,
     TraderSettingsModule,
     TransactionsModule,
@@ -37,6 +42,7 @@ import { TraderPayoutsController } from './controllers/trader-payouts.controller
     TraderPayoutsController,
     TraderFilesController,
     TraderAppealsController,
+    TraderMessagesController,
   ],
 })
 export class TraderCabinetModule {}

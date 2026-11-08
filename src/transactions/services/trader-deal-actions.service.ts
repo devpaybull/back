@@ -5,13 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { Crypto } from '../../common/types/crypto';
 import { Fiat } from '../../common/types/fiat';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { roundCrypto } from '../../common/utils/round-crypto';
+import { DeviceConfirmation } from '../types/device-confirmation';
+import { DeviceConfirmationRequest } from '../types/device-confirmation-request';
+import { DeviceMatchOutcome } from '../types/device-match-outcome.enum';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { PayInDeclineReason } from '../types/pay-in-decline-reason.enum';
@@ -27,6 +30,11 @@ const CONFIRMABLE_STATUSES: readonly TransactionStatus[] = [
   TransactionStatus.Active,
   TransactionStatus.Checking,
   TransactionStatus.CheckingManually,
+];
+
+const DEVICE_CONFIRMABLE_STATUSES: readonly TransactionStatus[] = [
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
 ];
 
 const DECLINABLE_STATUSES: readonly TransactionStatus[] = [
@@ -67,6 +75,69 @@ export class TraderDealActionsService {
 
       return confirmed;
     });
+  }
+
+  async confirmByDeviceWithin(
+    manager: EntityManager,
+    request: DeviceConfirmationRequest,
+  ): Promise<DeviceConfirmation> {
+    if (request.requisites.length === 0) {
+      return { outcome: DeviceMatchOutcome.NoCandidate, transactionId: null };
+    }
+
+    const candidates = await manager.find(Transaction, {
+      where: {
+        traderUserId: request.traderUserId,
+        kind: TransactionKind.PayIn,
+        bankDetailsId: In(request.requisites.map((requisite) => requisite.id)),
+        status: In([...DEVICE_CONFIRMABLE_STATUSES]),
+        amountFiat: request.amountFiat,
+      },
+      order: { id: 'ASC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (candidates.length === 0) {
+      return { outcome: DeviceMatchOutcome.NoCandidate, transactionId: null };
+    }
+
+    if (candidates.length > 1) {
+      return { outcome: DeviceMatchOutcome.Ambiguous, transactionId: null };
+    }
+
+    const [deal] = candidates;
+    const requisite = request.requisites.find(
+      (candidate) => candidate.id === deal.bankDetailsId,
+    );
+
+    if (requisite?.bankId !== request.bankId) {
+      return { outcome: DeviceMatchOutcome.BankMismatch, transactionId: null };
+    }
+
+    const fromStatus = deal.status;
+
+    await this.transactions.transitionLocked(manager, deal, {
+      toStatus: TransactionStatus.Success,
+      source: StatusEventSource.Device,
+      actorUserId: request.traderUserId,
+    });
+    await this.audit.record(
+      {
+        actorUserId: request.traderUserId,
+        targetUserId: request.traderUserId,
+        action: 'device.deal_confirmed',
+        metadata: {
+          transactionId: deal.id,
+          fromStatus,
+          deviceId: request.deviceId,
+          messageId: request.messageId,
+          amountFiat: formatFiat(request.amountFiat),
+        },
+      },
+      manager,
+    );
+
+    return { outcome: DeviceMatchOutcome.Matched, transactionId: deal.id };
   }
 
   confirmChanged(
