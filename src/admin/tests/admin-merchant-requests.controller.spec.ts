@@ -301,6 +301,50 @@ describe('AdminMerchantRequestsController', () => {
     expect((await controller.findOne(uuidOf(1), admin)).ip).toBeNull();
   });
 
+  describe('the address headers of the card', () => {
+    const headers = {
+      'X-Forwarded-For': '203.0.113.7, ::ffff:198.51.100.2 ,2001:db8::1',
+      'x-real-ip': ' 203.0.113.8 ',
+      FORWARDED:
+        'for=192.0.2.60;proto=http;by=203.0.113.43, for="[2001:db8:cafe::17]:4711", For=unknown, for="198.51.100.9:8080"',
+      'x-secure-key': 'abcd…wxyz',
+      'user-agent': 'probe 1.2.3.4',
+    };
+
+    it('masks every address of X-Forwarded-For, X-Real-IP and Forwarded for= for an admin, whatever the case of the name', async () => {
+      const { controller, history } = build();
+      const stored = { ...record, requestHeaders: { ...headers } };
+      history.findById.mockResolvedValueOnce(stored);
+
+      const card = await controller.findOne(uuidOf(1), admin);
+
+      expect(card.requestHeaders).toEqual({
+        'X-Forwarded-For': '203.0.*.*, 198.51.*.*, 2001:db8:0:0:*:*:*:*',
+        'x-real-ip': '203.0.*.*',
+        FORWARDED:
+          'for=192.0.*.*;proto=http;by=203.0.113.43, for="[2001:db8:cafe:0:*:*:*:*]:4711", For=*, for="198.51.*.*:8080"',
+        'x-secure-key': 'abcd…wxyz',
+        'user-agent': 'probe 1.2.3.4',
+      });
+      expect(stored.requestHeaders).toEqual(headers);
+      expect(card.sizes.headers.sizeBytes).toBe(
+        Buffer.byteLength(JSON.stringify(card.requestHeaders, null, 2)),
+      );
+    });
+
+    it('shows them as stored to a superadmin', async () => {
+      const { controller, history } = build();
+      history.findById.mockResolvedValueOnce({
+        ...record,
+        requestHeaders: { ...headers },
+      });
+
+      const card = await controller.findOne(uuidOf(1), superadmin);
+
+      expect(card.requestHeaders).toEqual(headers);
+    });
+  });
+
   it('answers 404 for a request found nowhere', async () => {
     const { controller } = build();
 
