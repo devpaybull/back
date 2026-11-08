@@ -24,7 +24,8 @@ import { RecognisedMessage } from './types/recognised-message';
 
 const PATTERN_FLAGS = 'iu';
 const PATTERN_TIMEOUT_MS = 50;
-const AMOUNT_GROUP = /\(\?<amount>/;
+const RECOGNITION_BUDGET_MS = 100;
+const AMOUNT_GROUP = 'amount';
 const AMOUNT_SPACES = /\s/g;
 const AMOUNT_SHAPE = /^\d{1,13}(\.\d{1,2})?$/;
 
@@ -35,6 +36,10 @@ export class MessageTemplatesService {
   private readonly logger = new Logger(MessageTemplatesService.name);
   private readonly sandbox = createContext(Object.create(null));
   private readonly execute = new Script('pattern.exec(text)');
+  private readonly compiled = new Map<
+    number,
+    { source: string; pattern: RegExp }
+  >();
 
   constructor(
     @InjectRepository(BankMessageTemplate)
@@ -119,13 +124,19 @@ export class MessageTemplatesService {
     if (!result.affected) {
       throw new NotFoundException('Message template not found');
     }
+
+    this.compiled.delete(id);
   }
 
   test(pattern: string, text: string): PatternTestResult {
     this.assertValidPattern(pattern);
 
     try {
-      const match = this.run(new RegExp(pattern, PATTERN_FLAGS), text);
+      const match = this.run(
+        new RegExp(pattern, PATTERN_FLAGS),
+        text,
+        PATTERN_TIMEOUT_MS,
+      );
 
       return {
         matched: match !== null,
@@ -148,8 +159,23 @@ export class MessageTemplatesService {
       order: { id: 'ASC' },
     });
 
+    const deadline = Date.now() + RECOGNITION_BUDGET_MS;
+
     for (const template of templates) {
-      const amount = this.amountWith(template, text);
+      const remaining = Math.floor(deadline - Date.now());
+
+      if (remaining < 1) {
+        this.logger.warn(
+          `Reading a message from ${template.sender} stopped at template ${template.id}: the ${RECOGNITION_BUDGET_MS} ms budget is spent`,
+        );
+        break;
+      }
+
+      const amount = this.amountWith(
+        template,
+        text,
+        Math.min(PATTERN_TIMEOUT_MS, remaining),
+      );
 
       if (amount) return { senderKnown: true, template, amount };
     }
@@ -157,11 +183,13 @@ export class MessageTemplatesService {
     return { senderKnown: templates.length > 0, template: null, amount: null };
   }
 
-  private amountWith(template: BankMessageTemplate, text: string): Fiat | null {
+  private amountWith(
+    template: BankMessageTemplate,
+    text: string,
+    timeoutMs: number,
+  ): Fiat | null {
     try {
-      return this.amountOf(
-        this.run(new RegExp(template.pattern, PATTERN_FLAGS), text),
-      );
+      return this.amountOf(this.run(this.patternOf(template), text, timeoutMs));
     } catch (error) {
       this.logger.warn(
         `Message template ${template.id} skipped: ${(error as Error).message}`,
@@ -171,13 +199,29 @@ export class MessageTemplatesService {
     }
   }
 
-  private run(pattern: RegExp, text: string): RegExpExecArray | null {
+  private patternOf(template: BankMessageTemplate): RegExp {
+    const cached = this.compiled.get(template.id);
+
+    if (cached?.source === template.pattern) return cached.pattern;
+
+    const pattern = new RegExp(template.pattern, PATTERN_FLAGS);
+
+    this.compiled.set(template.id, { source: template.pattern, pattern });
+
+    return pattern;
+  }
+
+  private run(
+    pattern: RegExp,
+    text: string,
+    timeoutMs: number,
+  ): RegExpExecArray | null {
     if (text.length > MESSAGE_TEXT_MAX_LENGTH) return null;
 
     Object.assign(this.sandbox, { pattern, text });
     try {
       return this.execute.runInContext(this.sandbox, {
-        timeout: PATTERN_TIMEOUT_MS,
+        timeout: timeoutMs,
       }) as RegExpExecArray | null;
     } finally {
       Object.assign(this.sandbox, { pattern: null, text: null });
@@ -203,7 +247,11 @@ export class MessageTemplatesService {
       );
     }
 
-    if (!AMOUNT_GROUP.test(pattern)) {
+    const groups = new RegExp(`(?:${pattern})|`, PATTERN_FLAGS).exec(
+      '',
+    )?.groups;
+
+    if (!groups || !(AMOUNT_GROUP in groups)) {
       throw new BadRequestException(
         'The pattern needs a named group "amount": (?<amount>…)',
       );

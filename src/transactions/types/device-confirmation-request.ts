@@ -7,5 +7,6 @@ export interface DeviceConfirmationRequest {
   messageId: number;
   bankId: number;
   amountFiat: Fiat;
+  createdNoLaterThan: Date;
   requisites: readonly Pick<BankDetails, 'id' | 'bankId'>[];
 }

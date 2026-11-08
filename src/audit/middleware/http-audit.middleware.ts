@@ -10,6 +10,10 @@ const SECRET_KEY = /password|totp|code|token|secret/i;
 const REDACTED = '[REDACTED]';
 const ADMIN_USER_ROUTE = /^\/admin\/users\/:id(\/|$)/;
 const UNAUDITED_ACTIONS = new Set(['POST /device/heartbeat']);
+const PERSONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  'POST /device/messages': ['sender', 'text'],
+  'POST /admin/message-templates/test': ['text'],
+};
 const TOKEN_PARAM = 'token';
 const TOKEN_PLACEHOLDER = ':token';
 
@@ -36,6 +40,16 @@ const redactSecrets = (value: unknown): unknown => {
     ]),
   );
 };
+
+const redactFields = (body: unknown, fields: readonly string[]): unknown =>
+  body === null || typeof body !== 'object' || Array.isArray(body)
+    ? body
+    : Object.fromEntries(
+        Object.entries(body).map(([key, value]) => [
+          key,
+          fields.includes(key) ? REDACTED : value,
+        ]),
+      );
 
 @Injectable()
 export class HttpAuditMiddleware implements NestMiddleware {
@@ -81,7 +95,9 @@ export class HttpAuditMiddleware implements NestMiddleware {
     const route: unknown = request.route?.path;
 
     if (typeof route !== 'string') return null;
-    if (UNAUDITED_ACTIONS.has(`${request.method} ${route}`)) return null;
+    const action = `${request.method} ${route}`;
+
+    if (UNAUDITED_ACTIONS.has(action)) return null;
 
     const params: Record<string, unknown> = { ...(request.params ?? {}) };
     const fullPath = request.originalUrl.split('?')[0];
@@ -105,7 +121,7 @@ export class HttpAuditMiddleware implements NestMiddleware {
         isUUID(targetId)
           ? targetId
           : null,
-      action: `${request.method} ${route}`,
+      action,
       method: request.method,
       path,
       params: Object.keys(params).length > 0 ? params : null,
@@ -113,7 +129,7 @@ export class HttpAuditMiddleware implements NestMiddleware {
       ip: request.ip ?? null,
       userAgent: request.get('user-agent') ?? null,
       login: anonymousLogin,
-      body: redactSecrets(body),
+      body: redactFields(redactSecrets(body), PERSONAL_FIELDS[action] ?? []),
     };
   }
 

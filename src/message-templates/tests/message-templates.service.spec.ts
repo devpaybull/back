@@ -67,6 +67,8 @@ describe('MessageTemplatesService', () => {
       ['does not compile', 'Зачисление (?<amount>\\d+'],
       ['has no amount group', 'Зачисление (\\d+)'],
       ['names the group otherwise', 'Зачисление (?<sum>\\d+)'],
+      ['only escapes the group', 'Зачисление \\(?<amount>\\d+'],
+      ['hides the group in a class', 'Зачисление [(?<amount>]\\d+'],
     ])('refuses a pattern that %s with a 400', async (_case, pattern) => {
       const { service, repository } = build();
 
@@ -196,6 +198,66 @@ describe('MessageTemplatesService', () => {
 
       expect(second.template?.id).toBe(3);
       expect(second.amount?.toFixed(2)).toBe('25.00');
+    });
+
+    it('spends at most 100 ms on one message across the sender’s templates', async () => {
+      const slow = [1, 2, 3].map((id) =>
+        templateOf({ id, pattern: CATASTROPHIC }),
+      );
+      const fine = templateOf({ id: 4, pattern: '(?<amount>\\d+)' });
+      const { service } = build([...slow, fine]);
+      const warned = jest
+        .spyOn(
+          (service as unknown as { logger: { warn: () => void } }).logger,
+          'warn',
+        )
+        .mockImplementation();
+      const started = Date.now();
+
+      const recognised = await service.recognise(
+        '900',
+        `${'a'.repeat(40)}! 25`,
+      );
+
+      expect(Date.now() - started).toBeLessThan(400);
+      expect(recognised.template).toBeNull();
+      expect(warned).toHaveBeenLastCalledWith(
+        expect.stringContaining('budget is spent'),
+      );
+    });
+
+    it('compiles a template once and again only when its pattern changes', async () => {
+      const template = templateOf({ pattern: '(?<amount>\\d+)' });
+      const { service } = build([template]);
+      const compiled = (
+        service as unknown as {
+          compiled: Map<number, { pattern: RegExp }>;
+        }
+      ).compiled;
+
+      await service.recognise('900', '10');
+      const first = compiled.get(1)?.pattern;
+      await service.recognise('900', '20');
+
+      expect(compiled.get(1)?.pattern).toBe(first);
+
+      template.pattern = 'Сумма (?<amount>\\d+)';
+      const recognised = await service.recognise('900', 'Сумма 30');
+
+      expect(compiled.get(1)?.pattern).not.toBe(first);
+      expect(recognised.amount?.toFixed(2)).toBe('30.00');
+    });
+
+    it('forgets the compiled pattern of a deleted template', async () => {
+      const { service } = build([templateOf({ pattern: '(?<amount>\\d+)' })]);
+      const compiled = (
+        service as unknown as { compiled: Map<number, unknown> }
+      ).compiled;
+
+      await service.recognise('900', '10');
+      await service.delete(1);
+
+      expect(compiled.has(1)).toBe(false);
     });
 
     it('does not run a pattern on a text above the cap', async () => {

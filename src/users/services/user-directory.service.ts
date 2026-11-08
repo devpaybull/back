@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, In, Repository } from 'typeorm';
+import {
+  EntityManager,
+  FindOptionsWhere,
+  ILike,
+  In,
+  Repository,
+} from 'typeorm';
 import { AccountIdentifier } from '../../common/types/account-identifier';
 import { Page, toPage } from '../../common/types/page';
 import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
@@ -14,6 +20,7 @@ import { toAccountIdentifier } from '../../common/utils/to-account-identifier';
 import { User } from '../entities/user.entity';
 import { AUTHENTICATABLE_STATUSES } from '../types/authenticatable-statuses';
 import { UserListQuery } from '../types/user-list-query';
+import { UserStatus } from '../types/user-status.enum';
 import { identifierMatches } from '../utils/identifier-matches';
 import { registeredOnly } from '../utils/registered-only';
 import { userListOrder } from '../utils/user-list-order';
@@ -34,6 +41,18 @@ export class UserDirectoryService {
 
   findById(id: string): Promise<User> {
     return this.users.findOne({ where: { id } });
+  }
+
+  async statusWithin(
+    manager: EntityManager,
+    id: string,
+  ): Promise<UserStatus | null> {
+    const user = await manager.getRepository(User).findOne({
+      select: { id: true, status: true },
+      where: { id },
+    });
+
+    return user?.status ?? null;
   }
 
   async findByIds(ids: string[]): Promise<User[]> {

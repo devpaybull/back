@@ -44,7 +44,7 @@ export class TraderMessageDto {
   @ApiProperty({
     enum: DeviceMessageMatchStatus,
     description:
-      'matched — the deal was confirmed by this message; no_template — nothing read it; no_candidate, ambiguous (several deals of that amount), bank_mismatch (the one deal is on a requisite of another bank), account_inactive — read, nothing confirmed; ignored — not a credit',
+      'matched — the deal was confirmed by this message; no_template — nothing read it; no_candidate, ambiguous (several deals of that amount), bank_mismatch (the one deal is on a requisite of another bank), account_inactive — read, nothing confirmed; confirm_failed — the confirmation failed and was rolled back, see the logs; ignored — not a credit',
   })
   matchStatus: DeviceMessageMatchStatus;
 

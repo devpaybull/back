@@ -414,6 +414,54 @@ describe('HttpAuditMiddleware', () => {
       });
     });
 
+    it('keeps the SMS text and sender out of the trail of POST /device/messages', () => {
+      const { recordHttp } = run({
+        route: { path: '/device/messages' },
+        originalUrl: '/device/messages',
+        body: {
+          externalId: 'sms-1',
+          kind: 'sms',
+          sender: '900',
+          text: 'Зачисление 1000 р',
+          receivedAt: '2026-11-08T10:00:00Z',
+        },
+      });
+
+      expect(recordHttp.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          action: 'POST /device/messages',
+          body: {
+            externalId: 'sms-1',
+            kind: 'sms',
+            sender: '[REDACTED]',
+            text: '[REDACTED]',
+            receivedAt: '2026-11-08T10:00:00Z',
+          },
+        }),
+      );
+    });
+
+    it('keeps the sample text out of the trail of a template test, the pattern stays', () => {
+      const { recordHttp } = run({
+        route: { path: '/admin/message-templates/test' },
+        body: { pattern: '(?<amount>\\d+)', text: 'Зачисление 1000 р' },
+      });
+
+      expect(recordHttp.mock.calls[0][0].body).toEqual({
+        pattern: '(?<amount>\\d+)',
+        text: '[REDACTED]',
+      });
+    });
+
+    it('keeps a text field on any other route', () => {
+      const { recordHttp } = run({
+        route: { path: '/admin/users/:id/note' },
+        body: { text: 'kept' },
+      });
+
+      expect(recordHttp.mock.calls[0][0].body).toEqual({ text: 'kept' });
+    });
+
     it('stores a missing body as null', () => {
       const { recordHttp } = run({ body: undefined });
 

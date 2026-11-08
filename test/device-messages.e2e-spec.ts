@@ -583,6 +583,100 @@ describe('device messages and automatic confirmation', () => {
     });
   });
 
+  describe('owner decisions of 2026-11-08', () => {
+    const minutes = (n: number) => n * 60 * 1000;
+    const shiftCreatedAt = (id: string, ms: number) =>
+      e2e.dataSource
+        .getRepository(Transaction)
+        .update(id, { createdAt: new Date(Date.now() - ms) });
+
+    it('confirms a deal in checking_manually, the payer’s timer having run out', async () => {
+      const id = await createPayIn('3500');
+      await e2e.dataSource
+        .getRepository(Transaction)
+        .update(id, { status: 'checking_manually' as never });
+
+      const answer = await send(deviceToken, {
+        text: credit((await dealRow(id)).amountFiat),
+      }).expect(200);
+
+      expect(answer.body.data).toEqual(
+        expect.objectContaining({ matchStatus: 'matched', transactionId: id }),
+      );
+      expect((await dealRow(id)).status).toBe('success');
+    });
+
+    it('confirms only a deal created no later than receivedAt plus the 2-minute tolerance', async () => {
+      const id = await createPayIn('3700');
+      const text = credit((await dealRow(id)).amountFiat);
+
+      const early = await send(deviceToken, {
+        text,
+        receivedAt: new Date(Date.now() - minutes(10)).toISOString(),
+      }).expect(200);
+      expect(early.body.data.matchStatus).toBe('no_candidate');
+      expect((await dealRow(id)).status).toBe('active');
+
+      const withinTolerance = await send(deviceToken, {
+        text,
+        receivedAt: new Date(Date.now() - minutes(1)).toISOString(),
+      }).expect(200);
+      expect(withinTolerance.body.data).toEqual(
+        expect.objectContaining({ matchStatus: 'matched', transactionId: id }),
+      );
+    });
+
+    it('a deal created after the window does not make the message ambiguous', async () => {
+      const older = await createPayIn('3900');
+      const newer = await createPayIn('3900');
+      await shiftCreatedAt(older, minutes(60));
+
+      const answer = await send(deviceToken, {
+        text: credit((await dealRow(older)).amountFiat),
+        receivedAt: new Date(Date.now() - minutes(30)).toISOString(),
+      }).expect(200);
+
+      expect(answer.body.data).toEqual(
+        expect.objectContaining({
+          matchStatus: 'matched',
+          transactionId: older,
+        }),
+      );
+      expect((await dealRow(newer)).status).toBe('active');
+    });
+
+    it('keeps the SMS text and the sender out of the http audit trail', async () => {
+      await send(deviceToken, {
+        sender: 'Spam',
+        text: 'секретный текст',
+      }).expect(200);
+      await e2e.http
+        .post('/admin/message-templates/test')
+        .set(bearer(admin))
+        .send({ pattern: CREDIT_PATTERN, text: 'образец секретный' })
+        .expect(200);
+
+      const trail = async () =>
+        e2e.dataSource.getRepository(AuditLog).find({
+          where: [
+            { action: 'POST /device/messages' },
+            { action: 'POST /admin/message-templates/test' },
+          ],
+        });
+      let rows = await trail();
+      for (let attempt = 0; attempt < 20 && rows.length < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        rows = await trail();
+      }
+
+      expect(rows.length).toBeGreaterThan(1);
+      expect(JSON.stringify(rows.map((row) => row.body))).not.toContain(
+        'секретный',
+      );
+      expect(JSON.stringify(rows.map((row) => row.body))).not.toContain('Spam');
+    });
+  });
+
   it('retention deletes the messages older than DEVICE_MESSAGE_RETENTION_DAYS', async () => {
     const repository = e2e.dataSource.getRepository(DeviceMessage);
     const total = await repository.count();

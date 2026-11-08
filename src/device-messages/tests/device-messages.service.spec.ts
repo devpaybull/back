@@ -54,7 +54,9 @@ const build = ({
       raw: insertedId === null ? [] : [{ id: insertedId }],
     })),
   };
+  const savepoint = { name: 'savepoint' };
   const manager = {
+    transaction: jest.fn((work: (m: unknown) => unknown) => work(savepoint)),
     createQueryBuilder: jest.fn(() => insert),
     update: jest.fn(async () => ({})),
     findOneOrFail: jest.fn(async () => ({ id: insertedId ?? 99 })),
@@ -71,14 +73,17 @@ const build = ({
     count: jest.fn<Promise<number>, [{ where: unknown }]>(async () => 3),
   };
   const templates = { recognise: jest.fn(async () => recognised) };
-  const users = { findById: jest.fn(async () => ({ status: ownerStatus })) };
+  const users = { statusWithin: jest.fn(async () => ownerStatus) };
+  const config = { getOrThrow: jest.fn(() => 120) };
   const requisites = {
     requisitesOfDeviceWithin: jest.fn(async () => [
       { id: REQUISITE, bankId: 5 },
     ]),
   };
   const dealActions = {
-    confirmByDeviceWithin: jest.fn(async () => outcome),
+    confirmByDeviceWithin: jest.fn<Promise<typeof outcome>, unknown[]>(
+      async () => outcome,
+    ),
   };
   const service = new DeviceMessagesService(
     dataSource as never,
@@ -87,12 +92,16 @@ const build = ({
     users as never,
     requisites as never,
     dealActions as never,
+    config as never,
   );
 
   return {
     service,
     insert,
     manager,
+    savepoint,
+    users,
+    config,
     messages,
     templates,
     requisites,
@@ -115,8 +124,17 @@ describe('DeviceMessagesService', () => {
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
 
-    it('stores the message for the device’s owner and confirms a credit through the deal actions in the same transaction', async () => {
-      const { service, insert, manager, requisites, dealActions } = build();
+    it('stores the message for the device’s owner and confirms a credit through the deal actions in a savepoint of the same transaction', async () => {
+      const {
+        service,
+        insert,
+        manager,
+        savepoint,
+        users,
+        config,
+        requisites,
+        dealActions,
+      } = build();
 
       await service.receive(device, input);
 
@@ -136,19 +154,28 @@ describe('DeviceMessagesService', () => {
         transactionId: null,
       });
       expect(insert.orIgnore).toHaveBeenCalled();
+      expect(users.statusWithin).toHaveBeenCalledWith(manager, OWNER);
+      expect(config.getOrThrow).toHaveBeenCalledWith(
+        'DEVICE_MESSAGE_CLOCK_TOLERANCE_SECONDS',
+      );
+      expect(manager.transaction).toHaveBeenCalledTimes(1);
       expect(requisites.requisitesOfDeviceWithin).toHaveBeenCalledWith(
-        manager,
+        savepoint,
         7,
         OWNER,
       );
-      expect(dealActions.confirmByDeviceWithin).toHaveBeenCalledWith(manager, {
-        traderUserId: OWNER,
-        deviceId: 7,
-        messageId: 11,
-        bankId: 5,
-        amountFiat: recognisedCredit.amount,
-        requisites: [{ id: REQUISITE, bankId: 5 }],
-      });
+      expect(dealActions.confirmByDeviceWithin).toHaveBeenCalledWith(
+        savepoint,
+        {
+          traderUserId: OWNER,
+          deviceId: 7,
+          messageId: 11,
+          bankId: 5,
+          amountFiat: recognisedCredit.amount,
+          createdNoLaterThan: new Date('2026-11-08T10:02:00Z'),
+          requisites: [{ id: REQUISITE, bankId: 5 }],
+        },
+      );
       expect(manager.update).toHaveBeenCalledWith(
         DeviceMessage,
         { id: 11 },
@@ -222,18 +249,51 @@ describe('DeviceMessagesService', () => {
     ])(
       'confirms nothing for an owner who is %s, as the trader could not by hand',
       async (ownerStatus) => {
-        const { service, insert, dealActions } = build({ ownerStatus });
+        const { service, manager, users, dealActions } = build({
+          ownerStatus,
+        });
 
         await service.receive(device, input);
 
-        expect(insertedValues(insert)).toEqual(
-          expect.objectContaining({
+        expect(users.statusWithin).toHaveBeenCalledWith(manager, OWNER);
+        expect(manager.update).toHaveBeenCalledWith(
+          DeviceMessage,
+          { id: 11 },
+          {
             matchStatus: DeviceMessageMatchStatus.AccountInactive,
-          }),
+            transactionId: null,
+          },
         );
         expect(dealActions.confirmByDeviceWithin).not.toHaveBeenCalled();
       },
     );
+
+    it('keeps the message when the confirmation throws: the savepoint rolls it back and the row says confirm_failed', async () => {
+      const { service, manager, dealActions } = build();
+      dealActions.confirmByDeviceWithin.mockRejectedValueOnce(
+        new Error('deadlock detected'),
+      );
+      const logged = jest
+        .spyOn(
+          (service as unknown as { logger: { error: () => void } }).logger,
+          'error',
+        )
+        .mockImplementation();
+
+      await expect(service.receive(device, input)).resolves.toEqual({
+        id: 11,
+      });
+
+      expect(manager.update).toHaveBeenCalledWith(
+        DeviceMessage,
+        { id: 11 },
+        {
+          matchStatus: DeviceMessageMatchStatus.ConfirmFailed,
+          transactionId: null,
+        },
+      );
+      expect(logged).toHaveBeenCalled();
+    });
 
     it('answers the row a concurrent repeat inserted, and confirms nothing itself', async () => {
       const { service, manager, dealActions } = build({

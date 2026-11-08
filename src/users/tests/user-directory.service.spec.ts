@@ -240,6 +240,31 @@ describe('UserDirectoryService', () => {
     });
   });
 
+  describe('statusWithin', () => {
+    it('reads the status through the manager it is given, and null for nobody', async () => {
+      const findOne = jest.fn(async () => ({
+        id: uuidOf(1),
+        status: UserStatus.Suspended,
+      }));
+      const manager = { getRepository: jest.fn(() => ({ findOne })) };
+
+      await expect(
+        service.statusWithin(manager as never, uuidOf(1)),
+      ).resolves.toBe(UserStatus.Suspended);
+      expect(manager.getRepository).toHaveBeenCalledWith(User);
+      expect(findOne).toHaveBeenCalledWith({
+        select: { id: true, status: true },
+        where: { id: uuidOf(1) },
+      });
+      expect(users.findOne).not.toHaveBeenCalled();
+
+      findOne.mockResolvedValueOnce(null as never);
+      await expect(
+        service.statusWithin(manager as never, uuidOf(2)),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('findByIds', () => {
     it('loads every named account in one query, whatever its status', async () => {
       const anna = { id: uuidOf(1), status: UserStatus.Active };

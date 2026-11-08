@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
+  EntityManager,
   FindOptionsWhere,
   ILike,
   LessThanOrEqual,
@@ -10,6 +12,7 @@ import {
   And,
 } from 'typeorm';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
+import { Fiat } from '../../common/types/fiat';
 import { Page, toPage } from '../../common/types/page';
 import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
 import { INT4_MAX } from '../../common/utils/int4-max';
@@ -35,6 +38,8 @@ const NUMERIC_ID = /^\d{1,10}$/;
 
 @Injectable()
 export class DeviceMessagesService {
+  private readonly logger = new Logger(DeviceMessagesService.name);
+
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -44,6 +49,7 @@ export class DeviceMessagesService {
     private readonly users: UserDirectoryService,
     private readonly requisites: BankDetailsService,
     private readonly dealActions: TraderDealActionsService,
+    private readonly config: ConfigService,
   ) {}
 
   async receive(
@@ -57,11 +63,7 @@ export class DeviceMessagesService {
     if (stored) return stored;
 
     const recognised = await this.templates.recognise(input.sender, input.text);
-    const owner = await this.users.findById(device.userId);
-    const matchStatus = this.initialMatchStatus(
-      recognised,
-      owner?.status === UserStatus.Active,
-    );
+    const matchStatus = this.initialMatchStatus(recognised);
 
     return this.dataSource.transaction(async (manager) => {
       const inserted = await manager
@@ -101,35 +103,73 @@ export class DeviceMessagesService {
         recognised.template &&
         recognised.amount
       ) {
-        const confirmation = await this.dealActions.confirmByDeviceWithin(
-          manager,
-          {
-            traderUserId: device.userId,
-            deviceId: device.id,
-            messageId: id,
-            bankId: recognised.template.bankId,
-            amountFiat: recognised.amount,
-            requisites: await this.requisites.requisitesOfDeviceWithin(
-              manager,
-              device.id,
-              device.userId,
-            ),
-          },
-        );
-
         await manager.update(
           DeviceMessage,
           { id },
-          {
-            matchStatus:
-              confirmation.outcome as string as DeviceMessageMatchStatus,
-            transactionId: confirmation.transactionId,
-          },
+          await this.confirmWithin(manager, device, id, input.receivedAt, {
+            bankId: recognised.template.bankId,
+            amountFiat: recognised.amount,
+          }),
         );
       }
 
       return manager.findOneOrFail(DeviceMessage, { where: { id } });
     });
+  }
+
+  private async confirmWithin(
+    manager: EntityManager,
+    device: Device,
+    messageId: number,
+    receivedAt: Date,
+    reading: { bankId: number; amountFiat: Fiat },
+  ): Promise<Pick<DeviceMessage, 'matchStatus' | 'transactionId'>> {
+    if (
+      (await this.users.statusWithin(manager, device.userId)) !==
+      UserStatus.Active
+    ) {
+      return {
+        matchStatus: DeviceMessageMatchStatus.AccountInactive,
+        transactionId: null,
+      };
+    }
+
+    const toleranceMs =
+      this.config.getOrThrow<number>('DEVICE_MESSAGE_CLOCK_TOLERANCE_SECONDS') *
+      1000;
+
+    try {
+      const confirmation = await manager.transaction(async (savepoint) =>
+        this.dealActions.confirmByDeviceWithin(savepoint, {
+          traderUserId: device.userId,
+          deviceId: device.id,
+          messageId,
+          bankId: reading.bankId,
+          amountFiat: reading.amountFiat,
+          createdNoLaterThan: new Date(receivedAt.getTime() + toleranceMs),
+          requisites: await this.requisites.requisitesOfDeviceWithin(
+            savepoint,
+            device.id,
+            device.userId,
+          ),
+        }),
+      );
+
+      return {
+        matchStatus: confirmation.outcome as string as DeviceMessageMatchStatus,
+        transactionId: confirmation.transactionId,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Device message ${messageId} could not confirm a deal: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      return {
+        matchStatus: DeviceMessageMatchStatus.ConfirmFailed,
+        transactionId: null,
+      };
+    }
   }
 
   async list(
@@ -173,13 +213,11 @@ export class DeviceMessagesService {
 
   private initialMatchStatus(
     recognised: RecognisedMessage,
-    ownerActive: boolean,
   ): DeviceMessageMatchStatus {
     if (!recognised.template) return DeviceMessageMatchStatus.NoTemplate;
     if (recognised.template.messageType !== BankMessageType.Credit) {
       return DeviceMessageMatchStatus.Ignored;
     }
-    if (!ownerActive) return DeviceMessageMatchStatus.AccountInactive;
 
     return DeviceMessageMatchStatus.NoCandidate;
   }

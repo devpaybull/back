@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, LessThanOrEqual } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { Crypto } from '../../common/types/crypto';
@@ -35,6 +35,7 @@ const CONFIRMABLE_STATUSES: readonly TransactionStatus[] = [
 const DEVICE_CONFIRMABLE_STATUSES: readonly TransactionStatus[] = [
   TransactionStatus.Active,
   TransactionStatus.Checking,
+  TransactionStatus.CheckingManually,
 ];
 
 const DECLINABLE_STATUSES: readonly TransactionStatus[] = [
@@ -92,6 +93,7 @@ export class TraderDealActionsService {
         bankDetailsId: In(request.requisites.map((requisite) => requisite.id)),
         status: In([...DEVICE_CONFIRMABLE_STATUSES]),
         amountFiat: request.amountFiat,
+        createdAt: LessThanOrEqual(request.createdNoLaterThan),
       },
       order: { id: 'ASC' },
       lock: { mode: 'pessimistic_write' },

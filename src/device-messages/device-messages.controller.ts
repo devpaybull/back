@@ -32,7 +32,7 @@ export class DeviceMessagesController {
   @ApiOperation({
     summary: 'Hands over an SMS or a push the phone received',
     description:
-      'Authorization: Bearer <deviceToken>. Idempotent by (device, externalId): a repeat answers the stored message and changes nothing. The text is read by the active bank message templates of its sender; a credit whose amount matches exactly one active or checking pay-in on this device’s requisites, at the template’s bank, confirms that deal (source device).',
+      'Authorization: Bearer <deviceToken>. Idempotent by (device, externalId): a repeat answers the stored message and changes nothing. The text is read by the active bank message templates of its sender; a credit whose amount matches exactly one active, checking or checking_manually pay-in on this device’s requisites, created no later than receivedAt plus DEVICE_MESSAGE_CLOCK_TOLERANCE_SECONDS, at the template’s bank, confirms that deal (source device).',
   })
   @ApiEnvelopeResponse(DeviceMessageAcceptedDto)
   async receive(

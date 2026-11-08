@@ -7,7 +7,7 @@ import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { toFiat } from '../../common/utils/to-fiat';
 import { toRate } from '../../common/utils/to-rate';
-import { In } from 'typeorm';
+import { In, LessThanOrEqual } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { TraderDealActionsService } from '../services/trader-deal-actions.service';
 import { DeviceMatchOutcome } from '../types/device-match-outcome.enum';
@@ -382,13 +382,14 @@ describe('TraderDealActionsService', () => {
       messageId: 11,
       bankId: 5,
       amountFiat: toFiat('1000'),
+      createdNoLaterThan: new Date('2026-11-08T10:02:00Z'),
       requisites: [
         { id: REQUISITE, bankId: 5 },
         { id: OTHER, bankId: 6 },
       ],
     };
 
-    it('locks the active and checking pay-ins of the trader on the device’s requisites at exactly the amount', async () => {
+    it('locks the active, checking and checking_manually pay-ins of the trader on the device’s requisites at exactly the amount, created no later than the window', async () => {
       const { service, manager } = build(null);
 
       await service.confirmByDeviceWithin(manager as never, request);
@@ -398,8 +399,13 @@ describe('TraderDealActionsService', () => {
           traderUserId: TRADER,
           kind: TransactionKind.PayIn,
           bankDetailsId: In([REQUISITE, OTHER]),
-          status: In([TransactionStatus.Active, TransactionStatus.Checking]),
+          status: In([
+            TransactionStatus.Active,
+            TransactionStatus.Checking,
+            TransactionStatus.CheckingManually,
+          ]),
           amountFiat: request.amountFiat,
+          createdAt: LessThanOrEqual(request.createdNoLaterThan),
         },
         order: { id: 'ASC' },
         lock: { mode: 'pessimistic_write' },

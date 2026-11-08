@@ -6,4 +6,5 @@ export enum DeviceMessageMatchStatus {
   BankMismatch = 'bank_mismatch',
   Ignored = 'ignored',
   AccountInactive = 'account_inactive',
+  ConfirmFailed = 'confirm_failed',
 }
