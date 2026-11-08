@@ -168,6 +168,7 @@ export class DisputeMoneyService {
             ? roundFiat(amountFiat.minus(previousFiat))
             : amountFiat,
           resolvedAt: deal.resolvedAt,
+          traderUserId: deal.traderUserId,
         },
       );
     }

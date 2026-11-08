@@ -9,7 +9,7 @@ import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { Page } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { toFiat } from '../../common/utils/to-fiat';
-import { TraderCounterpartySortField } from '../../transactions/types/trader-counterparty-sort-field.enum';
+import { TraderCounterpartySortField } from '../../counterparties/types/trader-counterparty-sort-field.enum';
 import { UserStatus } from '../../users/types/user-status.enum';
 import { TraderCounterpartiesController } from '../controllers/trader-counterparties.controller';
 
@@ -23,10 +23,6 @@ const trader: AuthenticatedUser = {
 
 const REQ_A = uuidOf(30);
 const REQ_B = uuidOf(31);
-const bound = [
-  { id: 7, bankDetailsId: REQ_A, available: true },
-  { id: 8, bankDetailsId: REQ_B, available: false },
-];
 
 const build = () => {
   const bankDetails = {
@@ -65,20 +61,13 @@ const build = () => {
     moveOwnCounterparty: jest.fn(async () => ({ id: 7, bankDetailsId: REQ_B })),
   };
   const counterparties = {
-    boundTo: jest.fn(async () => bound),
-    countBoundByRequisites: jest.fn(
-      async () =>
-        new Map([
-          [REQ_A, 1],
-          [REQ_B, 1],
-        ]),
-    ),
     unbind: jest.fn(async () => ({})),
   };
-  const stats = {
-    traderCounterpartyDeposits: jest.fn(async () => [
+  const traderCounterparties = {
+    totalsByRequisite: jest.fn(async () => [
       {
         bankDetailsId: REQ_A,
+        bound: 1,
         completedCount: 8,
         paidCount: 4,
         paidAmount: toFiat('200002.00'),
@@ -86,13 +75,14 @@ const build = () => {
       },
       {
         bankDetailsId: REQ_B,
+        bound: 1,
         completedCount: 2,
         paidCount: 0,
         paidAmount: toFiat(0),
         deposits30d: toFiat(0),
       },
     ]),
-    traderCounterpartyPage: jest.fn(
+    page: jest.fn(
       async () =>
         new Page(
           [
@@ -122,10 +112,10 @@ const build = () => {
   const controller = new TraderCounterpartiesController(
     bankDetails as never,
     counterparties as never,
-    stats as never,
+    traderCounterparties as never,
   );
 
-  return { controller, bankDetails, counterparties, stats };
+  return { controller, bankDetails, counterparties, traderCounterparties };
 };
 
 describe('TraderCounterpartiesController', () => {
@@ -144,7 +134,7 @@ describe('TraderCounterpartiesController', () => {
   });
 
   it('sums the cards over the clients bound to the trader’s own requisites', async () => {
-    const { controller, bankDetails, counterparties, stats } = build();
+    const { controller, bankDetails, traderCounterparties } = build();
 
     expect(await controller.summary(trader, { bankDetailsId: REQ_A })).toEqual({
       total: 2,
@@ -156,10 +146,9 @@ describe('TraderCounterpartiesController', () => {
       trader.id,
       REQ_A,
     );
-    expect(counterparties.boundTo).toHaveBeenCalledWith([REQ_A, REQ_B]);
-    expect(stats.traderCounterpartyDeposits).toHaveBeenCalledWith(
+    expect(traderCounterparties.totalsByRequisite).toHaveBeenCalledWith(
       trader.id,
-      bound,
+      [REQ_A, REQ_B],
       expect.any(Date),
     );
   });
@@ -198,7 +187,7 @@ describe('TraderCounterpartiesController', () => {
   });
 
   it('lists the clients with the internal id, active or inactive only, and the trader-scoped figures', async () => {
-    const { controller, stats } = build();
+    const { controller, traderCounterparties } = build();
 
     const page = await controller.list(trader, {
       page: 1,
@@ -233,9 +222,9 @@ describe('TraderCounterpartiesController', () => {
       },
     ]);
     expect(Object.keys(page.items[0])).not.toContain('externalId');
-    expect(stats.traderCounterpartyPage).toHaveBeenCalledWith(
+    expect(traderCounterparties.page).toHaveBeenCalledWith(
       trader.id,
-      bound,
+      [REQ_A, REQ_B],
       {
         page: 1,
         limit: 20,

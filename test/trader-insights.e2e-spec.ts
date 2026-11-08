@@ -3,6 +3,9 @@ import { AuditService } from '../src/audit/services/audit.service';
 import { Role } from '../src/common/enums/role.enum';
 import { toCrypto } from '../src/common/utils/to-crypto';
 import { toFiat } from '../src/common/utils/to-fiat';
+import { CounterpartyTraderDailyVolume } from '../src/counterparties/entities/counterparty-trader-daily-volume.entity';
+import { CounterpartyTraderStats } from '../src/counterparties/entities/counterparty-trader-stats.entity';
+import { CounterpartyDailyVolume } from '../src/counterparties/entities/counterparty-daily-volume.entity';
 import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
 import { Device } from '../src/devices/entities/device.entity';
 import { MerchantMethod } from '../src/merchants/entities/merchant-method.entity';
@@ -16,6 +19,7 @@ import { TransactionDispute } from '../src/transactions/entities/transaction-dis
 import { TransactionStatusEvent } from '../src/transactions/entities/transaction-status-event.entity';
 import { Transaction } from '../src/transactions/entities/transaction.entity';
 import { Wallet } from '../src/transactions/entities/wallet.entity';
+import { CounterpartyDealStatsService } from '../src/transactions/services/counterparty-deal-stats.service';
 import { DisputeStatus } from '../src/transactions/types/dispute-status.enum';
 import { RateScope } from '../src/transactions/types/rate-scope.enum';
 import { SelectionFilter } from '../src/transactions/types/selection-filter.enum';
@@ -352,6 +356,247 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
           where: { counterpartyId: clientId },
         }),
       ).toBe(2);
+    });
+
+    it('sorts, filters and pages the bound clients in the database from the counters of each pair, which the rebuild reproduces', async () => {
+      const settings = e2e.dataSource.getRepository(TraderSettings);
+      await settings.update(
+        { userId: trader.user.id },
+        { tradingEnabled: false },
+      );
+      const pageTrader = await e2e.createUser(Role.Trader);
+      const device = await ready(pageTrader);
+      const slotted = await requisite(pageTrader, device, '+79010000011', 5);
+      const settle = async (
+        externalId: string,
+        amount: string,
+        action: 'confirm' | 'decline',
+      ) => {
+        const id = await payIn(externalId, amount);
+        expect((await deal(id)).bankDetailsId).toBe(slotted);
+        await e2e.http
+          .post(`/trader/deals/${id}/${action}`)
+          .set(bearer(pageTrader))
+          .send(action === 'decline' ? { reasonCode: 'limit_reached' } : {})
+          .expect(200);
+
+        return id;
+      };
+
+      const settledA = await settle('page-a', '6000', 'confirm');
+      await settle('page-b', '7000', 'confirm');
+      await settle('page-b', '8000', 'decline');
+      const canceledC = await settle('page-c', '9000', 'decline');
+      const empty = await requisite(pageTrader, device, '+79010000012', 1);
+      const [a, b, c] = await Promise.all(
+        ['page-a', 'page-b', 'page-c'].map(
+          async (externalId) => (await client(externalId)).id,
+        ),
+      );
+      const list = (query: Record<string, string>) =>
+        e2e.http
+          .get('/trader/counterparties')
+          .set(bearer(pageTrader))
+          .query(query)
+          .expect(200);
+      const idsOf = (body: { data: { id: number }[] }) =>
+        body.data.map((row) => row.id);
+
+      const first = await list({ sortBy: 'volume', limit: '2' });
+      expect(idsOf(first.body)).toEqual([b, a]);
+      expect(first.body.meta).toEqual({
+        total: 3,
+        page: 1,
+        limit: 2,
+        pages: 2,
+      });
+      expect(
+        idsOf((await list({ sortBy: 'volume', limit: '2', page: '2' })).body),
+      ).toEqual([c]);
+      expect(
+        (await list({ sortBy: 'conversion', sortOrder: 'asc' })).body.data,
+      ).toEqual([
+        expect.objectContaining({
+          id: c,
+          conversion: 0,
+          completedCount: 1,
+          status: 'inactive',
+        }),
+        expect.objectContaining({
+          id: b,
+          conversion: 50,
+          paidCount: 1,
+          completedCount: 2,
+          averageCheck: '7000.00',
+          volume: '7000.00',
+        }),
+        expect.objectContaining({ id: a, conversion: 100 }),
+      ]);
+      const active = await list({ hideInactive: 'true', sortBy: 'id' });
+      expect(idsOf(active.body)).toEqual([b, a].sort((x, y) => y - x));
+      expect(active.body.meta.total).toBe(2);
+      expect(idsOf((await list({ bankDetailsId: empty })).body)).toEqual([]);
+      expect((await list({ bankDetailsId: slotted })).body.meta.total).toBe(3);
+
+      const summary = await e2e.http
+        .get('/trader/counterparties/summary')
+        .set(bearer(pageTrader))
+        .expect(200);
+      expect(summary.body.data).toEqual({
+        total: 3,
+        averageConversion: 50,
+        deposits30d: '13000.00',
+        averageCheck: '6500.00',
+      });
+      const groups = await e2e.http
+        .get('/trader/counterparties/groups')
+        .set(bearer(pageTrader))
+        .expect(200);
+      const groupOf = (id: string) =>
+        (
+          groups.body.data as {
+            requisite: { id: string };
+            slots: { bound: number; max: number };
+            deposits30d: string;
+          }[]
+        ).find((row) => row.requisite.id === id);
+      expect(groupOf(slotted)).toMatchObject({
+        slots: { bound: 3, max: 5 },
+        deposits30d: '13000.00',
+      });
+      expect(groupOf(empty)).toMatchObject({
+        slots: { bound: 0, max: 1 },
+        deposits30d: '0.00',
+      });
+
+      const snapshot = async () => {
+        const totals = await e2e.dataSource
+          .getRepository(CounterpartyTraderStats)
+          .find({ order: { counterpartyId: 'ASC', traderUserId: 'ASC' } });
+        const days = await e2e.dataSource
+          .getRepository(CounterpartyTraderDailyVolume)
+          .find({
+            order: { counterpartyId: 'ASC', traderUserId: 'ASC', day: 'ASC' },
+          });
+
+        return {
+          totals: totals.map((row) => ({
+            counterpartyId: row.counterpartyId,
+            traderUserId: row.traderUserId,
+            completedCount: row.completedCount,
+            paidCount: row.paidCount,
+            paidAmount: row.paidAmount.toFixed(2),
+            lastPaidAt: row.lastPaidAt?.toISOString() ?? null,
+            lastDealAt: row.lastDealAt?.toISOString() ?? null,
+          })),
+          days: days.map((row) => ({
+            counterpartyId: row.counterpartyId,
+            traderUserId: row.traderUserId,
+            day: row.day,
+            paidCount: row.paidCount,
+            paidAmount: row.paidAmount.toFixed(2),
+          })),
+        };
+      };
+      const clientSnapshot = async () => {
+        const rows = await e2e.dataSource
+          .getRepository(Counterparty)
+          .find({ order: { id: 'ASC' } });
+        const days = await e2e.dataSource
+          .getRepository(CounterpartyDailyVolume)
+          .find({ order: { counterpartyId: 'ASC', day: 'ASC' } });
+
+        return {
+          rows: rows.map((row) => ({
+            id: row.id,
+            dealCount: row.dealCount,
+            completedCount: row.completedCount,
+            paidCount: row.paidCount,
+            disputeCount: row.disputeCount,
+            paidAmount: row.paidAmount.toFixed(2),
+            lastDepositAt: row.lastDepositAt?.toISOString() ?? null,
+          })),
+          days: days.map((row) => ({
+            counterpartyId: row.counterpartyId,
+            day: row.day,
+            paidCount: row.paidCount,
+            paidAmount: row.paidAmount.toFixed(2),
+          })),
+        };
+      };
+      const evidence = async (id: string): Promise<string> =>
+        (
+          await e2e.http
+            .post('/v1/files')
+            .set('X-Secure-Key', key)
+            .field('dealId', id)
+            .attach(
+              'file',
+              Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n'),
+              'чек.pdf',
+            )
+            .expect(201)
+        ).body.data.fileKey as string;
+      const dispute = async (id: string, amount?: string) =>
+        e2e.http
+          .post(`/v1/payment/${id}/dispute`)
+          .set('X-Secure-Key', key)
+          .send({
+            fileKeys: [await evidence(id)],
+            ...(amount === undefined ? {} : { amount }),
+          })
+          .expect(200);
+
+      const changed = await payIn('page-d', '5500');
+      await e2e.http
+        .post(`/trader/deals/${changed}/confirm-changed`)
+        .set(bearer(pageTrader))
+        .send({ amount: '5600' })
+        .expect(200);
+      expect((await deal(changed)).amountFiat.toFixed(2)).toBe('5600.00');
+      const d = (await client('page-d')).id;
+
+      await dispute(settledA, '6500');
+      await dispute(canceledC);
+      expect((await deal(settledA)).status).toBe('dispute');
+      expect((await deal(canceledC)).status).toBe('dispute');
+
+      const live = await snapshot();
+      const liveClients = await clientSnapshot();
+      expect(live.totals.length).toBeGreaterThanOrEqual(5);
+      expect(
+        live.totals.find(
+          (row) =>
+            row.counterpartyId === a && row.traderUserId === pageTrader.user.id,
+        ),
+      ).toMatchObject({
+        completedCount: 1,
+        paidCount: 1,
+        paidAmount: '6000.00',
+      });
+      expect(
+        live.totals.find(
+          (row) =>
+            row.counterpartyId === c && row.traderUserId === pageTrader.user.id,
+        ),
+      ).toMatchObject({ completedCount: 1, paidCount: 0 });
+      expect(live.totals.find((row) => row.counterpartyId === d)).toMatchObject(
+        { paidCount: 1, paidAmount: '5600.00' },
+      );
+      await e2e.app
+        .get(CounterpartyDealStatsService)
+        .rebuildCounterpartyStats();
+      expect(await snapshot()).toEqual(live);
+      expect(await clientSnapshot()).toEqual(liveClients);
+
+      await settings.update(
+        { userId: trader.user.id },
+        { tradingEnabled: true },
+      );
+      await settings.update(
+        { userId: pageTrader.user.id },
+        { tradingEnabled: false },
+      );
     });
   });
 

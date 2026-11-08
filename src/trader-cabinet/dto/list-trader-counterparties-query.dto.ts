@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { TraderCounterpartySortField } from '../../transactions/types/trader-counterparty-sort-field.enum';
+import { TraderCounterpartySortField } from '../../counterparties/types/trader-counterparty-sort-field.enum';
 
 const asBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true') return true;

@@ -504,6 +504,10 @@ export class TransactionService {
       await this.counterpartyStats.recordDealCreatedWithin(
         manager,
         transaction.counterpartyId,
+        {
+          traderUserId: transaction.traderUserId,
+          createdAt: transaction.createdAt,
+        },
       );
     }
     return transaction;
@@ -846,6 +850,7 @@ export class TransactionService {
           paid: transaction.status !== TransactionStatus.Canceled,
           amountFiat: transaction.amountFiat,
           resolvedAt: transaction.resolvedAt,
+          traderUserId: transaction.traderUserId,
         },
       );
     }

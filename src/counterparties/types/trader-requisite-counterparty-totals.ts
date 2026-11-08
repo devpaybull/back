@@ -1,7 +1,8 @@
 import { Fiat } from '../../common/types/fiat';
 
-export interface TraderCounterpartyDeposits {
+export interface TraderRequisiteCounterpartyTotals {
   bankDetailsId: string;
+  bound: number;
   completedCount: number;
   paidCount: number;
   paidAmount: Fiat;

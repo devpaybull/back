@@ -1449,7 +1449,10 @@ describe('TransactionService, counterparty statistics', () => {
 
       expect(
         built.counterpartyStats.recordDealCreatedWithin,
-      ).toHaveBeenCalledWith(built.manager, 8);
+      ).toHaveBeenCalledWith(built.manager, 8, {
+        traderUserId: expect.any(String),
+        createdAt: expect.any(Date),
+      });
     });
 
     it('records nothing for a deal without a counterparty', async () => {
@@ -1534,6 +1537,7 @@ describe('TransactionService, counterparty statistics', () => {
         paid: true,
         amountFiat: toFiat('1500.50'),
         resolvedAt: result.resolvedAt,
+        traderUserId: result.traderUserId,
       });
     });
 

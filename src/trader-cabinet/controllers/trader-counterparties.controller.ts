@@ -33,7 +33,7 @@ import { percentOf } from '../../common/utils/percent-of';
 import { roundFiat } from '../../common/utils/round-fiat';
 import { toDecimal } from '../../common/utils/to-decimal';
 import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
-import { CounterpartyDealStatsService } from '../../transactions/services/counterparty-deal-stats.service';
+import { TraderCounterpartiesService } from '../../counterparties/services/trader-counterparties.service';
 import { ListTraderCounterpartiesQueryDto } from '../dto/list-trader-counterparties-query.dto';
 import { ListTraderCounterpartyGroupsQueryDto } from '../dto/list-trader-counterparty-groups-query.dto';
 import { MoveCounterpartyDto } from '../dto/move-counterparty.dto';
@@ -48,7 +48,7 @@ import { TraderCounterpartyDto } from '../dto/trader-counterparty.dto';
 import { TraderCounterpartyStatus } from '../types/trader-counterparty-status.enum';
 
 const SCOPE =
-  'Every figure counts only the deals of these clients with this trader; the merchant’s client id and other traders’ deals are never shown.';
+  'Every figure counts only the deals of these clients with this trader (kept as counters per client and trader); the merchant’s client id and other traders’ deals are never shown.';
 
 const assertIdInRange = (id: number): void => {
   if (id < 1 || id > INT4_MAX) {
@@ -65,7 +65,7 @@ export class TraderCounterpartiesController {
   constructor(
     private readonly bankDetails: BankDetailsService,
     private readonly counterparties: CounterpartiesService,
-    private readonly stats: CounterpartyDealStatsService,
+    private readonly traderCounterparties: TraderCounterpartiesService,
   ) {}
 
   @Get('summary')
@@ -79,33 +79,27 @@ export class TraderCounterpartiesController {
     @CurrentUser() trader: AuthenticatedUser,
     @Query() query: TraderCounterpartySummaryQueryDto,
   ): Promise<TraderCounterpartySummaryDto> {
-    const bound = await this.counterparties.boundTo(
+    const totals = await this.traderCounterparties.totalsByRequisite(
+      trader.id,
       await this.bankDetails.ownCounterpartyOnlyIds(
         trader.id,
         query.bankDetailsId,
       ),
-    );
-    const deposits = await this.stats.traderCounterpartyDeposits(
-      trader.id,
-      bound,
       new Date(),
     );
-    const paid = deposits.reduce((sum, row) => sum + row.paidCount, 0);
-    const completed = deposits.reduce(
-      (sum, row) => sum + row.completedCount,
-      0,
-    );
-    const paidAmount = deposits.reduce(
+    const paid = totals.reduce((sum, row) => sum + row.paidCount, 0);
+    const completed = totals.reduce((sum, row) => sum + row.completedCount, 0);
+    const paidAmount = totals.reduce(
       (sum, row) => sum.plus(row.paidAmount),
       toDecimal(0),
     );
-    const deposits30d = deposits.reduce(
+    const deposits30d = totals.reduce(
       (sum, row) => sum.plus(row.deposits30d),
       toDecimal(0),
     );
 
     return {
-      total: bound.length,
+      total: totals.reduce((sum, row) => sum + row.bound, 0),
       averageConversion: percentOf(paid, completed),
       deposits30d: formatFiat(roundFiat(deposits30d)),
       averageCheck: averageCheckOf(paidAmount, paid),
@@ -129,28 +123,23 @@ export class TraderCounterpartiesController {
       sortOrder: query.sortOrder,
       bankDetailsId: query.bankDetailsId,
     });
-    const ids = page.items.map((row) => row.id);
-    const [slots, bound] = await Promise.all([
-      this.counterparties.countBoundByRequisites(ids),
-      this.counterparties.boundTo(ids),
-    ]);
-    const deposits = new Map(
+    const totals = new Map(
       (
-        await this.stats.traderCounterpartyDeposits(
+        await this.traderCounterparties.totalsByRequisite(
           trader.id,
-          bound,
+          page.items.map((row) => row.id),
           new Date(),
         )
-      ).map((row) => [row.bankDetailsId, row.deposits30d]),
+      ).map((row) => [row.bankDetailsId, row]),
     );
 
     return page.map((row) => ({
       requisite: this.requisiteOf(row),
       slots: {
-        bound: slots.get(row.id) ?? 0,
+        bound: totals.get(row.id)?.bound ?? 0,
         max: row.maxCounterparties ?? null,
       },
-      deposits30d: formatFiat(deposits.get(row.id) ?? roundFiat(0)),
+      deposits30d: formatFiat(totals.get(row.id)?.deposits30d ?? roundFiat(0)),
     }));
   }
 
@@ -164,15 +153,12 @@ export class TraderCounterpartiesController {
     @CurrentUser() trader: AuthenticatedUser,
     @Query() query: ListTraderCounterpartiesQueryDto,
   ): Promise<Page<TraderCounterpartyDto>> {
-    const bound = await this.counterparties.boundTo(
+    const page = await this.traderCounterparties.page(
+      trader.id,
       await this.bankDetails.ownCounterpartyOnlyIds(
         trader.id,
         query.bankDetailsId,
       ),
-    );
-    const page = await this.stats.traderCounterpartyPage(
-      trader.id,
-      bound,
       {
         page: query.page,
         limit: query.limit,

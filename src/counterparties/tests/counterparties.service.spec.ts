@@ -693,51 +693,6 @@ describe('CounterpartiesService mutations and reads', () => {
     });
   });
 
-  describe('boundTo', () => {
-    it('answers nothing without asking for no requisites', async () => {
-      const find = jest.fn();
-      (repository as unknown as { find: jest.Mock }).find = find;
-
-      expect(await service.boundTo([])).toEqual([]);
-      expect(find).not.toHaveBeenCalled();
-    });
-
-    it('lists the clients bound to the requisites, unavailable when disabled or blacklisted', async () => {
-      const find = jest.fn(async () => [
-        {
-          id: 1,
-          bankDetailsId: uuidOf(30),
-          enabled: true,
-          blacklistedAt: null,
-        },
-        {
-          id: 2,
-          bankDetailsId: uuidOf(30),
-          enabled: false,
-          blacklistedAt: null,
-        },
-        {
-          id: 3,
-          bankDetailsId: uuidOf(31),
-          enabled: false,
-          blacklistedAt: new Date(),
-        },
-      ]);
-      (repository as unknown as { find: jest.Mock }).find = find;
-
-      expect(await service.boundTo([uuidOf(30), uuidOf(31)])).toEqual([
-        { id: 1, bankDetailsId: uuidOf(30), available: true },
-        { id: 2, bankDetailsId: uuidOf(30), available: false },
-        { id: 3, bankDetailsId: uuidOf(31), available: false },
-      ]);
-      expect(find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { bankDetailsId: In([uuidOf(30), uuidOf(31)]) },
-        }),
-      );
-    });
-  });
-
   describe('unbindRequisiteWithin', () => {
     it('clears every counterparty bound to the requisite as the system', async () => {
       const first = row({ id: 1, bankDetailsId: uuidOf(30) });

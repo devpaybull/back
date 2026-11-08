@@ -18,7 +18,6 @@ import { CounterpartyRequisiteEvent } from '../entities/counterparty-requisite-e
 import { Counterparty } from '../entities/counterparty.entity';
 import { BindableRequisite } from '../types/bindable-requisite';
 import { BindingScope } from '../types/binding-scope';
-import { BoundCounterparty } from '../types/bound-counterparty';
 import { CounterpartyBindingType } from '../types/counterparty-binding-type.enum';
 import { CounterpartyChanges } from '../types/counterparty-changes';
 import { CounterpartyData } from '../types/counterparty-data';
@@ -435,29 +434,6 @@ export class CounterpartiesService {
     rows.forEach((row) => counts.set(row.bankDetailsId, Number(row.bound)));
 
     return counts;
-  }
-
-  async boundTo(
-    bankDetailsIds: readonly string[],
-  ): Promise<BoundCounterparty[]> {
-    if (bankDetailsIds.length === 0) return [];
-
-    const rows = await this.counterparties.find({
-      select: {
-        id: true,
-        bankDetailsId: true,
-        enabled: true,
-        blacklistedAt: true,
-      },
-      where: { bankDetailsId: In([...bankDetailsIds]) },
-      order: { id: 'ASC' },
-    });
-
-    return rows.map((row) => ({
-      id: row.id,
-      bankDetailsId: row.bankDetailsId as string,
-      available: row.enabled && row.blacklistedAt === null,
-    }));
   }
 
   async listRequisiteEvents(
