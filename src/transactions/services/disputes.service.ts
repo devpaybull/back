@@ -38,6 +38,7 @@ import { DealCallbacksService } from './deal-callbacks.service';
 import { DisputeMoneyService } from './dispute-money.service';
 import { TransactionFilesService } from './transaction-files.service';
 import { TransactionService } from './transaction.service';
+import { WalletService } from './wallet.service';
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -75,6 +76,7 @@ export class DisputesService {
     private readonly audit: AuditService,
     private readonly config: ConfigService,
     private readonly dealCallbacks: DealCallbacksService,
+    private readonly wallets: WalletService,
   ) {}
 
   openByMerchant(
@@ -91,6 +93,14 @@ export class DisputesService {
       });
 
       if (!deal) throw dealNotFound();
+
+      if (deal.traderUserId) {
+        await this.wallets.lockWalletsWithin(
+          manager,
+          [deal.traderUserId],
+          [deal.traderUserId],
+        );
+      }
 
       if (
         now.getTime() - deal.createdAt.getTime() >

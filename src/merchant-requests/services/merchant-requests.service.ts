@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,6 +16,7 @@ const DROPPED_HEADERS: ReadonlySet<string> = new Set([
 ]);
 const KEY_VISIBLE_EDGE = 4;
 const ERROR_STATUS_FROM = 400;
+const COUNTER_LOCK_TIMEOUT = "SET LOCAL lock_timeout = '5s'";
 
 const maskKey = (value: string): string =>
   value.length > KEY_VISIBLE_EDGE * 2
@@ -54,6 +55,8 @@ const resultOf = (
 
 @Injectable()
 export class MerchantRequestsService {
+  private readonly logger = new Logger(MerchantRequestsService.name);
+
   constructor(
     @InjectRepository(MerchantApiRequest)
     private readonly requests: Repository<MerchantApiRequest>,
@@ -98,21 +101,46 @@ export class MerchantRequestsService {
       receivedAt: entry.receivedAt,
     };
 
-    if (row.counterpartyId === null) {
-      await this.requests.insert(row);
-      return;
+    await this.requests.insert(row);
+
+    if (row.counterpartyId !== null) {
+      await this.countRequest(row.id, row.counterpartyId, entry.receivedAt);
     }
+  }
 
-    const counterpartyId = row.counterpartyId;
+  private async countRequest(
+    id: string,
+    counterpartyId: number,
+    receivedAt: Date,
+  ): Promise<void> {
+    try {
+      await this.requests.manager.transaction(async (manager) => {
+        await manager.query(COUNTER_LOCK_TIMEOUT);
+        await this.counterpartyStats.lockRequestCountersWithin(
+          manager,
+          'shared',
+        );
 
-    await this.requests.manager.transaction(async (manager) => {
-      await manager.insert(MerchantApiRequest, row);
-      await this.counterpartyStats.recordRequestWithin(
-        manager,
-        counterpartyId,
-        entry.receivedAt,
+        const marked = await manager
+          .createQueryBuilder()
+          .update(MerchantApiRequest)
+          .set({ counted: true })
+          .where('id = :id AND counted = false', { id })
+          .execute();
+
+        if (marked.affected !== 1) return;
+
+        await this.counterpartyStats.recordRequestWithin(
+          manager,
+          counterpartyId,
+          receivedAt,
+        );
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Request ${id} is logged but not yet counted for counterparty ${counterpartyId}: ${(error as Error).message}`,
       );
-    });
+    }
   }
 
   private maskHeaders(

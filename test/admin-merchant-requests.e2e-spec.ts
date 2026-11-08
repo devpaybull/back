@@ -521,6 +521,13 @@ describe('the admin request history (RH)', () => {
         .rebuildCounterpartyStats();
 
       const after = await cardOf(paying.id);
+      expect(
+        (
+          await e2e.dataSource
+            .getRepository(MerchantApiRequest)
+            .findOneByOrFail({ id: created.requestId })
+        ).counted,
+      ).toBe(true);
       expect(after.requestCount).toBe(before.requestCount);
       expect(after.lastLoginAt).toBe(before.lastLoginAt);
       expect(
@@ -538,6 +545,11 @@ describe('the admin request history (RH)', () => {
       'X-Forwarded-For': '203.0.113.7, 2001:db8::1',
       'X-Real-IP': '198.51.100.2',
       Forwarded: 'for="[2001:db8:cafe::17]:4711";proto=https, for=192.0.2.60',
+      'CF-Connecting-IP': '203.0.113.20',
+      'True-Client-IP': '203.0.113.21',
+      'X-Client-IP': '2001:db8::21',
+      'X-Original-Forwarded-For': '198.51.100.20, 198.51.100.21',
+      Via: '1.1 203.0.113.22:3128 (squid), 1.1 proxy.example',
     };
     const id = (
       await e2e.http
@@ -555,6 +567,11 @@ describe('the admin request history (RH)', () => {
       'x-forwarded-for': sent['X-Forwarded-For'],
       'x-real-ip': sent['X-Real-IP'],
       forwarded: sent.Forwarded,
+      'cf-connecting-ip': sent['CF-Connecting-IP'],
+      'true-client-ip': sent['True-Client-IP'],
+      'x-client-ip': sent['X-Client-IP'],
+      'x-original-forwarded-for': sent['X-Original-Forwarded-For'],
+      via: sent.Via,
     };
 
     expect(await shown(admin)).toMatchObject({
@@ -562,6 +579,11 @@ describe('the admin request history (RH)', () => {
       'x-real-ip': '198.51.*.*',
       forwarded:
         'for="[2001:db8:cafe:0:*:*:*:*]:4711";proto=https, for=192.0.*.*',
+      'cf-connecting-ip': '203.0.*.*',
+      'true-client-ip': '203.0.*.*',
+      'x-client-ip': '2001:db8:0:0:*:*:*:*',
+      'x-original-forwarded-for': '198.51.*.*, 198.51.*.*',
+      via: '1.1 203.0.*.*:3128 (squid), 1.1 proxy.example',
     });
     expect(await shown(superadmin)).toMatchObject(whole);
     expect(

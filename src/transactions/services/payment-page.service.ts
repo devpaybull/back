@@ -227,11 +227,13 @@ export class PaymentPageService {
       deal.merchantId ? this.settings.settingsOf(deal.merchantId) : null,
     ]);
 
+    const final = isFinalStatus(deal.status);
+
     return {
       amount: payment.amount,
       currency: payment.currency,
-      requisite: payment.requisite,
-      expiresAt: payment.expiresAt,
+      requisite: final ? null : payment.requisite,
+      expiresAt: final ? null : payment.expiresAt,
       status: payment.status,
       successUrl: deal.successUrl ?? settings?.successUrl ?? null,
       errorUrl: deal.errorUrl ?? settings?.errorUrl ?? null,

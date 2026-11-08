@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
@@ -10,10 +10,13 @@ import { toFiat } from '../../common/utils/to-fiat';
 import { zonedMidnight } from '../../common/utils/zoned-midnight';
 import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
 import { MerchantRequestHistoryService } from '../../merchant-requests/services/merchant-request-history.service';
+import { CounterpartyRequestCounts } from '../../merchant-requests/types/counterparty-request-counts';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { CounterpartyDealEventListQuery } from '../types/counterparty-deal-event-list-query';
 import { CounterpartyDealStats } from '../types/counterparty-deal-stats';
+import { CounterpartyRebuildResult } from '../types/counterparty-rebuild-result';
+import { CounterpartyRequestCountersRebuild } from '../types/counterparty-request-counters-rebuild.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { COUNTERPARTY_STATS_METHOD_CODES } from '../utils/counterparty-stats-method-codes';
@@ -33,6 +36,8 @@ interface TotalsRow {
 
 @Injectable()
 export class CounterpartyDealStatsService {
+  private readonly logger = new Logger(CounterpartyDealStatsService.name);
+
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -99,7 +104,7 @@ export class CounterpartyDealStatsService {
     );
   }
 
-  async rebuildCounterpartyStats(): Promise<void> {
+  async rebuildCounterpartyStats(): Promise<CounterpartyRebuildResult> {
     const totals = await this.withTotals(
       this.countedDeals(COUNTERPARTY_STATS_METHOD_CODES),
     )
@@ -126,9 +131,7 @@ export class CounterpartyDealStatsService {
         paidAmount: string;
       }>();
 
-    const requests = await this.requestLog.counterpartyRequestCounts(
-      this.timeZone(),
-    );
+    const archived = await this.archivedRequestCounts();
 
     await this.dataSource.transaction(async (manager) => {
       await this.counterpartyStats.replaceAllWithin(
@@ -144,12 +147,48 @@ export class CounterpartyDealStatsService {
           paidAmount: toFiat(row.paidAmount),
         })),
       );
+
+      if (archived === null) return;
+
+      await this.counterpartyStats.lockRequestCountersWithin(
+        manager,
+        'exclusive',
+      );
+
+      const requests =
+        await this.requestLog.storedCounterpartyRequestCountsWithin(
+          manager,
+          this.timeZone(),
+          archived,
+        );
+
       await this.counterpartyStats.replaceRequestsWithin(
         manager,
         requests.totals,
         requests.days,
       );
     });
+
+    return {
+      requestCounters:
+        archived === null
+          ? CounterpartyRequestCountersRebuild.Skipped
+          : CounterpartyRequestCountersRebuild.Rebuilt,
+    };
+  }
+
+  private async archivedRequestCounts(): Promise<CounterpartyRequestCounts | null> {
+    try {
+      return await this.requestLog.archivedCounterpartyRequestCounts(
+        this.timeZone(),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Counterparty request counters left as they are: the request log archive could not be read (${(error as Error).message})`,
+      );
+
+      return null;
+    }
   }
 
   private countedDeals(

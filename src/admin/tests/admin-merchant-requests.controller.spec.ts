@@ -332,6 +332,39 @@ describe('AdminMerchantRequestsController', () => {
       );
     });
 
+    it('masks CF-Connecting-IP, True-Client-IP, X-Client-IP, X-Original-Forwarded-For and the addresses inside Via for an admin', async () => {
+      const { controller, history } = build();
+      const more = {
+        'CF-Connecting-IP': '203.0.113.9',
+        'true-client-ip': '2001:db8::5',
+        'X-CLIENT-IP': 'not-an-address',
+        'x-original-forwarded-for': '198.51.100.3, 203.0.113.4',
+        Via: '1.1 203.0.113.10:8080 (squid), HTTP/1.1 [2001:db8::7]:443, 1.0 edge.example.com, 2 2001:db8::8',
+      };
+      history.findById.mockResolvedValueOnce({
+        ...record,
+        requestHeaders: { ...more },
+      });
+
+      expect(
+        (await controller.findOne(uuidOf(1), admin)).requestHeaders,
+      ).toEqual({
+        'CF-Connecting-IP': '203.0.*.*',
+        'true-client-ip': '2001:db8:0:0:*:*:*:*',
+        'X-CLIENT-IP': '*',
+        'x-original-forwarded-for': '198.51.*.*, 203.0.*.*',
+        Via: '1.1 203.0.*.*:8080 (squid), HTTP/1.1 [2001:db8:0:0:*:*:*:*]:443, 1.0 edge.example.com, 2 2001:db8:0:0:*:*:*:*',
+      });
+
+      history.findById.mockResolvedValueOnce({
+        ...record,
+        requestHeaders: { ...more },
+      });
+      expect(
+        (await controller.findOne(uuidOf(1), superadmin)).requestHeaders,
+      ).toEqual(more);
+    });
+
     it('shows them as stored to a superadmin', async () => {
       const { controller, history } = build();
       history.findById.mockResolvedValueOnce({

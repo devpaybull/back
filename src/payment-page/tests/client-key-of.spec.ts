@@ -26,4 +26,20 @@ describe('clientKeyOf', () => {
     expect(clientKeyOf('')).toBe('unknown');
     expect(clientKeyOf(' Not-An-IP ')).toBe('not-an-ip');
   });
+
+  it('keys an address that embeds an IPv4 by that IPv4, not by a /64 shared with every IPv4 client', () => {
+    expect(clientKeyOf('::ffff:0:203.0.113.7')).toBe('203.0.113.7');
+    expect(clientKeyOf('::ffff:0:cb00:7107')).toBe('203.0.113.7');
+    expect(clientKeyOf('::203.0.113.7')).toBe('203.0.113.7');
+    expect(clientKeyOf('64:ff9b::203.0.113.7')).toBe('203.0.113.7');
+    expect(clientKeyOf('64:ff9b::cb00:7108')).toBe('203.0.113.8');
+    expect(clientKeyOf('64:ff9b::203.0.113.7')).not.toBe(
+      clientKeyOf('64:ff9b::203.0.113.8'),
+    );
+  });
+
+  it('keeps ordinary IPv6 next to those prefixes on its /64', () => {
+    expect(clientKeyOf('64:ff9b:1::1')).toBe('64:ff9b:1:0::/64');
+    expect(clientKeyOf('::ffff:1:203.0.113.7')).toBe('0:0:0:0::/64');
+  });
 });

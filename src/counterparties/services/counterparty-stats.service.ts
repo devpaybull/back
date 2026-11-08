@@ -26,6 +26,10 @@ ON CONFLICT ("counterpartyId", "day") DO UPDATE SET
   "requestCount" = counterparty_daily_requests."requestCount" + EXCLUDED."requestCount",
   "updatedAt" = now()`;
 
+const REQUEST_COUNTERS_LOCK = 'counterparty_request_counters';
+const LOCK_SHARED = 'SELECT pg_advisory_xact_lock_shared(hashtext($1))';
+const LOCK_EXCLUSIVE = 'SELECT pg_advisory_xact_lock(hashtext($1))';
+
 @Injectable()
 export class CounterpartyStatsService {
   constructor(private readonly config: ConfigService) {}
@@ -164,6 +168,15 @@ export class CounterpartyStatsService {
         formatFiat(day.paidAmount),
       ]);
     }
+  }
+
+  async lockRequestCountersWithin(
+    manager: EntityManager,
+    mode: 'shared' | 'exclusive',
+  ): Promise<void> {
+    await manager.query(mode === 'shared' ? LOCK_SHARED : LOCK_EXCLUSIVE, [
+      REQUEST_COUNTERS_LOCK,
+    ]);
   }
 
   async recordRequestWithin(

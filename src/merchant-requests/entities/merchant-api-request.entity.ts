@@ -134,6 +134,9 @@ export class MerchantApiRequest {
   @Column({ type: 'jsonb', nullable: true })
   selectionSummary: SelectionSummary | null;
 
+  @Column({ default: false })
+  counted: boolean;
+
   @Column({ type: 'timestamptz' })
   receivedAt: Date;
 

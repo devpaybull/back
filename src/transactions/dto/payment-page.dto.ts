@@ -14,10 +14,14 @@ export class PaymentPageDto {
   @ApiProperty({ nullable: true, example: 'RUB' })
   currency: string | null;
 
-  @ApiProperty({ type: PaymentRequisiteDto, nullable: true })
+  @ApiProperty({
+    type: PaymentRequisiteDto,
+    nullable: true,
+    description: 'null once the deal is final',
+  })
   requisite: PaymentRequisiteDto | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({ nullable: true, description: 'null once the deal is final' })
   expiresAt: Date | null;
 
   @ApiProperty({ enum: TransactionStatus })

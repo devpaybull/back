@@ -172,7 +172,7 @@ describe('PaymentPageService', () => {
       if (token === 'short') expect(manager.findOne).not.toHaveBeenCalled();
     });
 
-    it('shows a final deal with the merchant’s URLs for 24 hours after it was resolved', async () => {
+    it('shows a final deal for 24 hours after it was resolved: the amount, the status and the merchant’s URLs, no requisite and no timer', async () => {
       for (const status of [
         TransactionStatus.Success,
         TransactionStatus.SuccessChanged,
@@ -185,10 +185,15 @@ describe('PaymentPageService', () => {
           }),
         );
 
-        await expect(service.view(TOKEN, NOW)).resolves.toMatchObject({
+        await expect(service.view(TOKEN, NOW)).resolves.toEqual({
+          amount: '2000.00',
+          currency: 'RUB',
+          requisite: null,
+          expiresAt: null,
           status,
           successUrl: 'https://merchant.example/ok',
           errorUrl: 'https://merchant.example/err',
+          supportLink: 'https://t.me/support',
         });
       }
     });

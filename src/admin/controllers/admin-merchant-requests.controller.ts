@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isIP } from 'node:net';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -69,13 +70,44 @@ const maskForwardedNode = (node: string): string => {
   return quoted ? `"${masked}"` : masked;
 };
 
+const VIA_RECEIVED_BY = /^(\s*\S+\s+)(\S+)/;
+
+const maskViaHost = (host: string): string => {
+  const bracketed = BRACKETED.exec(host);
+  const withPort = IPV4_WITH_PORT.exec(host);
+
+  if (bracketed) return `[${maskIp(bracketed[1])}]${bracketed[2]}`;
+  if (withPort) return `${maskIp(withPort[1])}${withPort[2]}`;
+
+  return isIP(host) === 0 ? host : maskIp(host);
+};
+
+const maskAddressList = (value: string): string =>
+  value
+    .split(',')
+    .map((address) => maskIp(address.trim()))
+    .join(', ');
+
+const maskAddress = (value: string): string => maskIp(value.trim());
+
 const ADDRESS_HEADERS: Record<string, (value: string) => string> = {
-  'x-forwarded-for': (value) =>
+  'x-forwarded-for': maskAddressList,
+  'x-original-forwarded-for': maskAddressList,
+  'x-real-ip': maskAddress,
+  'cf-connecting-ip': maskAddress,
+  'true-client-ip': maskAddress,
+  'x-client-ip': maskAddress,
+  via: (value) =>
     value
       .split(',')
-      .map((address) => maskIp(address.trim()))
-      .join(', '),
-  'x-real-ip': (value) => maskIp(value.trim()),
+      .map((entry) =>
+        entry.replace(
+          VIA_RECEIVED_BY,
+          (_match, protocol: string, host: string) =>
+            `${protocol}${maskViaHost(host)}`,
+        ),
+      )
+      .join(','),
   forwarded: (value) =>
     value.replace(
       FORWARDED_FOR,
@@ -185,7 +217,7 @@ export class AdminMerchantRequestsController {
   @ApiOperation({
     summary: 'One logged request with its headers, body and answer',
     description:
-      'The client address — `ip` and the X-Forwarded-For, X-Real-IP and Forwarded (`for=`) headers — is whole for a superadmin and masked for an admin. Not in Postgres nor in the archive: 404.',
+      'The client address — `ip` and the X-Forwarded-For, X-Original-Forwarded-For, X-Real-IP, CF-Connecting-IP, True-Client-IP, X-Client-IP, Forwarded (`for=`) and Via (the addresses) headers — is whole for a superadmin and masked for an admin. Not in Postgres nor in the archive: 404.',
   })
   @ApiEnvelopeResponse(MerchantRequestDetailDto)
   async findOne(

@@ -387,10 +387,15 @@ describe('the payment page /pay (MA11)', () => {
       .expect(200);
 
     const shown = await page(token).expect(200);
-    expect(shown.body.data).toMatchObject({
+    expect(shown.body.data).toEqual({
+      amount: expect.any(String),
+      currency: 'RUB',
+      requisite: null,
+      expiresAt: null,
       status: 'success',
       successUrl: 'https://merchant.example/ok',
       errorUrl: 'https://merchant.example/err',
+      supportLink: 'https://t.me/casino_support',
     });
     await paid(token).expect(404);
     await receipt(token).expect(404);

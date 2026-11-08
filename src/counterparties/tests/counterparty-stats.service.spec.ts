@@ -284,4 +284,22 @@ describe('CounterpartyStatsService', () => {
       ]);
     });
   });
+
+  describe('lockRequestCountersWithin', () => {
+    it('takes the request counters lock shared for a count and exclusive for a rebuild', async () => {
+      await service.lockRequestCountersWithin(manager as never, 'shared');
+      await service.lockRequestCountersWithin(manager as never, 'exclusive');
+
+      expect(manager.query.mock.calls).toEqual([
+        [
+          'SELECT pg_advisory_xact_lock_shared(hashtext($1))',
+          ['counterparty_request_counters'],
+        ],
+        [
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          ['counterparty_request_counters'],
+        ],
+      ]);
+    });
+  });
 });

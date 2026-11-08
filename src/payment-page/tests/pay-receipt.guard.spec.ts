@@ -89,4 +89,29 @@ describe('PayReceiptGuard', () => {
       (guard as unknown as { inProgress: Map<string, number> }).inProgress.size,
     ).toBe(0);
   });
+
+  it('holds at most 8 uploads in flight across all clients, refusing the ninth with 429 until one ends', async () => {
+    const pages = { assertAcceptsReceipt: jest.fn(async () => undefined) };
+    const guard = new PayReceiptGuard(pages as never);
+    const responses = Array.from({ length: 8 }, () => new EventEmitter());
+
+    for (const [index, response] of responses.entries()) {
+      await guard.canActivate(contextOf(`203.0.113.${index + 1}`, response));
+    }
+
+    const refused = await guard
+      .canActivate(contextOf('198.51.100.1'))
+      .catch((caught: unknown) => caught);
+
+    expect((refused as HttpException).getStatus()).toBe(429);
+    expect((refused as HttpException).getResponse()).toMatchObject({
+      code: 'TOO_MANY_UPLOADS',
+    });
+    expect(pages.assertAcceptsReceipt).toHaveBeenCalledTimes(8);
+
+    responses[3].emit('close');
+    await expect(guard.canActivate(contextOf('198.51.100.1'))).resolves.toBe(
+      true,
+    );
+  });
 });

@@ -12,6 +12,19 @@ const ADMIN_USER_ROUTE = /^\/admin\/users\/:id(\/|$)/;
 const UNAUDITED_ACTIONS = new Set(['POST /device/heartbeat']);
 const TOKEN_PARAM = 'token';
 const TOKEN_PLACEHOLDER = ':token';
+
+const withoutToken = (path: string, route: string): string => {
+  const pathSegments = path.split('/');
+  const routeSegments = route.split('/');
+
+  if (pathSegments.length !== routeSegments.length) return route;
+
+  return pathSegments
+    .map((segment, index) =>
+      routeSegments[index] === TOKEN_PLACEHOLDER ? TOKEN_PLACEHOLDER : segment,
+    )
+    .join('/');
+};
 const redactSecrets = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value === null || typeof value !== 'object') return value;
@@ -71,14 +84,11 @@ export class HttpAuditMiddleware implements NestMiddleware {
     if (UNAUDITED_ACTIONS.has(`${request.method} ${route}`)) return null;
 
     const params: Record<string, unknown> = { ...(request.params ?? {}) };
-    const token = params[TOKEN_PARAM];
     const fullPath = request.originalUrl.split('?')[0];
-    const path =
-      typeof token === 'string' && token
-        ? fullPath.split(token).join(TOKEN_PLACEHOLDER)
-        : fullPath;
+    const hasToken = params[TOKEN_PARAM] !== undefined;
+    const path = hasToken ? withoutToken(fullPath, route) : fullPath;
 
-    if (token !== undefined) params[TOKEN_PARAM] = TOKEN_PLACEHOLDER;
+    if (hasToken) params[TOKEN_PARAM] = TOKEN_PLACEHOLDER;
     const targetId = params.id;
     const body: unknown = request.body ?? null;
     const anonymousLogin =

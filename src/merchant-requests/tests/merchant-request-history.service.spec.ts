@@ -994,64 +994,159 @@ describe('MerchantRequestHistoryService', () => {
       expect(total).toBe(2);
     });
 
-    it('rebuilds the request counts from both stores, days in the business timezone', async () => {
-      archived = [
-        summary(1, 10, {
+    it('buckets the archive by counterparty and 15 minutes in LogsQL, de-duplicated per bucket, and maps the buckets to business days', async () => {
+      stored = [summary(3, 30)];
+      victoria.selectScoped.mockResolvedValueOnce([
+        {
+          counterpartyId: '5',
+          _time: '2026-10-31T21:00:00Z',
+          total: '2',
+          last: '2026-10-31T21:10:00.000Z',
+        },
+        {
+          counterpartyId: '5',
+          _time: '2026-10-31T20:45:00Z',
+          total: '1',
+          last: '2026-10-31T20:50:00.000Z',
+        },
+        {
+          counterpartyId: '6',
+          _time: '2026-10-31T20:45:00Z',
+          total: '4',
+          last: '2026-10-31T20:59:59.000Z',
+        },
+      ]);
+
+      const counts =
+        await service.archivedCounterpartyRequestCounts('Europe/Moscow');
+
+      expect(victoria.selectScoped.mock.calls[0][0]).toMatch(
+        / counterpartyId:\* \| stats by \(counterpartyId, _time:15m\) count_uniq\(requestId\) total, max\(receivedAt\) last$/,
+      );
+      expect(victoria.selectScoped.mock.calls[0][0]).toContain(
+        `receivedAt:string_range("0", "${at(30).toISOString()}")`,
+      );
+      expect(counts.totals).toEqual([
+        {
           counterpartyId: 5,
-          receivedAt: new Date('2026-10-31T21:30:00.000Z'),
+          requestCount: 3,
+          lastRequestAt: new Date('2026-10-31T21:10:00.000Z'),
+        },
+        {
+          counterpartyId: 6,
+          requestCount: 4,
+          lastRequestAt: new Date('2026-10-31T20:59:59.000Z'),
+        },
+      ]);
+      expect(counts.days).toEqual([
+        { counterpartyId: 5, day: '2026-11-01', requestCount: 2 },
+        { counterpartyId: 5, day: '2026-10-31', requestCount: 1 },
+        { counterpartyId: 6, day: '2026-10-31', requestCount: 4 },
+      ]);
+    });
+
+    it('reads nothing from an archive that is not configured', async () => {
+      victoria.enabled = false;
+
+      expect(
+        await service.archivedCounterpartyRequestCounts('Europe/Moscow'),
+      ).toEqual({ totals: [], days: [] });
+      expect(victoria.selectScoped).not.toHaveBeenCalled();
+    });
+
+    it('fails with a 503 on an archive bucket it cannot read', async () => {
+      stored = [summary(3, 30)];
+      victoria.selectScoped.mockResolvedValueOnce([
+        { counterpartyId: '5', _time: 'soon', total: '1', last: 'x' },
+      ]);
+
+      await expect(
+        service.archivedCounterpartyRequestCounts('Europe/Moscow'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
+
+    it('counts Postgres inside the caller’s transaction: marks every uncounted row first, then counts only counted rows on top of the archive', async () => {
+      const steps: string[] = [];
+      const update = {
+        update: jest.fn(() => update),
+        set: jest.fn(() => update),
+        where: jest.fn(() => update),
+        execute: jest.fn(async () => {
+          steps.push('mark');
         }),
-        summary(2, 20, {
-          counterpartyId: 5,
-          receivedAt: new Date('2026-10-31T20:30:00.000Z'),
-        }),
-      ];
-      const builder = {
-        select: jest.fn(() => builder),
-        addSelect: jest.fn(() => builder),
-        where: jest.fn(() => builder),
-        setParameter: jest.fn(() => builder),
-        groupBy: jest.fn(() => builder),
-        addGroupBy: jest.fn(() => builder),
-        getRawOne: jest.fn(async () => ({
-          oldest: new Date('2026-11-02T00:00:00.000Z'),
-        })),
-        getRawMany: jest.fn(async () => [
-          {
-            counterpartyId: 5,
-            day: '2026-11-02',
-            total: '2',
-            last: new Date('2026-11-02T09:00:00.000Z'),
-          },
-        ]),
       };
-      const rebuilt = new MerchantRequestHistoryService(
-        { createQueryBuilder: () => builder } as never,
-        victoria as never,
+      const select = {
+        select: jest.fn(() => select),
+        addSelect: jest.fn(() => select),
+        where: jest.fn(() => select),
+        andWhere: jest.fn(() => select),
+        setParameter: jest.fn(() => select),
+        groupBy: jest.fn(() => select),
+        addGroupBy: jest.fn(() => select),
+        getRawMany: jest.fn(async () => {
+          steps.push('count');
+          return [
+            {
+              counterpartyId: 5,
+              day: '2026-11-01',
+              total: '2',
+              last: new Date('2026-11-01T09:00:00.000Z'),
+            },
+            {
+              counterpartyId: 7,
+              day: '2026-11-02',
+              total: '1',
+              last: '2026-11-02T09:00:00.000Z',
+            },
+          ];
+        }),
+      };
+      const manager = {
+        createQueryBuilder: jest.fn(() => update),
+        getRepository: jest.fn(() => ({ createQueryBuilder: () => select })),
+      };
+
+      const counts = await service.storedCounterpartyRequestCountsWithin(
+        manager as never,
+        'Europe/Moscow',
+        {
+          totals: [
+            {
+              counterpartyId: 5,
+              requestCount: 3,
+              lastRequestAt: new Date('2026-10-31T21:10:00.000Z'),
+            },
+          ],
+          days: [{ counterpartyId: 5, day: '2026-11-01', requestCount: 2 }],
+        },
       );
 
-      const counts = await rebuilt.counterpartyRequestCounts('Europe/Moscow');
-
-      expect(builder.setParameter).toHaveBeenCalledWith(
+      expect(steps).toEqual(['mark', 'count']);
+      expect(update.set).toHaveBeenCalledWith({ counted: true });
+      expect(update.where).toHaveBeenCalledWith(
+        '"counterpartyId" IS NOT NULL AND counted = false',
+      );
+      expect(select.andWhere).toHaveBeenCalledWith('request.counted = true');
+      expect(select.setParameter).toHaveBeenCalledWith(
         'timeZone',
         'Europe/Moscow',
       );
       expect(counts.totals).toEqual([
         {
           counterpartyId: 5,
-          requestCount: 4,
+          requestCount: 5,
+          lastRequestAt: new Date('2026-11-01T09:00:00.000Z'),
+        },
+        {
+          counterpartyId: 7,
+          requestCount: 1,
           lastRequestAt: new Date('2026-11-02T09:00:00.000Z'),
         },
       ]);
-      expect(
-        [...counts.days].sort((a, b) => a.day.localeCompare(b.day)),
-      ).toEqual([
-        { counterpartyId: 5, day: '2026-10-31', requestCount: 1 },
-        { counterpartyId: 5, day: '2026-11-01', requestCount: 1 },
-        { counterpartyId: 5, day: '2026-11-02', requestCount: 2 },
+      expect(counts.days).toEqual([
+        { counterpartyId: 5, day: '2026-11-01', requestCount: 4 },
+        { counterpartyId: 7, day: '2026-11-02', requestCount: 1 },
       ]);
-      expect(victoria.selectScoped.mock.calls[0][0]).toContain(
-        'counterpartyId:* | fields requestId, counterpartyId, receivedAt | sort by (requestId) partition by (requestId) limit 1 | stats by (counterpartyId, receivedAt) count() total',
-      );
     });
   });
 });

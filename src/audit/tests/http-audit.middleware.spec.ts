@@ -209,6 +209,31 @@ describe('HttpAuditMiddleware', () => {
       expect(JSON.stringify(entry)).not.toContain(token);
     });
 
+    it('keeps a percent-encoded token out of the path too', async () => {
+      const token = 'Ab3_-'.repeat(8) + 'xyz';
+      const encoded = [...token]
+        .map(
+          (character) =>
+            `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+        )
+        .join('');
+
+      await request(app.getHttpServer())
+        .post(`/pay/${encoded}/paid`)
+        .set('Authorization', 'Bearer ok')
+        .send({})
+        .expect(200);
+
+      const [entry] = await recorded();
+
+      expect(entry).toMatchObject({
+        path: '/pay/:token/paid',
+        params: { token: ':token' },
+      });
+      expect(JSON.stringify(entry)).not.toContain(encoded);
+      expect(JSON.stringify(entry)).not.toContain(token);
+    });
+
     it('records a guard rejection, which happens before any interceptor runs', async () => {
       await request(app.getHttpServer())
         .post('/things')

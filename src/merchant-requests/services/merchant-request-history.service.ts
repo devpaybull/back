@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
-import { Brackets, Repository, SelectQueryBuilder } from 'typeorm';
+import {
+  Brackets,
+  EntityManager,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { VictoriaLogsService } from '../../audit/services/victoria-logs.service';
 import { VictoriaLine } from '../../audit/types/victoria-line';
 import { SortOrder } from '../../common/enums/sort-order.enum';
@@ -17,8 +22,6 @@ import { sortDirection } from '../../common/utils/sort-direction';
 import { toFiat } from '../../common/utils/to-fiat';
 import { SelectionSummary } from '../../transactions/types/selection-summary';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
-import { CounterpartyDayRequests } from '../../counterparties/types/counterparty-day-requests';
-import { CounterpartyRequestTotals } from '../../counterparties/types/counterparty-request-totals';
 import { MerchantApiRequest } from '../entities/merchant-api-request.entity';
 import { MerchantRequestArchiveReach } from '../types/merchant-request-archive-reach';
 import { CounterpartyRequestCounts } from '../types/counterparty-request-counts';
@@ -32,6 +35,7 @@ import { MerchantRequestSegment } from '../types/merchant-request-segment';
 import { MerchantRequestSlice } from '../types/merchant-request-slice';
 import { MerchantRequestSortField } from '../types/merchant-request-sort-field.enum';
 import { MerchantRequestSummary } from '../types/merchant-request-summary';
+import { CounterpartyRequestTally } from '../utils/counterparty-request-tally';
 import { MERCHANT_REQUEST_ARCHIVE_SOURCE } from '../utils/merchant-request-archive-source';
 import { MERGED_SORT_WINDOW_MAX } from '../../common/utils/merged-sort-window-max';
 
@@ -65,6 +69,7 @@ const RANGE_CEILING = '~';
 const UNRANKED = Number.MAX_SAFE_INTEGER;
 const ARCHIVE_TIME_SLACK_MS = 60 * 60 * 1000;
 const EPOCH = new Date(0);
+const ARCHIVE_BUCKET = '15m';
 const ARCHIVE_UNAVAILABLE = 'The request log archive is unavailable';
 
 const SORT_COLUMN: Record<
@@ -315,61 +320,83 @@ export class MerchantRequestHistoryService {
     return concat(this.timeSegments({ counterpartyId }, order, reach), 0, take);
   }
 
-  async counterpartyRequestCounts(
+  async archivedCounterpartyRequestCounts(
     timeZone: string,
   ): Promise<CounterpartyRequestCounts> {
+    const counts = new CounterpartyRequestTally();
     const reach = await this.archiveReach();
-    const [stored, archived] = await Promise.all([
-      this.requests
-        .createQueryBuilder('request')
-        .select('request.counterpartyId', 'counterpartyId')
-        .addSelect(
-          `to_char(request.receivedAt AT TIME ZONE :timeZone, 'YYYY-MM-DD')`,
-          'day',
-        )
-        .addSelect('COUNT(*)', 'total')
-        .addSelect('MAX(request.receivedAt)', 'last')
-        .where('request.counterpartyId IS NOT NULL')
-        .setParameter('timeZone', timeZone)
-        .groupBy('request.counterpartyId')
-        .addGroupBy('day')
-        .getRawMany<{
-          counterpartyId: number;
-          day: string;
-          total: string;
-          last: Date | string;
-        }>(),
-      this.archivedCounterpartyBuckets(reach),
-    ]);
-    const days = new Map<string, CounterpartyDayRequests>();
-    const totals = new Map<number, CounterpartyRequestTotals>();
-    const add = (
-      counterpartyId: number,
-      day: string,
-      count: number,
-      last: Date,
-    ): void => {
-      const dayKey = `${counterpartyId}:${day}`;
-      const bucket = days.get(dayKey);
-      const total = totals.get(counterpartyId);
 
-      days.set(dayKey, {
-        counterpartyId,
-        day,
-        requestCount: (bucket?.requestCount ?? 0) + count,
-      });
-      totals.set(counterpartyId, {
-        counterpartyId,
-        requestCount: (total?.requestCount ?? 0) + count,
-        lastRequestAt:
-          total?.lastRequestAt && total.lastRequestAt > last
-            ? total.lastRequestAt
-            : last,
-      });
-    };
+    if (!reach) return counts.result();
 
-    for (const row of stored) {
-      add(
+    const filter = this.archiveFilter({}, reach);
+
+    if (filter === null) return counts.result();
+
+    const buckets = await this.archive(
+      `${filter} counterpartyId:* | stats by (counterpartyId, _time:${ARCHIVE_BUCKET}) count_uniq(requestId) total, max(receivedAt) last`,
+      (line) => {
+        const start = new Date(line._time as string);
+        const last = new Date(line.last as string);
+
+        if (Number.isNaN(start.getTime()) || Number.isNaN(last.getTime())) {
+          throw new Error(
+            `Unreadable bucket ${line._time} / ${line.last} of counterparty ${line.counterpartyId}`,
+          );
+        }
+
+        return {
+          counterpartyId: Number(line.counterpartyId),
+          day: calendarDateIn(start, timeZone),
+          count: Number(line.total ?? 0),
+          last,
+        };
+      },
+    );
+
+    for (const bucket of buckets) {
+      counts.add(bucket.counterpartyId, bucket.day, bucket.count, bucket.last);
+    }
+
+    return counts.result();
+  }
+
+  async storedCounterpartyRequestCountsWithin(
+    manager: EntityManager,
+    timeZone: string,
+    archived: CounterpartyRequestCounts,
+  ): Promise<CounterpartyRequestCounts> {
+    await manager
+      .createQueryBuilder()
+      .update(MerchantApiRequest)
+      .set({ counted: true })
+      .where('"counterpartyId" IS NOT NULL AND counted = false')
+      .execute();
+
+    const rows = await manager
+      .getRepository(MerchantApiRequest)
+      .createQueryBuilder('request')
+      .select('request.counterpartyId', 'counterpartyId')
+      .addSelect(
+        `to_char(request.receivedAt AT TIME ZONE :timeZone, 'YYYY-MM-DD')`,
+        'day',
+      )
+      .addSelect('COUNT(*)', 'total')
+      .addSelect('MAX(request.receivedAt)', 'last')
+      .where('request.counterpartyId IS NOT NULL')
+      .andWhere('request.counted = true')
+      .setParameter('timeZone', timeZone)
+      .groupBy('request.counterpartyId')
+      .addGroupBy('day')
+      .getRawMany<{
+        counterpartyId: number;
+        day: string;
+        total: string;
+        last: Date | string;
+      }>();
+    const counts = new CounterpartyRequestTally(archived);
+
+    for (const row of rows) {
+      counts.add(
         Number(row.counterpartyId),
         row.day,
         Number(row.total),
@@ -377,43 +404,7 @@ export class MerchantRequestHistoryService {
       );
     }
 
-    for (const bucket of archived) {
-      add(
-        bucket.counterpartyId,
-        calendarDateIn(bucket.receivedAt, timeZone),
-        bucket.count,
-        bucket.receivedAt,
-      );
-    }
-
-    return { totals: [...totals.values()], days: [...days.values()] };
-  }
-
-  private async archivedCounterpartyBuckets(
-    reach: MerchantRequestArchiveReach | null,
-  ): Promise<{ counterpartyId: number; receivedAt: Date; count: number }[]> {
-    if (!reach) return [];
-
-    const filter = this.archiveFilter({}, reach);
-
-    if (filter === null) return [];
-
-    return this.archive(
-      `${filter} counterpartyId:* | fields requestId, counterpartyId, receivedAt | ${ONE_LINE_PER_REQUEST} | stats by (counterpartyId, receivedAt) count() total`,
-      (line) => {
-        const receivedAt = new Date(line.receivedAt as string);
-
-        if (Number.isNaN(receivedAt.getTime())) {
-          throw new Error(`Unreadable receivedAt ${line.receivedAt}`);
-        }
-
-        return {
-          counterpartyId: Number(line.counterpartyId),
-          receivedAt,
-          count: Number(line.total ?? 0),
-        };
-      },
-    );
+    return counts.result();
   }
 
   private keyedSegments(

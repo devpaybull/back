@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toFiat } from '../../common/utils/to-fiat';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
@@ -6,8 +7,23 @@ import { MerchantRequestEntry } from '../types/merchant-request-entry';
 import { MerchantRequestOperation } from '../types/merchant-request-operation.enum';
 import { MerchantRequestResult } from '../types/merchant-request-result.enum';
 
-const build = (maxBytes = 65536) => {
-  const manager = { insert: jest.fn(async () => undefined) };
+const build = (maxBytes = 65536, markedRows = 1) => {
+  const calls: string[] = [];
+  const update = {
+    update: jest.fn(() => update),
+    set: jest.fn(() => update),
+    where: jest.fn(() => update),
+    execute: jest.fn(async () => {
+      calls.push('mark');
+      return { affected: markedRows };
+    }),
+  };
+  const manager = {
+    query: jest.fn(async (sql: string) => {
+      calls.push(sql);
+    }),
+    createQueryBuilder: jest.fn(() => update),
+  };
   const requests = {
     insert: jest.fn(async () => undefined),
     manager: {
@@ -18,12 +34,19 @@ const build = (maxBytes = 65536) => {
   };
   const config = { get: jest.fn(() => maxBytes) };
   const counterpartyStats = {
-    recordRequestWithin: jest.fn(async () => undefined),
+    lockRequestCountersWithin: jest.fn(async () => {
+      calls.push('lock');
+    }),
+    recordRequestWithin: jest.fn(async () => {
+      calls.push('count');
+    }),
   };
 
   return {
     requests,
     manager,
+    update,
+    calls,
     counterpartyStats,
     service: new MerchantRequestsService(
       requests as never,
@@ -244,35 +267,85 @@ describe('MerchantRequestsService.record — a create request', () => {
     expect(counterpartyStats.recordRequestWithin).not.toHaveBeenCalled();
   });
 
-  it('counts the request toward its counterparty in the same transaction as the row', async () => {
-    const { service, requests, manager, counterpartyStats } = build();
+  const reachedStepSeven = (overrides: Partial<MerchantRequestEntry> = {}) =>
+    entry({
+      statusCode: 403,
+      responseBody: '{"code":"PAYER_BLOCKED"}',
+      details: {
+        operation: MerchantRequestOperation.PayInCreate,
+        payerUserId: 'client-1',
+        counterpartyId: 5,
+      },
+      ...overrides,
+    });
+
+  it('inserts the row first on its own, then counts it in a separate transaction: lock timeout, shared lock, mark, count', async () => {
+    const { service, requests, manager, update, calls, counterpartyStats } =
+      build();
     const receivedAt = new Date('2026-11-04T10:00:00Z');
 
-    await service.record(
-      entry({
-        statusCode: 403,
-        responseBody: '{"code":"PAYER_BLOCKED"}',
-        details: {
-          operation: MerchantRequestOperation.PayInCreate,
-          payerUserId: 'client-1',
-          counterpartyId: 5,
-        },
-      }),
-    );
+    await service.record(reachedStepSeven());
 
-    expect(requests.insert).not.toHaveBeenCalled();
-    expect(manager.insert).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        counterpartyId: 5,
-        errorCode: 'PAYER_BLOCKED',
-      }),
+    expect(inserted(requests)).toMatchObject({
+      counterpartyId: 5,
+      errorCode: 'PAYER_BLOCKED',
+    });
+    expect(requests.insert.mock.invocationCallOrder[0]).toBeLessThan(
+      requests.manager.transaction.mock.invocationCallOrder[0],
     );
+    expect(calls).toEqual([
+      "SET LOCAL lock_timeout = '5s'",
+      'lock',
+      'mark',
+      'count',
+    ]);
+    expect(counterpartyStats.lockRequestCountersWithin).toHaveBeenCalledWith(
+      manager,
+      'shared',
+    );
+    expect(update.set).toHaveBeenCalledWith({ counted: true });
+    expect(update.where).toHaveBeenCalledWith('id = :id AND counted = false', {
+      id: uuidOf(7),
+    });
     expect(counterpartyStats.recordRequestWithin).toHaveBeenCalledWith(
       manager,
       5,
       receivedAt,
     );
+  });
+
+  it('does not count a row that is already counted, so the counter never leads the log', async () => {
+    const { service, counterpartyStats } = build(65536, 0);
+
+    await service.record(reachedStepSeven());
+
+    expect(counterpartyStats.recordRequestWithin).not.toHaveBeenCalled();
+  });
+
+  it('keeps the row and only logs when the counter cannot be updated', async () => {
+    const { service, requests, counterpartyStats } = build();
+    counterpartyStats.recordRequestWithin.mockRejectedValueOnce(
+      new Error('lock timeout'),
+    );
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    await expect(service.record(reachedStepSeven())).resolves.toBeUndefined();
+
+    expect(requests.insert).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('lock timeout'));
+    warn.mockRestore();
+  });
+
+  it('lets a failed log insert fail without counting anything', async () => {
+    const { service, requests, counterpartyStats } = build();
+    requests.insert.mockRejectedValueOnce(new Error('insert failed'));
+
+    await expect(service.record(reachedStepSeven())).rejects.toThrow(
+      'insert failed',
+    );
+    expect(counterpartyStats.recordRequestWithin).not.toHaveBeenCalled();
   });
 
   it('leaves the descriptive columns null for a request that is not a create', async () => {

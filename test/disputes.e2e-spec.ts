@@ -598,6 +598,82 @@ describe('disputes', () => {
       });
     });
 
+    it('a trader’s decline after «Я оплатил» starts the deferred dispute, as a decline from active does', async () => {
+      const id = await payIn('2310');
+
+      expect((await open(id, '2310')).body.data.dispute.status).toBe(
+        'deferred',
+      );
+      const { paymentPageToken } = await deal(id);
+      await e2e.http.post(`/pay/${paymentPageToken}/paid`).expect(200);
+      expect((await deal(id)).status).toBe('checking');
+
+      await e2e.http
+        .post(`/trader/deals/${id}/decline`)
+        .set(bearer(trader))
+        .send({ reasonCode: 'limit_reached' })
+        .expect(200);
+
+      expect((await deal(id)).status).toBe('dispute');
+      expect(await disputeOf(id)).toMatchObject({
+        status: 'open',
+        statusBefore: 'canceled',
+      });
+    });
+
+    it('a merchant opening a dispute takes the trader’s wallet first, so a racing insurance transfer sees it', async () => {
+      const id = await canceledPayIn('2320');
+      const fileKeyOf = await fileKey(id);
+      await e2e.dataSource
+        .getRepository(Wallet)
+        .update(
+          { userId: trader.user.id },
+          { lastAcceptedDealAt: new Date(Date.now() - 30 * 24 * HOUR) },
+        );
+      const lockWaiters = async (): Promise<number> =>
+        Number(
+          (
+            await e2e.dataSource.query(
+              `SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+            )
+          )[0].n,
+        );
+      const waitFor = async (count: number): Promise<void> => {
+        for (let i = 0; i < 200 && (await lockWaiters()) < count; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(await lockWaiters()).toBe(count);
+      };
+      const holder = e2e.dataSource.createQueryRunner();
+
+      await holder.connect();
+      await holder.startTransaction();
+      await holder.query(
+        'SELECT 1 FROM wallets WHERE "userId" = $1 FOR UPDATE',
+        [trader.user.id],
+      );
+
+      const opening = v1(`payment/${id}/dispute`)
+        .send({ fileKeys: [fileKeyOf] })
+        .then((response) => response);
+      await waitFor(1);
+      const moving = e2e.http
+        .post('/trader/balances/transfer')
+        .set(bearer(trader))
+        .send({ direction: 'insurance_pay_in_to_main', amount: '1' })
+        .then((response) => response);
+      await waitFor(2);
+
+      await holder.commitTransaction();
+      await holder.release();
+      const [opened, moved] = await Promise.all([opening, moving]);
+
+      expect(opened.status).toBe(200);
+      expect((await disputeOf(id)).status).toBe('open');
+      expect(moved.status).toBe(409);
+      expect(moved.body.code).toBe('INSURANCE_LOCKED_BY_DISPUTE');
+    });
+
     it('a deal the merchant canceled itself cannot be disputed', async () => {
       const id = await payIn('2450');
       await v1(`payment/${id}/cancel`).expect(200);
