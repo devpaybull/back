@@ -53,6 +53,15 @@ const SHOWN_FIELDS: Record<string, readonly string[]> = {
   'balance.transfer': ['from', 'to', 'amount'],
 };
 
+const MONEY_ACTIONS_OF_ANY_ACTOR: readonly string[] = [
+  ActivityAction.DepositCredited,
+  ActivityAction.WithdrawalCompleted,
+];
+
+const OWN_OR_SYSTEM_ACTIONS = Object.keys(SHOWN_FIELDS).filter(
+  (action) => !MONEY_ACTIONS_OF_ANY_ACTOR.includes(action),
+);
+
 @ApiTags('Trader · Settings')
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
@@ -65,7 +74,7 @@ export class TraderActivityController {
   @ApiOperation({
     summary: '«Активность»: what the trader did, newest first',
     description:
-      'Sign-in and sign-out, trading switched, requisites and devices added, changed or deleted, deals confirmed or declined, pay-outs taken, completed or declined, appeals answered, deposits credited, withdrawals completed, moves between own balances. Only rows the trader did or the system did for them: an admin’s action is not shown. No IP, no technical fields.',
+      'Sign-in and sign-out, trading switched, requisites and devices added, changed or deleted, deals confirmed or declined, pay-outs taken, completed or declined, appeals answered, deposits credited, withdrawals completed, moves between own balances. Only rows the trader did or the system did for them; of an admin’s actions only a deposit credited or a withdrawal completed by hand, without naming the admin. No IP, no technical fields.',
   })
   @ApiPagedResponse(TraderActivityEntryDto)
   async activity(
@@ -80,7 +89,8 @@ export class TraderActivityController {
         sortOrder: query.sortOrder,
         targetUserId: trader.id,
         actorUserIdOrSystem: trader.id,
-        actions: Object.keys(SHOWN_FIELDS),
+        actions: OWN_OR_SYSTEM_ACTIONS,
+        anyActorActions: MONEY_ACTIONS_OF_ANY_ACTOR,
       })
     ).map((record) => ({
       id: record.id,

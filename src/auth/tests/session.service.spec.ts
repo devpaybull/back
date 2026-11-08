@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -545,6 +545,43 @@ describe('SessionService', () => {
         targetUserId: uuidOf(2),
         action: 'merchant_activity.logout',
       });
+    });
+
+    it('still signs a trader in and out when the activity row cannot be written', async () => {
+      const error = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      audit.record.mockRejectedValue(new Error('audit down'));
+      userCredentials.verifyPassword.mockResolvedValue(true);
+      userCredentials.verifySecondFactor.mockResolvedValue(true);
+      userDirectory.findAuthenticatableByLogin.mockResolvedValue(activeUser);
+
+      await expect(
+        service.login({
+          login: 'user@example.com',
+          password: 'password123',
+          totp: '123456',
+        }),
+      ).resolves.toEqual(
+        expect.objectContaining({ accessToken: expect.any(String) }),
+      );
+
+      refreshTokens.update.mockResolvedValue({ affected: 1 });
+      userDirectory.findById.mockResolvedValue(activeUser);
+      refreshTokens.findOne.mockResolvedValue({
+        id: 4,
+        userId: activeUser.id,
+        impersonatedByUserId: null,
+      });
+      await expect(service.logout('trader-token')).resolves.toBeUndefined();
+
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('trader_activity.login'),
+      );
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('trader_activity.logout'),
+      );
+      error.mockRestore();
     });
 
     it('writes a trader’s sign-out into the trader feed', async () => {

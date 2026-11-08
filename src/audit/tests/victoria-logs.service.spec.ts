@@ -343,6 +343,25 @@ describe('VictoriaLogsService', () => {
       );
     });
 
+    it('lets the allow-listed actions through whoever the actor, in one bracketed condition', async () => {
+      fetchMock.mockResolvedValueOnce(answer(200, '{"total":"0"}'));
+
+      await service().find({
+        belowId: 10,
+        sortOrder: SortOrder.Desc,
+        skip: 0,
+        take: 0,
+        targetUserId: uuidOf(1),
+        actorUserIdOrSystem: uuidOf(1),
+        actions: ['a.own'],
+        anyActorActions: ['a.money'],
+      });
+
+      expect(queriesSent()[0]).toBe(
+        `${SCOPE} auditId:<10 targetUserId:="${uuidOf(1)}" (((actorUserId:="${uuidOf(1)}" or actorUserId:"") action:in("a.own")) or action:in("a.money")) | stats count_uniq(auditId) total`,
+      );
+    });
+
     it('filters by the impersonating superadmin and reads the column back', async () => {
       fetchMock
         .mockResolvedValueOnce(answer(200, '{"total":"1"}'))

@@ -7,7 +7,7 @@ import {
   IsBoolean,
   IsEnum,
   IsIn,
-  IsOptional,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { IsCryptoAmount } from '../../common/decorators/is-crypto-amount.decorator';
@@ -19,6 +19,8 @@ import {
 import { TRANSACTION_METHOD_CODES } from '../../transactions/utils/transaction-methods';
 
 const LIMIT_METHODS = [...TRANSACTION_METHOD_CODES, 'all'];
+
+const sent = (_: object, value: unknown): boolean => value !== undefined;
 
 export class NotificationSettingChangeDto {
   @ApiProperty({ enum: NotificationType })
@@ -37,7 +39,7 @@ export class NotificationSettingChangeDto {
     description:
       'USDT, above zero; balance_below_threshold only, and required to switch it on',
   })
-  @IsOptional()
+  @ValidateIf(sent)
   @IsCryptoAmount({ positive: true })
   threshold?: string;
 
@@ -45,7 +47,7 @@ export class NotificationSettingChangeDto {
     enum: LIMIT_METHODS,
     description: 'requisite_limit_reached only; kept when absent, all at first',
   })
-  @IsOptional()
+  @ValidateIf(sent)
   @IsIn(LIMIT_METHODS)
   method?: string;
 
@@ -53,7 +55,7 @@ export class NotificationSettingChangeDto {
     enum: NotificationLimitType,
     description: 'requisite_limit_reached only; kept when absent, all at first',
   })
-  @IsOptional()
+  @ValidateIf(sent)
   @IsEnum(NotificationLimitType)
   limitType?: NotificationLimitType;
 }

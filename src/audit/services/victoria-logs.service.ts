@@ -125,13 +125,8 @@ export class VictoriaLogsService {
 const toActionsFilter = (actions: readonly string[]): string =>
   `action:in(${actions.map((action) => JSON.stringify(action)).join(',')})`;
 
-const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
-  [
-    `installationId:=${JSON.stringify(installationId)}`,
-    query.belowId === null ? 'auditId:>0' : `auditId:<${query.belowId}`,
-    ...FILTERED_FIELDS.filter((field) => query[field] !== undefined).map(
-      (field) => `${field}:=${JSON.stringify(String(query[field]))}`,
-    ),
+const toActorAndActionsFilters = (query: VictoriaAuditQuery): string[] => {
+  const restricted = [
     ...(query.actorUserIdOrSystem
       ? [
           `(actorUserId:=${JSON.stringify(query.actorUserIdOrSystem)} or actorUserId:"")`,
@@ -140,6 +135,23 @@ const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
     ...(query.action === undefined && query.actions
       ? [toActionsFilter(query.actions)]
       : []),
+  ];
+
+  return query.anyActorActions?.length && restricted.length > 0
+    ? [
+        `((${restricted.join(' ')}) or ${toActionsFilter(query.anyActorActions)})`,
+      ]
+    : restricted;
+};
+
+const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
+  [
+    `installationId:=${JSON.stringify(installationId)}`,
+    query.belowId === null ? 'auditId:>0' : `auditId:<${query.belowId}`,
+    ...FILTERED_FIELDS.filter((field) => query[field] !== undefined).map(
+      (field) => `${field}:=${JSON.stringify(String(query[field]))}`,
+    ),
+    ...toActorAndActionsFilters(query),
     ...(query.createdAfter
       ? [`_time:>${query.createdAfter.toISOString()}`]
       : []),

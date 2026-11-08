@@ -30,6 +30,8 @@ import { percentColumn } from '../../common/utils/percent-column';
 
 @Entity('transactions')
 @Index(['merchantId', 'merchantTransactionId'], { unique: true })
+@Index(['traderUserId', 'createdAt'])
+@Index(['traderUserId', 'resolvedAt'])
 @Check(
   'transactions_trader_unset_only_on_untaken_pay_out',
   `"traderUserId" IS NOT NULL OR ("kind" = 'pay_out' AND "status" IN ('pending', 'canceled'))`,

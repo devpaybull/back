@@ -42,6 +42,9 @@ describe('UpdateNotificationSettingsDto', () => {
       { type: 'requisite_limit_reached', enabled: true, limitType: 'weekly' },
       { type: 'nonsense', enabled: true },
       { type: 'new_payouts' },
+      { type: 'balance_below_threshold', enabled: true, threshold: null },
+      { type: 'requisite_limit_reached', enabled: true, method: null },
+      { type: 'requisite_limit_reached', enabled: true, limitType: null },
     ]) {
       expect(
         await errorsOf(UpdateNotificationSettingsDto, { settings: [change] }),

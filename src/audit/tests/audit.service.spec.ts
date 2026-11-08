@@ -227,6 +227,34 @@ describe('AuditService', () => {
       );
     });
 
+    it('lets the allow-listed actions through whoever the actor, in the query', async () => {
+      await service.list({
+        ...query,
+        targetUserId: uuidOf(1),
+        actorUserIdOrSystem: uuidOf(1),
+        actions: ['a.own'],
+        anyActorActions: ['a.money'],
+      });
+
+      expect(repo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            {
+              targetUserId: uuidOf(1),
+              action: In(['a.own']),
+              actorUserId: uuidOf(1),
+            },
+            {
+              targetUserId: uuidOf(1),
+              action: In(['a.own']),
+              actorUserId: IsNull(),
+            },
+            { targetUserId: uuidOf(1), action: In(['a.money']) },
+          ],
+        }),
+      );
+    });
+
     it('lets an exact action win over a list of actions', async () => {
       await service.list({ ...query, action: 'a.one', actions: ['a.two'] });
 
@@ -256,6 +284,14 @@ describe('AuditService', () => {
 
         expect(victoria.find).toHaveBeenCalledWith(
           expect.objectContaining({ belowId: 101, statusCode: 403 }),
+        );
+      });
+
+      it('hands the any-actor allow-list to the archive too', async () => {
+        await service.list({ ...query, anyActorActions: ['a.money'] });
+
+        expect(victoria.find).toHaveBeenCalledWith(
+          expect.objectContaining({ anyActorActions: ['a.money'] }),
         );
       });
 

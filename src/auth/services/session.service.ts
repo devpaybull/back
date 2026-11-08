@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +28,8 @@ const REFRESH_REJECTED = 'Refresh token is invalid or expired';
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
+
   constructor(
     @InjectRepository(RefreshToken)
     private readonly refreshTokens: Repository<RefreshToken>,
@@ -87,11 +89,17 @@ export class SessionService {
   ): Promise<void> {
     if (user.role !== Role.Trader) return;
 
-    await this.audit.record({
-      actorUserId: user.id,
-      targetUserId: user.id,
-      action,
-    });
+    try {
+      await this.audit.record({
+        actorUserId: user.id,
+        targetUserId: user.id,
+        action,
+      });
+    } catch (error) {
+      this.logger.error(
+        `${action} was not recorded for ${user.id}: ${(error as Error).message}`,
+      );
+    }
   }
 
   async refresh(refreshToken: string): Promise<IssuedSession> {

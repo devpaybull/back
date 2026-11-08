@@ -122,12 +122,18 @@ export class AuditService {
         ? { createdAt: MoreThan(query.createdAfter) }
         : {}),
     };
+    const anyActor = query.anyActorActions?.length
+      ? [{ ...where, action: In([...query.anyActorActions]) }]
+      : [];
     const conditions = query.actorUserIdOrSystem
       ? [
           { ...where, actorUserId: query.actorUserIdOrSystem },
           { ...where, actorUserId: IsNull() },
+          ...anyActor,
         ]
-      : where;
+      : anyActor.length > 0
+        ? [where, ...anyActor]
+        : where;
     const order =
       query.sortBy === AuditSortField.Id
         ? { id: direction }
@@ -156,6 +162,7 @@ export class AuditService {
           impersonatorUserId: query.impersonatorUserId,
           action: query.action,
           actions: query.actions,
+          anyActorActions: query.anyActorActions,
           source: query.source,
           statusCode: query.statusCode,
           createdAfter: query.createdAfter,

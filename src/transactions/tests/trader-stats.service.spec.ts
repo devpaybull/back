@@ -1,6 +1,8 @@
+import { getMetadataArgsStorage } from 'typeorm';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { toFiat } from '../../common/utils/to-fiat';
+import { Transaction } from '../entities/transaction.entity';
 import { TraderStatsService } from '../services/trader-stats.service';
 import { TransactionKind } from '../types/transaction-kind.enum';
 
@@ -340,5 +342,20 @@ describe('TraderStatsService', () => {
         ]),
       );
     });
+  });
+});
+
+describe('the indexes a trader’s figures read', () => {
+  it('has (traderUserId, createdAt) and (traderUserId, resolvedAt) on transactions', () => {
+    const columnsOf = getMetadataArgsStorage()
+      .indices.filter((index) => index.target === Transaction)
+      .map((index) => index.columns);
+
+    expect(columnsOf).toEqual(
+      expect.arrayContaining([
+        ['traderUserId', 'createdAt'],
+        ['traderUserId', 'resolvedAt'],
+      ]),
+    );
   });
 });

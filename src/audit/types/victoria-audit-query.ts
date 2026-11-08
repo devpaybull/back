@@ -12,6 +12,7 @@ export interface VictoriaAuditQuery {
   impersonatorUserId?: string;
   action?: string;
   actions?: readonly string[];
+  anyActorActions?: readonly string[];
   source?: AuditSource;
   statusCode?: number;
   createdAfter?: Date;

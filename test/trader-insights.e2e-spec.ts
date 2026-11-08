@@ -1,4 +1,5 @@
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
+import { AuditService } from '../src/audit/services/audit.service';
 import { Role } from '../src/common/enums/role.enum';
 import { toCrypto } from '../src/common/utils/to-crypto';
 import { toFiat } from '../src/common/utils/to-fiat';
@@ -6,7 +7,9 @@ import { Counterparty } from '../src/counterparties/entities/counterparty.entity
 import { Device } from '../src/devices/entities/device.entity';
 import { MerchantMethod } from '../src/merchants/entities/merchant-method.entity';
 import { MerchantsService } from '../src/merchants/services/merchants.service';
+import { NotificationSetting } from '../src/trader-settings/entities/notification-setting.entity';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
+import { NotificationType } from '../src/trader-settings/types/notification-type.enum';
 import { MethodRate } from '../src/transactions/entities/method-rate.entity';
 import { SelectionAttempt } from '../src/transactions/entities/selection-attempt.entity';
 import { TransactionDispute } from '../src/transactions/entities/transaction-dispute.entity';
@@ -536,7 +539,7 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
   });
 
   describe('activity and notification settings (TC12)', () => {
-    it('lists the trader’s own sign-ins and switches, not an admin’s, with no IP', async () => {
+    it('lists the trader’s own sign-ins and switches, of an admin’s only the money events, with no IP and no admin', async () => {
       await e2e.http
         .post('/trader/trading')
         .set(bearer(trader))
@@ -567,6 +570,47 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
         ]),
       );
       expect(actions).not.toContain('activity.trading_enabled');
+
+      const audit = e2e.app.get(AuditService);
+      for (const action of [
+        'activity.deposit_credited',
+        'activity.withdrawal_completed',
+        'activity.bank_details_added',
+      ]) {
+        await audit.record({
+          actorUserId: admin.user.id,
+          targetUserId: trader.user.id,
+          action,
+          metadata: {
+            accountTransactionId: 77,
+            amount: '50.000000',
+            fee: '1.000000',
+            id: 'by-the-admin',
+          },
+        });
+      }
+      const withMoney = await e2e.http
+        .get('/trader/activity')
+        .set(bearer(trader))
+        .query({ limit: 100 })
+        .expect(200);
+      const rows = withMoney.body.data as {
+        action: string;
+        details: Record<string, unknown>;
+      }[];
+      expect(rows.slice(0, 2)).toEqual([
+        expect.objectContaining({
+          action: 'activity.withdrawal_completed',
+          details: { amount: '50.000000', fee: '1.000000' },
+        }),
+        expect.objectContaining({
+          action: 'activity.deposit_credited',
+          details: { amount: '50.000000' },
+        }),
+      ]);
+      expect(rows.some((row) => row.details.id === 'by-the-admin')).toBe(false);
+      expect(withMoney.body.meta.total).toBe(feed.body.meta.total + 2);
+      expect(JSON.stringify(withMoney.body)).not.toContain(admin.user.id);
       expect(JSON.stringify(feed.body)).not.toContain('203.0.113');
       expect(JSON.stringify(feed.body)).not.toContain('"ip"');
 
@@ -610,6 +654,18 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
         { type: 'new_payouts', enabled: true },
         { type: 'new_payouts', enabled: false },
       ]).expect(400);
+      for (const field of ['threshold', 'method', 'limitType']) {
+        await put([
+          {
+            type:
+              field === 'threshold'
+                ? 'balance_below_threshold'
+                : 'requisite_limit_reached',
+            enabled: false,
+            [field]: null,
+          },
+        ]).expect(400);
+      }
 
       const saved = await put([
         {
@@ -642,6 +698,22 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
         limitType: 'hourly',
       });
       expect(byType.get('trading_blocked')).toMatchObject({ enabled: true });
+
+      const stored = () =>
+        e2e.dataSource.getRepository(NotificationSetting).findOneByOrFail({
+          userId: trader.user.id,
+          type: NotificationType.BalanceBelowThreshold,
+        });
+      const before = await stored();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await put([
+        { type: 'balance_below_threshold', enabled: true, threshold: '150.5' },
+      ]).expect(200);
+      const after = await stored();
+      expect(after.id).toBe(before.id);
+      expect(after.updatedAt.getTime()).toBeGreaterThan(
+        before.updatedAt.getTime(),
+      );
 
       const again = await e2e.http
         .get('/trader/notification-settings')

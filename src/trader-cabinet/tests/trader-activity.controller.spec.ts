@@ -61,7 +61,7 @@ describe('TraderActivityController', () => {
     ).toEqual([Role.Trader]);
   });
 
-  it('reads the trader’s own rows and the system’s for them, of the feed’s actions only', async () => {
+  it('reads the trader’s own rows and the system’s, and of an admin’s only the money ones', async () => {
     const { audit, controller } = build([]);
 
     await controller.activity(trader, {
@@ -87,14 +87,18 @@ describe('TraderActivityController', () => {
         'trader.deal_declined',
         'trader.payout_taken',
         'trader.appeal_contested',
-        'activity.deposit_credited',
-        'activity.withdrawal_completed',
         'balance.transfer',
       ]),
+      anyActorActions: [
+        'activity.deposit_credited',
+        'activity.withdrawal_completed',
+      ],
     });
     const [[{ actions }]] = audit.list.mock.calls as unknown as [
       [{ actions: string[] }],
     ];
+    expect(actions).not.toContain('activity.deposit_credited');
+    expect(actions).not.toContain('activity.withdrawal_completed');
     expect(actions).not.toContain('counterparty.requisite_bound');
     expect(actions).not.toContain('withdrawal.completed_manually');
   });
