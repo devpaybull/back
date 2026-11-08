@@ -15,7 +15,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiDefaultResponse,
+  ApiOperation,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Response } from 'express';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { ApiPagedResponse } from '../../common/decorators/api-paged-response.decorator';
@@ -31,6 +36,7 @@ import { CreatePayInDto } from '../dto/create-pay-in.dto';
 import { CreatePayOutDto } from '../dto/create-pay-out.dto';
 import { ListPaymentsQueryDto } from '../dto/list-payments-query.dto';
 import { OpenDisputeDto } from '../dto/open-dispute.dto';
+import { MerchantApiErrorDto } from '../dto/merchant-api-error.dto';
 import { MerchantApiExceptionFilter } from '../filters/merchant-api-exception.filter';
 import { MerchantApiKeyGuard } from '../guards/merchant-api-key.guard';
 import { MerchantApiService } from '../merchant-api.service';
@@ -56,7 +62,11 @@ const DealIdPipe = new ParseUUIDPipe({
 });
 
 @ApiTags('Merchant API · Payments')
-@ApiHeader({ name: 'X-Secure-Key', required: true })
+@ApiSecurity('X-Secure-Key')
+@ApiDefaultResponse({
+  type: MerchantApiErrorDto,
+  description: 'An error: { statusCode, code, message, details? }',
+})
 @Public()
 @UseGuards(MerchantApiKeyGuard)
 @UseFilters(MerchantApiExceptionFilter)

@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import 'dotenv/config';
 import { hash } from 'bcryptjs';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { join } from 'path';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
@@ -14,6 +14,7 @@ import { Country } from '../src/countries/entities/country.entity';
 import { Currency } from '../src/currencies/entities/currency.entity';
 import { Bank } from '../src/banks/entities/bank.entity';
 import { Device } from '../src/devices/entities/device.entity';
+import { DeviceCredential } from '../src/devices/entities/device-credential.entity';
 import { DeviceStatus } from '../src/devices/types/device-status.enum';
 import { DeviceType } from '../src/devices/types/device-type.enum';
 import { BankDetails } from '../src/bank-details/entities/bank-details.entity';
@@ -25,6 +26,8 @@ import { UserBackupCode } from '../src/users/entities/user-backup-code.entity';
 import { UserStatus } from '../src/users/types/user-status.enum';
 import { Merchant } from '../src/merchants/entities/merchant.entity';
 import { MerchantApiKey } from '../src/merchants/entities/merchant-api-key.entity';
+import { MerchantCurrency } from '../src/merchants/entities/merchant-currency.entity';
+import { MerchantMethod } from '../src/merchants/entities/merchant-method.entity';
 import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
 import { CounterpartyStatsService } from '../src/counterparties/services/counterparty-stats.service';
 import { CounterpartyBindingType } from '../src/counterparties/types/counterparty-binding-type.enum';
@@ -55,8 +58,11 @@ import { Transaction } from '../src/transactions/entities/transaction.entity';
 import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
 import { TransactionStatus } from '../src/transactions/types/transaction-status.enum';
 import { TransactionStatusEvent } from '../src/transactions/entities/transaction-status-event.entity';
+import { TransactionDispute } from '../src/transactions/entities/transaction-dispute.entity';
+import { DisputeStatus } from '../src/transactions/types/dispute-status.enum';
 import { StatusEventSource } from '../src/transactions/types/status-event-source.enum';
 import { computeDeal } from '../src/transactions/utils/compute-deal';
+import { computePayOutRequest } from '../src/transactions/utils/compute-pay-out-request';
 import { formatCrypto } from '../src/common/utils/format-crypto';
 import { roundCrypto } from '../src/common/utils/round-crypto';
 import { toCrypto } from '../src/common/utils/to-crypto';
@@ -121,10 +127,25 @@ interface StatusStep {
   reason?: string | null;
 }
 
+type PayOutFields = Pick<
+  Transaction,
+  | 'payoutOwnerName'
+  | 'payoutBankId'
+  | 'payoutCardNumber'
+  | 'payoutPhone'
+  | 'payoutTakenAt'
+  | 'payoutDeadlineAt'
+  | 'payoutCompletedAt'
+  | 'payoutAssignedBy'
+>;
+
 interface SeededUser {
   user: User;
   codes: string[];
 }
+
+const TRADER_APPEAL_WINDOW_MS = 30 * 60_000;
+const PAYOUT_PAYMENT_WINDOW_MS = 60 * 60_000;
 
 const daysAgo = (days: number): Date =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -279,9 +300,10 @@ async function createDeal(
     kind: TransactionKind.PayIn | TransactionKind.PayOut;
     method: TransactionMethod;
     traderUserId: string;
-    bankDetailsId: string;
+    bankDetailsId: string | null;
     merchantId: string;
     counterpartyId?: number | null;
+    payout?: PayOutFields;
     amountFiat: number;
     rate: number;
     merchantPercent: number;
@@ -331,6 +353,7 @@ async function createDeal(
       traderAmount: computation.traderAmount,
       merchantAmount: computation.merchantAmount,
       comment: input.comment ?? null,
+      ...input.payout,
       createdAt,
       expiresAt,
       resolvedAt: input.resolved ? new Date() : null,
@@ -390,6 +413,8 @@ async function main(): Promise<void> {
 
   const passwordHash = await hash(SEED_PASSWORD, 12);
   const credentials: { label: string; user: SeededUser }[] = [];
+  const merchantApiKey = randomUUID();
+  const deviceToken = randomBytes(32).toString('base64url');
 
   await dataSource.transaction(async (manager) => {
     const russia = await manager.save(
@@ -597,6 +622,15 @@ async function main(): Promise<void> {
         status: DeviceStatus.On,
         type: DeviceType.Android,
         model: 'Google Pixel 7',
+        activatedAt: new Date(),
+        lastActivity: new Date(),
+      }),
+    );
+    await manager.save(
+      DeviceCredential,
+      manager.create(DeviceCredential, {
+        deviceId: device1.id,
+        tokenHash: sha256Hex(deviceToken),
       }),
     );
     await manager.save(
@@ -713,10 +747,33 @@ async function main(): Promise<void> {
     );
 
     await manager.save(
+      MerchantMethod,
+      [
+        { method: 'sbp', payInEnabled: true, payOutEnabled: true },
+        { method: 'card', payInEnabled: true, payOutEnabled: true },
+        { method: 'counterparty', payInEnabled: true, payOutEnabled: false },
+        {
+          method: 'mobile_commerce',
+          payInEnabled: true,
+          payOutEnabled: false,
+        },
+      ].map((state) =>
+        manager.create(MerchantMethod, { ...state, merchantId: merchant1.id }),
+      ),
+    );
+    await manager.save(
+      MerchantCurrency,
+      manager.create(MerchantCurrency, {
+        merchantId: merchant1.id,
+        currencyId: rub.id,
+      }),
+    );
+
+    await manager.save(
       MerchantApiKey,
       manager.create(MerchantApiKey, {
         merchantId: merchant1.id,
-        key: 'ohla-shop-live-key',
+        key: merchantApiKey,
         secret: randomBytes(32).toString('hex'),
         active: true,
       }),
@@ -725,7 +782,7 @@ async function main(): Promise<void> {
       MerchantApiKey,
       manager.create(MerchantApiKey, {
         merchantId: merchant2.id,
-        key: 'payzavr-store-old-key',
+        key: randomUUID(),
         secret: randomBytes(32).toString('hex'),
         active: false,
         revokedAt: daysAgo(5),
@@ -785,7 +842,7 @@ async function main(): Promise<void> {
       manager,
       trader1Wallet,
       BalanceKind.InsurancePayIn,
-      800,
+      1200,
       BalanceOperationType.AdminAdjustment,
       null,
     );
@@ -932,10 +989,16 @@ async function main(): Promise<void> {
           source: StatusEventSource.System,
         },
         {
+          toStatus: TransactionStatus.Checking,
+          source: StatusEventSource.Payer,
+        },
+        {
+          toStatus: TransactionStatus.CheckingManually,
+          source: StatusEventSource.AutoTimer,
+        },
+        {
           toStatus: TransactionStatus.Dispute,
-          source: StatusEventSource.Trader,
-          actorUserId: trader1.user.id,
-          reason: 'Клиент утверждает, что перевод не получен',
+          source: StatusEventSource.Merchant,
         },
         {
           toStatus: TransactionStatus.ManualReview,
@@ -943,6 +1006,19 @@ async function main(): Promise<void> {
         },
       ],
     });
+    const d3DisputeOpenedAt = daysAgo(1);
+    await manager.save(
+      TransactionDispute,
+      manager.create(TransactionDispute, {
+        transactionId: d3.id,
+        status: DisputeStatus.Reviewing,
+        statusBefore: TransactionStatus.CheckingManually,
+        openedAt: d3DisputeOpenedAt,
+        traderDeadlineAt: new Date(
+          d3DisputeOpenedAt.getTime() + TRADER_APPEAL_WINDOW_MS,
+        ),
+      }),
+    );
     trader1Wallet.mainReserved = roundCrypto(
       toCrypto(trader1Wallet.mainReserved ?? 0).plus(d3.traderAmount),
     );
@@ -972,17 +1048,30 @@ async function main(): Promise<void> {
       ],
     });
 
+    const d5TakenAt = daysAgo(2);
     const d5 = await createDeal(manager, {
       kind: TransactionKind.PayOut,
       method: 'card',
       traderUserId: trader1.user.id,
-      bankDetailsId: bd1.id,
+      bankDetailsId: null,
       merchantId: merchant1.id,
       counterpartyId: cp2.id,
       amountFiat: 40000,
       rate: 89.05,
       merchantPercent: 3,
       traderPercent: 1.5,
+      payout: {
+        payoutOwnerName: 'OLGA MOROZOVA',
+        payoutBankId: sberbank.id,
+        payoutCardNumber: '4276000055556666',
+        payoutPhone: null,
+        payoutTakenAt: d5TakenAt,
+        payoutDeadlineAt: new Date(
+          d5TakenAt.getTime() + PAYOUT_PAYMENT_WINDOW_MS,
+        ),
+        payoutCompletedAt: new Date(d5TakenAt.getTime() + 20 * 60_000),
+        payoutAssignedBy: 'manual',
+      },
       finalStatus: TransactionStatus.Success,
       resolved: true,
       steps: [
@@ -996,8 +1085,13 @@ async function main(): Promise<void> {
           actorUserId: trader1.user.id,
         },
         {
+          toStatus: TransactionStatus.Checking,
+          source: StatusEventSource.Trader,
+          actorUserId: trader1.user.id,
+        },
+        {
           toStatus: TransactionStatus.Success,
-          source: StatusEventSource.System,
+          source: StatusEventSource.AutoTimer,
         },
       ],
     });
@@ -1026,25 +1120,36 @@ async function main(): Promise<void> {
       d5.merchantAmount.neg(),
     );
 
-    const d6 = await createDeal(manager, {
-      kind: TransactionKind.PayOut,
-      method: 'sbp',
-      traderUserId: trader1.user.id,
-      bankDetailsId: bd2.id,
-      merchantId: merchant1.id,
-      amountFiat: 7000,
-      rate: 89.2,
-      merchantPercent: 3,
-      traderPercent: 1.5,
-      finalStatus: TransactionStatus.Pending,
-      resolved: false,
-      steps: [
-        {
-          toStatus: TransactionStatus.Pending,
-          source: StatusEventSource.System,
-        },
-      ],
-    });
+    const d6AmountFiat = toFiat(7000);
+    const d6Rate = toRate(89.2);
+    const d6CreatedAt = new Date();
+    const d6 = await manager.save(
+      Transaction,
+      manager.create(Transaction, {
+        kind: TransactionKind.PayOut,
+        status: TransactionStatus.Pending,
+        method: 'sbp',
+        traderUserId: null,
+        bankDetailsId: null,
+        merchantId: merchant1.id,
+        amountFiat: d6AmountFiat,
+        rate: d6Rate,
+        merchantPercent: 3,
+        ...computePayOutRequest({
+          amountFiat: d6AmountFiat,
+          rate: d6Rate,
+          merchantPercent: 3,
+        }),
+        payoutOwnerName: 'PAVEL SIDOROV',
+        payoutBankId: tinkoff.id,
+        payoutPhone: '79035556677',
+        createdAt: d6CreatedAt,
+        expiresAt: new Date(d6CreatedAt.getTime() + dealTtlMinutes() * 60_000),
+      }),
+    );
+    await writeStatusPath(manager, d6.id, [
+      { toStatus: TransactionStatus.Pending, source: StatusEventSource.System },
+    ]);
 
     await recordMerchantMove(
       manager,
@@ -1174,6 +1279,7 @@ async function main(): Promise<void> {
         userId: trader1.user.id,
         tradingEnabled: true,
         payoutTradingEnabled: true,
+        withdrawalsEnabled: true,
         individualRatesEnabled: true,
         autoBuybackEnabled: true,
         autoBuybackConcurrent: 3,
@@ -1191,6 +1297,8 @@ async function main(): Promise<void> {
       manager.create(TraderSettings, {
         userId: trader3.user.id,
         tradingEnabled: true,
+        payoutTradingEnabled: false,
+        withdrawalsEnabled: false,
       }),
     );
     await manager.save(
@@ -1372,6 +1480,13 @@ async function main(): Promise<void> {
       console.log(`  backup codes: ${entry.user.codes.join(', ')}`);
     }
   }
+
+  console.log(
+    `\nMerchant API key (Ohla Shop, X-Secure-Key): ${merchantApiKey}`,
+  );
+  console.log(
+    `Device token (trader_one, Pixel 7; POST /device/heartbeat with Authorization: Bearer): ${deviceToken}`,
+  );
 
   await dataSource.destroy();
 }

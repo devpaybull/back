@@ -11,6 +11,7 @@ import { FieldErrorsValidationPipe } from './common/pipes/field-errors-validatio
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { parseCorsOrigin } from './common/utils/parse-cors-origin';
 import { parseTrustProxy } from './common/utils/parse-trust-proxy';
+import { buildMerchantApiDocument } from './merchant-api/utils/build-merchant-api-document';
 import { registerBodyParsers } from './merchant-api/utils/register-body-parsers';
 
 async function bootstrap() {
@@ -47,12 +48,21 @@ async function bootstrap() {
       .setVersion('0.0.1')
       .addBearerAuth()
       .addCookieAuth(REFRESH_COOKIE_NAME)
+      .addApiKey(
+        { type: 'apiKey', in: 'header', name: 'X-Secure-Key' },
+        'X-Secure-Key',
+      )
       .build();
 
     SwaggerModule.setup(
       'api',
       app,
       SwaggerModule.createDocument(app, swaggerConfig),
+    );
+    SwaggerModule.setup(
+      'merchant-api-docs',
+      app,
+      buildMerchantApiDocument(app),
     );
   }
 

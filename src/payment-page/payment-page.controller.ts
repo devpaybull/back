@@ -14,6 +14,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBody,
   ApiConsumes,
+  ApiDefaultResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -29,6 +30,10 @@ import { PayPageRateLimitGuard } from './guards/pay-page-rate-limit.guard';
 import { PayReceiptGuard } from './guards/pay-receipt.guard';
 
 @ApiTags('Payment page')
+@ApiDefaultResponse({
+  description:
+    'An error: { statusCode, code, message } — PAYMENT_PAGE_NOT_FOUND (404), PAYMENT_NOT_PAYABLE (409), RECEIPT_LIMIT_REACHED (409), FILE_TYPE_NOT_ALLOWED (400), TOO_MANY_REQUESTS (429, with Retry-After), TOO_MANY_UPLOADS (429); a file over the size limit is a 413',
+})
 @ApiParam({
   name: 'token',
   description: 'The last segment of the deal’s paymentPageUrl',

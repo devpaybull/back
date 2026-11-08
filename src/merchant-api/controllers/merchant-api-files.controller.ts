@@ -16,9 +16,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBody,
   ApiConsumes,
-  ApiHeader,
+  ApiDefaultResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
@@ -28,12 +29,17 @@ import { TransactionFilesService } from '../../transactions/services/transaction
 import { CurrentApiMerchant } from '../decorators/current-api-merchant.decorator';
 import { DealFileDto } from '../dto/deal-file.dto';
 import { UploadDealFileDto } from '../dto/upload-deal-file.dto';
+import { MerchantApiErrorDto } from '../dto/merchant-api-error.dto';
 import { MerchantApiExceptionFilter } from '../filters/merchant-api-exception.filter';
 import { MerchantApiKeyGuard } from '../guards/merchant-api-key.guard';
 import { ApiMerchant } from '../types/api-merchant';
 
 @ApiTags('Merchant API · Disputes')
-@ApiHeader({ name: 'X-Secure-Key', required: true })
+@ApiSecurity('X-Secure-Key')
+@ApiDefaultResponse({
+  type: MerchantApiErrorDto,
+  description: 'An error: { statusCode, code, message, details? }',
+})
 @Public()
 @UseGuards(MerchantApiKeyGuard)
 @UseFilters(MerchantApiExceptionFilter)

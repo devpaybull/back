@@ -5,7 +5,12 @@ import {
   UseFilters,
   UseGuards,
 } from '@nestjs/common';
-import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiDefaultResponse,
+  ApiOperation,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiEnvelopeResponse } from '../../common/decorators/api-envelope-response.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { formatCrypto } from '../../common/utils/format-crypto';
@@ -17,13 +22,18 @@ import { MerchantExchangeRate } from '../../transactions/types/merchant-exchange
 import { CurrentApiMerchant } from '../decorators/current-api-merchant.decorator';
 import { ApiExchangeRateDto } from '../dto/api-exchange-rate.dto';
 import { ApiMerchantBalanceDto } from '../dto/api-merchant-balance.dto';
+import { MerchantApiErrorDto } from '../dto/merchant-api-error.dto';
 import { MerchantApiExceptionFilter } from '../filters/merchant-api-exception.filter';
 import { MerchantApiKeyGuard } from '../guards/merchant-api-key.guard';
 import { ApiMerchant } from '../types/api-merchant';
 import { MerchantApiErrorCode } from '../types/merchant-api-error-code.enum';
 
 @ApiTags('Merchant API · Account')
-@ApiHeader({ name: 'X-Secure-Key', required: true })
+@ApiSecurity('X-Secure-Key')
+@ApiDefaultResponse({
+  type: MerchantApiErrorDto,
+  description: 'An error: { statusCode, code, message, details? }',
+})
 @Public()
 @UseGuards(MerchantApiKeyGuard)
 @UseFilters(MerchantApiExceptionFilter)
