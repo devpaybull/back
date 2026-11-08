@@ -156,14 +156,6 @@ export class WalletService {
       .execute();
   }
 
-  async hasMinInsurancePayIn(userId: string): Promise<boolean> {
-    const wallet = await this.requireWallet(userId);
-    const minimum =
-      await this.traderSettings.effectiveInsurancePayInMin(userId);
-
-    return wallet.insurancePayInBalance.gte(minimum);
-  }
-
   isWithinNightWindow(now: Date): boolean {
     return isNightWindow(
       now,

@@ -1,6 +1,10 @@
 import { TransactionFileKind } from '../../transactions/types/transaction-file-kind.enum';
 import 'reflect-metadata';
-import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ValidationPipe,
+} from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ROLES_METADATA_KEY } from '../../common/decorators/roles.decorator';
 import { WRITE_ACCESS_METADATA_KEY } from '../../common/decorators/write-access.decorator';
@@ -30,6 +34,8 @@ const TRADER = { id: uuidOf(1), impersonatedBy: uuidOf(7) } as never;
 const DEAL = uuidOf(2);
 const REQUISITE = uuidOf(3);
 const MERCHANT = uuidOf(4);
+const OTHER_REQUISITE = uuidOf(9);
+const DEVICE = 11;
 const pipe = new ValidationPipe({
   whitelist: true,
   forbidNonWhitelisted: true,
@@ -95,6 +101,10 @@ const build = () => {
     tagsOf: jest.fn(
       async () => new Map([[REQUISITE, [{ id: 8, name: 'основной' }]]]),
     ),
+    idsOfDevice: jest.fn(async () => [REQUISITE, OTHER_REQUISITE]),
+  };
+  const devices = {
+    findOwn: jest.fn(async (id: number) => (id === DEVICE ? { id } : null)),
   };
   const merchants = {
     findIdsOfGroup: jest.fn(async () => [MERCHANT]),
@@ -136,9 +146,19 @@ const build = () => {
     counterparties as never,
     config as never,
     files as never,
+    devices as never,
   );
 
-  return { controller, deals, actions, merchants, counterparties, files };
+  return {
+    controller,
+    deals,
+    actions,
+    bankDetails,
+    devices,
+    merchants,
+    counterparties,
+    files,
+  };
 };
 
 const query = (overrides: object = {}): ListTraderDealsQueryDto =>
@@ -258,6 +278,66 @@ describe('TraderDealsController', () => {
         sortBy: TransactionSortField.TraderCommission,
       }),
     );
+  });
+
+  describe('GET /trader/devices/:id/deals', () => {
+    it('lists the deals of the device’s requisites through the same query, with the same filters', async () => {
+      const { controller, deals, bankDetails, devices } = build();
+
+      const page = await controller.ofDevice(
+        TRADER,
+        DEVICE,
+        query({ merchantGroupId: 6, period: DayPeriod.AllTime }),
+      );
+
+      expect(devices.findOwn).toHaveBeenCalledWith(DEVICE, uuidOf(1));
+      expect(bankDetails.idsOfDevice).toHaveBeenCalledWith(DEVICE, uuidOf(1));
+      expect(deals.list).toHaveBeenCalledWith(
+        uuidOf(1),
+        expect.objectContaining({
+          bankDetailsIds: [REQUISITE, OTHER_REQUISITE],
+          merchantIds: [MERCHANT],
+          page: 1,
+          limit: 20,
+        }),
+      );
+      expect(page.items[0]).toMatchObject({ id: DEAL });
+    });
+
+    it('narrows to one requisite of the device, and to none for a requisite of another device', async () => {
+      const { controller, deals } = build();
+
+      await controller.ofDevice(
+        TRADER,
+        DEVICE,
+        query({ bankDetailsId: OTHER_REQUISITE }),
+      );
+      await controller.ofDevice(
+        TRADER,
+        DEVICE,
+        query({ bankDetailsId: uuidOf(30) }),
+      );
+
+      expect(deals.list).toHaveBeenNthCalledWith(
+        1,
+        uuidOf(1),
+        expect.objectContaining({ bankDetailsIds: [OTHER_REQUISITE] }),
+      );
+      expect(deals.list).toHaveBeenNthCalledWith(
+        2,
+        uuidOf(1),
+        expect.objectContaining({ bankDetailsIds: [] }),
+      );
+    });
+
+    it('is a 404 for a device the trader does not own, and reads no deals', async () => {
+      const { controller, deals } = build();
+
+      await expect(
+        controller.ofDevice(TRADER, 99, query()),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(deals.list).not.toHaveBeenCalled();
+    });
   });
 
   it('counts the chips, an appeal being dispute and manual review', async () => {

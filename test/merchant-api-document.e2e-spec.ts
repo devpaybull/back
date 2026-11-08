@@ -1,4 +1,8 @@
 import { OpenAPIObject } from '@nestjs/swagger';
+import { execFileSync } from 'child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { MerchantApiErrorCode } from '../src/merchant-api/types/merchant-api-error-code.enum';
 import { buildMerchantApiDocument } from '../src/merchant-api/utils/build-merchant-api-document';
 import { E2eContext, startE2e } from './support/e2e-app';
@@ -107,7 +111,7 @@ describe('the merchant OpenAPI document', () => {
     expect(Object.keys(error.properties)).toEqual(
       expect.arrayContaining(['statusCode', 'code', 'message', 'details']),
     );
-    expect(codes.enum.sort()).toEqual(
+    expect([...codes.enum].sort()).toEqual(
       Object.values(MerchantApiErrorCode).sort(),
     );
     for (const code of Object.values(MerchantApiErrorCode)) {
@@ -143,4 +147,27 @@ describe('the merchant OpenAPI document', () => {
     }
     expect(document.info.description).toContain('HMAC-SHA256');
   });
+
+  it('exports the same document as a static file, with no database and no environment', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'merchant-openapi-'));
+    const output = join(directory, 'merchant-api.json');
+
+    try {
+      execFileSync(
+        'npm',
+        ['run', '--silent', 'openapi:merchant', '--', output],
+        {
+          cwd: join(__dirname, '..'),
+          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+          encoding: 'utf8',
+        },
+      );
+
+      expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(
+        JSON.parse(JSON.stringify(document)),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 300_000);
 });

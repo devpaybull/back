@@ -26,6 +26,7 @@ describe('the trader cabinet: deals', () => {
   let merchantId: string;
   let key: string;
   let requisiteId: string;
+  let deviceId: number;
 
   const startingMain = toCrypto(100000);
 
@@ -120,7 +121,7 @@ describe('the trader cabinet: deals', () => {
 
     trader = await e2e.createUser(Role.Trader);
     stranger = await e2e.createUser(Role.Trader);
-    const deviceId = await deviceOf(e2e, trader);
+    deviceId = await deviceOf(e2e, trader);
     await e2e.dataSource
       .getRepository(Device)
       .update(deviceId, { lastActivity: new Date(Date.now() + 3_600_000) });
@@ -211,6 +212,47 @@ describe('the trader cabinet: deals', () => {
       .expect(200);
     expect(csv.headers['content-type']).toContain('text/csv');
     expect(csv.text).toContain(id);
+
+    await post(id, 'decline').send({ reasonCode: 'limit_reached' }).expect(200);
+  });
+
+  it('lists the deals of one own device, with the deal filters, and refuses another trader’s device', async () => {
+    const id = await createPayIn('1020');
+    const ofDevice = (device: number, as: E2eUser, query: object = {}) =>
+      e2e.http
+        .get(`/trader/devices/${device}/deals`)
+        .set(bearer(as))
+        .query({ period: 'all_time', ...query });
+
+    const listed = await ofDevice(deviceId, trader).expect(200);
+    const all = await e2e.http
+      .get('/trader/deals')
+      .set(bearer(trader))
+      .query({ period: 'all_time' })
+      .expect(200);
+    expect(listed.body.meta.total).toBe(all.body.meta.total);
+    expect(listed.body.data).toEqual(all.body.data);
+    expect((listed.body.data as { id: string }[]).map((d) => d.id)).toContain(
+      id,
+    );
+
+    const filtered = await ofDevice(deviceId, trader, {
+      status: 'active',
+      amountFrom: '1020',
+      amountTo: '1020',
+    }).expect(200);
+    expect((filtered.body.data as { id: string }[]).map((d) => d.id)).toEqual([
+      id,
+    ]);
+    expect(filtered.body.meta.total).toBe(1);
+
+    const spare = await deviceOf(e2e, trader);
+    const empty = await ofDevice(spare, trader).expect(200);
+    expect(empty.body.data).toEqual([]);
+    expect(empty.body.meta.total).toBe(0);
+
+    await ofDevice(deviceId, stranger).expect(404);
+    await ofDevice(999999, trader).expect(404);
 
     await post(id, 'decline').send({ reasonCode: 'limit_reached' }).expect(200);
   });

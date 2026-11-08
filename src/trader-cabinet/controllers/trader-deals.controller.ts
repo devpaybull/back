@@ -4,7 +4,9 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Post,
   Query,
@@ -35,6 +37,7 @@ import { formatRate } from '../../common/utils/format-rate';
 import { roundFiat } from '../../common/utils/round-fiat';
 import { toFiat } from '../../common/utils/to-fiat';
 import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
+import { DevicesService } from '../../devices/devices.service';
 import { MerchantsService } from '../../merchants/services/merchants.service';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TraderDealActionsService } from '../../transactions/services/trader-deal-actions.service';
@@ -74,7 +77,7 @@ const distinct = <T>(values: (T | null | undefined)[]): T[] => [
 @ApiBearerAuth()
 @UseGuards(RolesGuard, WriteAccessGuard)
 @Roles(Role.Trader)
-@Controller('trader/deals')
+@Controller('trader')
 export class TraderDealsController {
   constructor(
     private readonly deals: TraderDealsService,
@@ -84,9 +87,10 @@ export class TraderDealsController {
     private readonly counterparties: CounterpartiesService,
     private readonly config: ConfigService,
     private readonly files: TransactionFilesService,
+    private readonly devices: DevicesService,
   ) {}
 
-  @Get()
+  @Get('deals')
   @ApiOperation({
     summary: 'The trader’s own pay-in deals',
     description:
@@ -97,18 +101,40 @@ export class TraderDealsController {
     @CurrentUser() trader: AuthenticatedUser,
     @Query() query: ListTraderDealsQueryDto,
   ): Promise<Page<TraderDealDto>> {
-    const page = await this.deals.list(trader.id, {
-      ...(await this.filterOf(query)),
-      page: query.page,
-      limit: query.limit,
-      sortBy: SORT_FIELDS[query.sortBy],
-      sortOrder: query.sortOrder,
-    });
-
-    return new Page(await this.withDetails(page.items), page.meta);
+    return this.page(trader, query, await this.filterOf(query));
   }
 
-  @Get('counters')
+  @Get('devices/:id/deals')
+  @ApiOperation({
+    summary:
+      'The deals on the requisites of one of the trader’s devices, the device page’s tab',
+    description:
+      'The filters of GET /trader/deals; bankDetailsId narrows to one requisite of this device. Requisites deleted since keep their deals here. Another trader’s device, or a deleted one, is a 404.',
+  })
+  @ApiPagedResponse(TraderDealDto)
+  async ofDevice(
+    @CurrentUser() trader: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ListTraderDealsQueryDto,
+  ): Promise<Page<TraderDealDto>> {
+    if (!(await this.devices.findOwn(id, trader.id))) {
+      throw new NotFoundException('Device not found');
+    }
+
+    const requisiteIds = await this.bankDetails.idsOfDevice(id, trader.id);
+    const filter = await this.filterOf(query);
+
+    return this.page(trader, query, {
+      ...filter,
+      bankDetailsIds: requisiteIds.filter(
+        (requisiteId) =>
+          query.bankDetailsId === undefined ||
+          requisiteId === query.bankDetailsId,
+      ),
+    });
+  }
+
+  @Get('deals/counters')
   @ApiOperation({
     summary: 'The chip counters under the list’s filters, status aside',
   })
@@ -136,7 +162,7 @@ export class TraderDealsController {
     };
   }
 
-  @Get('export')
+  @Get('deals/export')
   @ApiOperation({
     summary: 'The deals under the same filters as CSV',
     description:
@@ -165,7 +191,7 @@ export class TraderDealsController {
     );
   }
 
-  @Get(':id')
+  @Get('deals/:id')
   @ApiOperation({
     summary: 'One of the trader’s deals',
     description: 'Another trader’s deal is a 404.',
@@ -178,7 +204,7 @@ export class TraderDealsController {
     return this.detailOf(await this.deals.findOwn(trader.id, id));
   }
 
-  @Post(':id/confirm')
+  @Post('deals/:id/confirm')
   @WriteAccess()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -195,7 +221,7 @@ export class TraderDealsController {
     return this.detailOf(await this.actions.confirm(traderActorOf(trader), id));
   }
 
-  @Post(':id/confirm-changed')
+  @Post('deals/:id/confirm-changed')
   @WriteAccess()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -219,7 +245,7 @@ export class TraderDealsController {
     );
   }
 
-  @Post(':id/decline')
+  @Post('deals/:id/decline')
   @WriteAccess()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -241,6 +267,22 @@ export class TraderDealsController {
         dto.comment ?? null,
       ),
     );
+  }
+
+  private async page(
+    trader: AuthenticatedUser,
+    query: ListTraderDealsQueryDto,
+    filter: TraderDealFilter,
+  ): Promise<Page<TraderDealDto>> {
+    const page = await this.deals.list(trader.id, {
+      ...filter,
+      page: query.page,
+      limit: query.limit,
+      sortBy: SORT_FIELDS[query.sortBy],
+      sortOrder: query.sortOrder,
+    });
+
+    return new Page(await this.withDetails(page.items), page.meta);
   }
 
   private async filterOf(

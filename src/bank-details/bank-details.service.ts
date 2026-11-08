@@ -431,6 +431,16 @@ export class BankDetailsService {
     });
   }
 
+  async idsOfDevice(deviceId: number, userId: string): Promise<string[]> {
+    return (
+      await this.requisitesOfDeviceWithin(
+        this.bankDetails.manager,
+        deviceId,
+        userId,
+      )
+    ).map((requisite) => requisite.id);
+  }
+
   async countByDevices(
     deviceIds: readonly number[],
   ): Promise<Map<number, number>> {
