@@ -427,6 +427,7 @@ export class BankDetailsService {
       select: { id: true, bankId: true },
       where: { deviceId, userId },
       order: { id: 'ASC' },
+      withDeleted: true,
     });
   }
 

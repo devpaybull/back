@@ -897,6 +897,24 @@ describe('BankDetailsService', () => {
     });
   });
 
+  describe('requisitesOfDeviceWithin', () => {
+    it('reads the device’s requisites of its owner through the manager, deleted ones included', async () => {
+      const find = jest.fn(async () => [{ id: uuidOf(100), bankId: 5 }]);
+      const within = { getRepository: jest.fn(() => ({ find })) };
+
+      await expect(
+        service.requisitesOfDeviceWithin(within as never, 7, owner),
+      ).resolves.toEqual([{ id: uuidOf(100), bankId: 5 }]);
+      expect(within.getRepository).toHaveBeenCalledWith(BankDetails);
+      expect(find).toHaveBeenCalledWith({
+        select: { id: true, bankId: true },
+        where: { deviceId: 7, userId: owner },
+        order: { id: 'ASC' },
+        withDeleted: true,
+      });
+    });
+  });
+
   describe('list', () => {
     it('pages the query and loads the bank, the owner and who banned it', async () => {
       await service.list({

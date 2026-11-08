@@ -1,4 +1,5 @@
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
+import { BankDetails } from '../src/bank-details/entities/bank-details.entity';
 import { Role } from '../src/common/enums/role.enum';
 import { toCrypto } from '../src/common/utils/to-crypto';
 import { DeviceMessage } from '../src/device-messages/entities/device-message.entity';
@@ -643,6 +644,30 @@ describe('device messages and automatic confirmation', () => {
         }),
       );
       expect((await dealRow(newer)).status).toBe('active');
+    });
+
+    it('confirms a deal on a requisite deleted since, as on a disabled one (Q-TC10.10)', async () => {
+      const id = await createPayIn('4100');
+      const deal = await dealRow(id);
+
+      await e2e.http
+        .delete(`/trader/requisites/${deal.bankDetailsId}`)
+        .set(bearer(trader))
+        .expect(200);
+      expect(
+        await e2e.dataSource
+          .getRepository(BankDetails)
+          .findOne({ where: { id: deal.bankDetailsId } }),
+      ).toBeNull();
+
+      const answer = await send(deviceToken, {
+        text: credit(deal.amountFiat),
+      }).expect(200);
+
+      expect(answer.body.data).toEqual(
+        expect.objectContaining({ matchStatus: 'matched', transactionId: id }),
+      );
+      expect((await dealRow(id)).status).toBe('success');
     });
 
     it('keeps the SMS text and the sender out of the http audit trail', async () => {
