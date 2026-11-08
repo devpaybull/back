@@ -182,7 +182,7 @@ describe('the trader cabinet: pay-outs', () => {
     });
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('runs the whole cycle: pool → take → receipt → review → success, with the trader paid and the hold spent', async () => {
     const id = await createPayOut();

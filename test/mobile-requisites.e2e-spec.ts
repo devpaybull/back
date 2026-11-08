@@ -45,7 +45,7 @@ describe('mobile operators and the two requisite types', () => {
     ).body.data.id;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('lets an admin add, read, list and retire a mobile operator', async () => {
     const created = await e2e.http

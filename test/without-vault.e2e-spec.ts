@@ -42,7 +42,7 @@ describe('the Tron engine with KEY_SOURCE=env and no Vault', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('deposits, sweeps and withdraws with the keys from the environment', async () => {
     const address = (

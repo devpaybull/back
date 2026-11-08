@@ -148,7 +148,7 @@ describe('the trader cabinet: deals', () => {
     ).body.data.id as string;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('lists a pay-in from /v1 for its trader today, and shows it to nobody else', async () => {
     const id = await createPayIn('1010');

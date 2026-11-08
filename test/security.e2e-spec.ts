@@ -60,7 +60,7 @@ describe('security of the money endpoints', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it.each([...TRADER_ROUTES, ...ADMIN_ROUTES])(
     'refuses %s %s without a token (401)',

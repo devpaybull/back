@@ -26,7 +26,7 @@ describe('deposits end to end', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   describe('the deposit address', () => {
     it('issues the first HD address on first use, with a QR, and keeps it', async () => {

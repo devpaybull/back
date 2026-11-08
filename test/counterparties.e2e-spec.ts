@@ -142,7 +142,7 @@ describe('the counterparties page', () => {
     second = (await counterparties.findOrCreate(merchantId, '9990001')).id;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('counts the deals of a counterparty as they move, and the rebuild agrees', async () => {
     await move(await payIn(first, 1000), ['success']);

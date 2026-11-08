@@ -64,7 +64,7 @@ describe('recovery from failures end to end', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('keeps a withdrawal queued while the hot wallet cannot cover it', async () => {
     const id = await request('40');

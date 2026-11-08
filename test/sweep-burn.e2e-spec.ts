@@ -47,7 +47,7 @@ describe('sweep end to end, burning TRX without a stake', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('leaves an address below SWEEP_MIN_USDT alone', async () => {
     const trader = await e2e.createUser(Role.Trader);

@@ -122,7 +122,7 @@ describe('MAIN_BALANCE_MIN_THRESHOLD in requisite selection', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('drops a trader at or below the threshold, journals the reason, shows it, and leaves the switch on', async () => {
     const trader = await e2e.createUser(Role.Trader);

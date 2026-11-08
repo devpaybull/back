@@ -27,7 +27,7 @@ describe('PAYOUT_MODE=manual end to end', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('never sends a withdrawal itself, and an admin closes a queued one by hash', async () => {
     const destination = 'TKTX96CBxr5kvhjsDHcqoiPWZageGxoTW3';

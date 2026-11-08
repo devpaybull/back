@@ -67,7 +67,7 @@ describe('the trader’s requisites (TC07)', () => {
     ).body.data.id;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('requires a device and the daily limit, and takes the delay only from the set', async () => {
     await create({ deviceId: undefined }).expect(400);

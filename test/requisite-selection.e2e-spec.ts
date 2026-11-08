@@ -147,7 +147,7 @@ describe('requisite selection against Postgres', () => {
     });
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   afterEach(async () => {
     await cancelAll();

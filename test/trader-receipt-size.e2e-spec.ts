@@ -9,7 +9,7 @@ describe('the trader cabinet: the size of a receipt', () => {
     e2e = await startE2e({ DISPUTE_FILE_MAX_BYTES: '16' });
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('answers 413 over DISPUTE_FILE_MAX_BYTES', async () => {
     const trader = await e2e.createUser(Role.Trader);

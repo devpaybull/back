@@ -173,7 +173,7 @@ describe('the payment page /pay (MA11)', () => {
     ip = `198.51.100.${client}`;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('gives a /v1 pay-in a paymentPageUrl with a random token, and the page shows only what the payer needs', async () => {
     const { id, url, token } = await payIn({

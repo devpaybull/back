@@ -172,7 +172,7 @@ describe('merchant callbacks', () => {
     );
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('a confirmed deal sends one signed status_changed with the same PaymentDto the API gives', async () => {
     const id = await payIn(HOOK);

@@ -77,7 +77,7 @@ describe('the merchants page', () => {
     ).body.data.id;
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('groups merchants, applies group flags, and deletes a group left empty', async () => {
     const created = await e2e.http

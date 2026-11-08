@@ -37,7 +37,7 @@ describe('sweep end to end, delegating staked energy', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('waits without a stake when burning is off', async () => {
     const trader = await e2e.createUser(Role.Trader);

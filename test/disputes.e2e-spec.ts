@@ -250,7 +250,7 @@ describe('disputes', () => {
     await fund(100000);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   describe('pay-in', () => {
     it('canceled, a silent trader: the deadline moves no money and hands it to an admin, whose accept debits the trader without any escrow and credits the merchant', async () => {

@@ -174,7 +174,7 @@ describe('the trader cabinet: the switch, the summary and the balances', () => {
     await scan(e2e);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('deposit, transfer to insurance, switch on, traffic: each step with exact balances', async () => {
     const trader = await e2e.createUser(Role.Trader);

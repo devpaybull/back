@@ -1,9 +1,11 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { runId } from './run-id';
 
-const STATE_FILE = join(tmpdir(), 'paybull-e2e-postgres.json');
+const stateFile = (): string =>
+  join(tmpdir(), `paybull-e2e-postgres-${runId()}.json`);
 const IMAGE = 'postgres:16-alpine';
 
 export interface PostgresState {
@@ -55,7 +57,7 @@ export const startPostgres = (): PostgresState => {
         'select 1',
       );
       const state = { container, port };
-      writeFileSync(STATE_FILE, JSON.stringify(state));
+      writeFileSync(stateFile(), JSON.stringify(state));
       return state;
     } catch {
       execFileSync('sleep', ['1']);
@@ -66,11 +68,12 @@ export const startPostgres = (): PostgresState => {
 };
 
 export const readPostgres = (): PostgresState =>
-  JSON.parse(readFileSync(STATE_FILE, 'utf8')) as PostgresState;
+  JSON.parse(readFileSync(stateFile(), 'utf8')) as PostgresState;
 
 export const stopPostgres = (): void => {
   try {
     docker('rm', '-f', readPostgres().container);
+    rmSync(stateFile(), { force: true });
   } catch {
     return;
   }

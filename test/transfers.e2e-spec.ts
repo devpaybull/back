@@ -12,7 +12,7 @@ describe('admin transfer between accounts (AT01)', () => {
     admin = await e2e.createUser(Role.Superadmin);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('moves the money in one row, with both journal legs, to a recipient without a wallet', async () => {
     const sender = await e2e.createUser(Role.Trader);

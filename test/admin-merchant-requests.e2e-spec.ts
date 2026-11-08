@@ -532,4 +532,44 @@ describe('the admin request history (RH)', () => {
       ).toBe(2);
     });
   });
+
+  it('masks the address headers of the card for an admin and keeps them whole for a superadmin and in storage', async () => {
+    const sent = {
+      'X-Forwarded-For': '203.0.113.7, 2001:db8::1',
+      'X-Real-IP': '198.51.100.2',
+      Forwarded: 'for="[2001:db8:cafe::17]:4711";proto=https, for=192.0.2.60',
+    };
+    const id = (
+      await e2e.http
+        .get('/v1/merchant/balance')
+        .set('X-Secure-Key', key)
+        .set(sent)
+        .expect(200)
+    ).headers['x-request-id'];
+    await settle();
+
+    const shown = async (user: E2eUser) =>
+      (await get(`/admin/merchant-requests/${id}`, user).expect(200)).body.data
+        .requestHeaders;
+    const whole = {
+      'x-forwarded-for': sent['X-Forwarded-For'],
+      'x-real-ip': sent['X-Real-IP'],
+      forwarded: sent.Forwarded,
+    };
+
+    expect(await shown(admin)).toMatchObject({
+      'x-forwarded-for': '203.0.*.*, 2001:db8:0:0:*:*:*:*',
+      'x-real-ip': '198.51.*.*',
+      forwarded:
+        'for="[2001:db8:cafe:0:*:*:*:*]:4711";proto=https, for=192.0.*.*',
+    });
+    expect(await shown(superadmin)).toMatchObject(whole);
+    expect(
+      (
+        await e2e.dataSource
+          .getRepository(MerchantApiRequest)
+          .findOneByOrFail({ id })
+      ).requestHeaders,
+    ).toMatchObject(whole);
+  });
 });

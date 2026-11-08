@@ -113,7 +113,7 @@ describe('the merchant cabinet', () => {
     await succeed(ownDeal);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('is closed to a trader and to a merchant-side account bound to no merchant', async () => {
     await e2e.http.get('/merchant/me').set(bearer(trader)).expect(403);

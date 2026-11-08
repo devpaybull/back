@@ -72,7 +72,7 @@ describe('withdrawals end to end', () => {
     await fund(trader, '800');
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   describe('quote', () => {
     it('prices the network cost of a transfer in TRX and USDT and stores the quote', async () => {

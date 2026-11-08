@@ -1,9 +1,11 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { runId } from './run-id';
 
-const STATE_FILE = join(tmpdir(), 'paybull-e2e-minio.json');
+const stateFile = (): string =>
+  join(tmpdir(), `paybull-e2e-minio-${runId()}.json`);
 const IMAGE =
   'ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9';
 
@@ -19,7 +21,7 @@ const docker = (...args: string[]): string =>
   execFileSync('docker', args, { encoding: 'utf8' }).trim();
 
 export const readMinio = (): MinioState =>
-  JSON.parse(readFileSync(STATE_FILE, 'utf8')) as MinioState;
+  JSON.parse(readFileSync(stateFile(), 'utf8')) as MinioState;
 
 export const startMinio = (): void => {
   const container = `paybull-e2e-minio-${process.pid}`;
@@ -50,7 +52,7 @@ export const startMinio = (): void => {
         '2',
         `http://127.0.0.1:${port}/minio/health/live`,
       ]);
-      writeFileSync(STATE_FILE, JSON.stringify({ container, port }));
+      writeFileSync(stateFile(), JSON.stringify({ container, port }));
       return;
     } catch {
       execFileSync('sleep', ['1']);
@@ -63,6 +65,7 @@ export const startMinio = (): void => {
 export const stopMinio = (): void => {
   try {
     docker('rm', '-f', readMinio().container);
+    rmSync(stateFile(), { force: true });
   } catch {
     return;
   }

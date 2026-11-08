@@ -36,7 +36,7 @@ describe('device pairing and heartbeat', () => {
     stranger = await e2e.createUser(Role.Trader);
   });
 
-  afterAll(() => e2e.close());
+  afterAll(() => e2e?.close());
 
   it('pairs a device, keeps it online by heartbeat and shows it offline after silence', async () => {
     const id = await createDevice('Pixel 7');
