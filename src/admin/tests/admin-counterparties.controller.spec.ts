@@ -38,6 +38,8 @@ const counterparty = (overrides: Partial<Counterparty> = {}): Counterparty =>
     paidCount: 0,
     disputeCount: 0,
     paidAmount: toFiat(0),
+    requestCount: 0,
+    lastRequestAt: null,
     lastDepositAt: null,
     createdAt: new Date('2026-06-24T08:32:00Z'),
     ...overrides,
@@ -108,18 +110,27 @@ const build = () => {
     findByIds: jest.fn(async () => [requisite.user]),
     findIdsMatching: jest.fn(async (): Promise<string[]> => []),
   };
+  const requestLog = {
+    countForCounterparty: jest.fn(async () => 7),
+    listForCounterparty: jest.fn(async (): Promise<[unknown[], number]> => [
+      [],
+      0,
+    ]),
+  };
   const controller = new AdminCounterpartiesController(
     counterparties as never,
     dealStats as never,
     bankDetails as never,
     merchants as never,
     directory as never,
+    requestLog as never,
   );
 
   return {
     controller,
     counterparties,
     dealStats,
+    requestLog,
     bankDetails,
     merchants,
     directory,
@@ -173,6 +184,8 @@ describe('AdminCounterpartiesController', () => {
             paidCount: 580,
             disputeCount: 21,
             paidAmount: toFiat('1160000.00'),
+            requestCount: 600,
+            lastRequestAt: new Date('2026-11-05T10:00:00Z'),
           }),
         ],
         { total: 1, page: 1, limit: 20, pages: 1 },
@@ -200,8 +213,8 @@ describe('AdminCounterpartiesController', () => {
     expect(row.volume7d).toBe('2000000.00');
     expect(row.volume30d).toBe('40000000.00');
     expect(row.volumeTotal).toBe('1160000.00');
-    expect(row.requestCount).toBeNull();
-    expect(row.lastLoginAt).toBeNull();
+    expect(row.requestCount).toBe(600);
+    expect(row.lastLoginAt).toEqual(new Date('2026-11-05T10:00:00Z'));
     expect(row.currency).toBe('RUB');
     expect(page.meta.total).toBe(1);
   });
@@ -315,7 +328,7 @@ describe('AdminCounterpartiesController', () => {
   });
 
   it('shapes the statistics of a method', async () => {
-    const { controller, dealStats } = build();
+    const { controller, dealStats, requestLog } = build();
     dealStats.statsOf.mockResolvedValue({
       dealCount: 600,
       completedCount: 504,
@@ -334,9 +347,45 @@ describe('AdminCounterpartiesController', () => {
       method: 'sbp',
       conversion: 99.21,
       averageCheck: '245500.50',
-      funnel: { requests: null, deals: 600, paid: 500 },
+      funnel: { requests: 7, deals: 600, paid: 500 },
       volume7d: '200000.50',
       volumeTotal: '122750250.00',
+    });
+    expect(requestLog.countForCounterparty).toHaveBeenCalledWith(1, 'sbp');
+  });
+
+  it('takes the funnel’s requests from the counter without a method', async () => {
+    const { controller, dealStats, counterparties, requestLog } = build();
+    dealStats.statsOf.mockResolvedValue({
+      dealCount: 1,
+      completedCount: 0,
+      paidCount: 0,
+      disputeCount: 0,
+      paidAmount: toFiat(0),
+      lastDepositAt: null,
+      volume7d: toFiat(0),
+      volume30d: toFiat(0),
+    });
+    counterparties.findById.mockResolvedValue(
+      counterparty({ requestCount: 42 }),
+    );
+
+    const stats = await controller.stats(1, {});
+
+    expect(stats.funnel.requests).toBe(42);
+    expect(requestLog.countForCounterparty).not.toHaveBeenCalled();
+  });
+
+  it('passes the «Запросов 30 д.» range as counts', async () => {
+    const { controller, counterparties } = build();
+    counterparties.list.mockResolvedValue(
+      new Page([], { total: 0, page: 1, limit: 20, pages: 0 }),
+    );
+
+    await controller.list(query({ requests30dFrom: 2, requests30dTo: 9 }));
+
+    expect(counterparties.list.mock.calls[0][0]).toMatchObject({
+      requests30d: { from: 2, to: 9 },
     });
   });
 
@@ -409,5 +458,140 @@ describe('AdminCounterpartiesController', () => {
       trader: { login: 'super_maks' },
       requisite: { id: REQUISITE, phone: '+79012345678' },
     });
+  });
+
+  it('merges the creation requests into the deal events by time, the request with its trader and outcome', async () => {
+    const { controller, dealStats, requestLog } = build();
+    const statusEvent = (id: number, at: string) => ({
+      id,
+      createdAt: new Date(at),
+      fromStatus: null,
+      toStatus: 'active',
+      source: 'system',
+      transaction: {
+        id: uuidOf(90),
+        kind: 'pay_in',
+        method: 'sbp',
+        status: 'active',
+        amountFiat: toFiat('2000'),
+        traderUserId: TRADER,
+        bankDetailsId: REQUISITE,
+      },
+    });
+    dealStats.listDealEvents.mockResolvedValue(
+      new Page(
+        [
+          statusEvent(9, '2026-11-05T10:00:03Z'),
+          statusEvent(8, '2026-11-05T09:00:00Z'),
+        ],
+        { total: 2, page: 1, limit: 4, pages: 1 },
+      ),
+    );
+    requestLog.listForCounterparty.mockResolvedValue([
+      [
+        {
+          id: uuidOf(500),
+          receivedAt: new Date('2026-11-05T10:00:02Z'),
+          paymentMethod: 'sbp',
+          amountFiat: toFiat('2000'),
+          currency: 'RUB',
+          result: 'created',
+          statusCode: 201,
+          errorCode: null,
+          transactionId: uuidOf(90),
+          processedByUserId: TRADER,
+        },
+        {
+          id: uuidOf(501),
+          receivedAt: new Date('2026-11-05T09:30:00Z'),
+          paymentMethod: 'sbp',
+          amountFiat: toFiat('3000'),
+          currency: 'RUB',
+          result: 'not_created',
+          statusCode: 403,
+          errorCode: 'NO_REQUISITE_FOUND_FOR_THIS_AMOUNT',
+          transactionId: null,
+          processedByUserId: null,
+        },
+      ],
+      2,
+    ]);
+
+    const page = await controller.dealEvents(1, {
+      page: 1,
+      limit: 4,
+      sortOrder: SortOrder.Desc,
+    } as never);
+
+    expect(dealStats.listDealEvents).toHaveBeenCalledWith(1, {
+      page: 1,
+      limit: 4,
+      sortOrder: SortOrder.Desc,
+    });
+    expect(requestLog.listForCounterparty).toHaveBeenCalledWith(
+      1,
+      SortOrder.Desc,
+      4,
+    );
+    expect(page.meta.total).toBe(4);
+    expect(page.items.map((item) => item.kind)).toEqual([
+      'status_changed',
+      'deal_requested',
+      'deal_requested',
+      'status_changed',
+    ]);
+    expect(page.items[1]).toEqual({
+      kind: 'deal_requested',
+      id: null,
+      createdAt: new Date('2026-11-05T10:00:02Z'),
+      fromStatus: null,
+      toStatus: null,
+      source: null,
+      deal: null,
+      trader: { id: TRADER, login: 'super_maks', email: 'super_maks@mail.ru' },
+      requisite: null,
+      request: {
+        id: uuidOf(500),
+        method: 'sbp',
+        amountFiat: '2000.00',
+        currency: 'RUB',
+        result: 'created',
+        statusCode: 201,
+        errorCode: null,
+        dealId: uuidOf(90),
+      },
+    });
+    expect(page.items[2].request).toMatchObject({
+      errorCode: 'NO_REQUISITE_FOUND_FOR_THIS_AMOUNT',
+      dealId: null,
+    });
+    expect(page.items[2].trader).toBeNull();
+  });
+
+  it('slices a later page out of the merged events and refuses one past the window', async () => {
+    const { controller, dealStats } = build();
+    dealStats.listDealEvents.mockResolvedValue(
+      new Page([], { total: 0, page: 1, limit: 40, pages: 0 }),
+    );
+
+    const page = await controller.dealEvents(1, {
+      page: 2,
+      limit: 20,
+      sortOrder: SortOrder.Desc,
+    } as never);
+
+    expect(dealStats.listDealEvents).toHaveBeenCalledWith(1, {
+      page: 1,
+      limit: 40,
+      sortOrder: SortOrder.Desc,
+    });
+    expect(page.items).toEqual([]);
+    await expect(
+      controller.dealEvents(1, {
+        page: 101,
+        limit: 100,
+        sortOrder: SortOrder.Desc,
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

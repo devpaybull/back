@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
+import { MerchantRequestsModule } from '../merchant-requests/merchant-requests.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { TraderSettingsModule } from '../trader-settings/trader-settings.module';
@@ -77,6 +78,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     BanksModule,
     forwardRef(() => BankDetailsModule),
     CounterpartiesModule,
+    MerchantRequestsModule,
     MerchantsModule,
     TraderSettingsModule,
     UsersModule,

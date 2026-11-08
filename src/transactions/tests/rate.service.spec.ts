@@ -1266,4 +1266,24 @@ describe('RateService — the merchant cabinet', () => {
     expect(await service.merchantSourceRate(0)).toEqual(toRate('80.8'));
     expect(await service.merchantSourceRate(2.5)).toEqual(toRate('82.82'));
   });
+
+  it('prices several markups from one quote of the source', async () => {
+    const rapira = { getFiatPerUsdt: jest.fn(async () => toRate('80')) };
+    const service = new RateService(
+      {} as never,
+      {} as never,
+      {} as never,
+      rapira as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    expect(await service.merchantSourceRates([2.5, -1, 0])).toEqual([
+      toRate('82.82'),
+      toRate('79.992'),
+      toRate('80.8'),
+    ]);
+    expect(rapira.getFiatPerUsdt).toHaveBeenCalledTimes(1);
+  });
 });

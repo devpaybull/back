@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
@@ -21,6 +22,7 @@ import { TransactionFilesService } from './transaction-files.service';
 import { TransactionService } from './transaction.service';
 
 const PAYER_RECEIPTS_MAX = 3;
+const HOUR_MS = 3_600_000;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 const pageNotFound = (): NotFoundException =>
@@ -47,12 +49,28 @@ export class PaymentPageService {
     private readonly files: TransactionFilesService,
     private readonly settings: MerchantSettingsService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
-  async view(token: string): Promise<PaymentPageDto> {
-    return this.pageOf(
-      await this.liveDeal(this.dataSource.manager, token, false),
-    );
+  async view(token: string, now: Date = new Date()): Promise<PaymentPageDto> {
+    const deal = await this.dealOf(this.dataSource.manager, token, false);
+
+    if (isFinalStatus(deal.status) && !this.stillShown(deal, now)) {
+      throw pageNotFound();
+    }
+
+    return this.pageOf(deal);
+  }
+
+  async assertAcceptsReceipt(token: string): Promise<void> {
+    const deal = await this.liveDeal(this.dataSource.manager, token, false);
+
+    if (
+      (await this.receiptsOf(this.dataSource.manager, deal.id)) >=
+      PAYER_RECEIPTS_MAX
+    ) {
+      throw receiptLimitReached();
+    }
   }
 
   async markPaid(
@@ -158,6 +176,18 @@ export class PaymentPageService {
     token: string,
     lock: boolean,
   ): Promise<Transaction> {
+    const deal = await this.dealOf(manager, token, lock);
+
+    if (isFinalStatus(deal.status)) throw pageNotFound();
+
+    return deal;
+  }
+
+  private async dealOf(
+    manager: EntityManager,
+    token: string,
+    lock: boolean,
+  ): Promise<Transaction> {
     if (!TOKEN_PATTERN.test(token)) throw pageNotFound();
 
     const deal = await manager.findOne(Transaction, {
@@ -165,9 +195,21 @@ export class PaymentPageService {
       ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
     });
 
-    if (!deal || isFinalStatus(deal.status)) throw pageNotFound();
+    if (!deal) throw pageNotFound();
 
     return deal;
+  }
+
+  private stillShown(deal: Transaction, now: Date): boolean {
+    const hours = this.config.getOrThrow<number>(
+      'PAYMENT_PAGE_FINAL_TTL_HOURS',
+    );
+
+    return (
+      deal.resolvedAt !== null &&
+      deal.resolvedAt !== undefined &&
+      now.getTime() < deal.resolvedAt.getTime() + hours * HOUR_MS
+    );
   }
 
   private receiptsOf(

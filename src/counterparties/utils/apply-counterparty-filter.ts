@@ -115,5 +115,18 @@ export function applyCounterpartyFilter(
     });
   }
 
+  const requestsIn30Days =
+    'COALESCE((SELECT SUM(requests."requestCount") FROM counterparty_daily_requests requests WHERE requests."counterpartyId" = counterparty.id AND requests.day >= :since30), 0)';
+  if (filter.requests30d?.from !== undefined) {
+    query.andWhere(`${requestsIn30Days} >= :requests30dFrom`, {
+      requests30dFrom: filter.requests30d.from,
+    });
+  }
+  if (filter.requests30d?.to !== undefined) {
+    query.andWhere(`${requestsIn30Days} <= :requests30dTo`, {
+      requests30dTo: filter.requests30d.to,
+    });
+  }
+
   return query;
 }

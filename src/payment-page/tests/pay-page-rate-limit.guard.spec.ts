@@ -99,4 +99,43 @@ describe('PayPageRateLimitGuard', () => {
       ),
     ).toBe(false);
   });
+
+  it('counts every address of one IPv6 /64 as one client', () => {
+    const guard = build(1);
+
+    expect(call(guard, '2001:db8:1:2::1').passed).toBe(true);
+    expect(call(guard, '2001:db8:1:2:ffff::9').passed).toBe(false);
+    expect(call(guard, '2001:db8:1:3::1').passed).toBe(true);
+  });
+
+  it('keeps at most 100 000 clients, dropping the oldest window first', () => {
+    const guard = build(1);
+    const windows = (guard as unknown as { windows: Map<string, unknown> })
+      .windows;
+
+    for (let i = 0; i < 100_000; i++) {
+      call(guard, `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`);
+    }
+    expect(windows.size).toBe(100_000);
+
+    call(guard, '203.0.113.7');
+
+    expect(windows.size).toBe(100_000);
+    expect(windows.has('10.0.0.0')).toBe(false);
+    expect(windows.has('203.0.113.7')).toBe(true);
+  });
+
+  it('moves a renewed window to the end, so the sweep stops at the first live one', () => {
+    const guard = build(5);
+    const windows = (guard as unknown as { windows: Map<string, unknown> })
+      .windows;
+
+    call(guard, '203.0.113.7');
+    now += 30_000;
+    call(guard, '203.0.113.8');
+    now += 31_000;
+    call(guard, '203.0.113.7');
+
+    expect([...windows.keys()]).toEqual(['203.0.113.8', '203.0.113.7']);
+  });
 });

@@ -171,7 +171,7 @@ describe('the counterparties page', () => {
       volume30d: '4000.50',
       volumeTotal: '4000.50',
       currency: 'RUB',
-      requestCount: null,
+      requestCount: 0,
     });
     expect(counted.lastDepositAt).not.toBeNull();
 
@@ -188,7 +188,7 @@ describe('the counterparties page', () => {
       completedCount: 3,
       disputes: 1,
       averageCheck: '2000.25',
-      funnel: { requests: null, deals: 4, paid: 2 },
+      funnel: { requests: 0, deals: 4, paid: 2 },
       volume7d: '4000.50',
       volumeTotal: '4000.50',
     });
@@ -267,8 +267,14 @@ describe('the counterparties page', () => {
       .get('/admin/counterparties?volume7dFrom=1.234')
       .set(bearer(admin))
       .expect(400);
+    expect(
+      (await list(`?merchantId=${merchantId}&requests30dFrom=1`)).meta.total,
+    ).toBe(0);
+    expect(
+      (await list(`?merchantId=${merchantId}&requests30dTo=0`)).meta.total,
+    ).toBe(2);
     await e2e.http
-      .get('/admin/counterparties?requests30dFrom=1')
+      .get('/admin/counterparties?requests30dFrom=3&requests30dTo=1')
       .set(bearer(admin))
       .expect(400);
   });

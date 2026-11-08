@@ -17,6 +17,7 @@ import { MerchantRequestSummary } from '../types/merchant-request-summary';
 
 const MERCHANT_A = uuidOf(901);
 const MERCHANT_B = uuidOf(902);
+const HOUR = 60 * 60 * 1000;
 
 const at = (minute: number): Date => new Date(Date.UTC(2026, 10, 1, 0, minute));
 
@@ -41,6 +42,7 @@ const summary = (
   merchantTransactionId: `order-${n}`,
   transactionId: null,
   processedByUserId: null,
+  counterpartyId: null,
   receivedAt: at(minute),
   ...overrides,
 });
@@ -59,6 +61,10 @@ const passes = (row: MerchantRequestSummary, [sql, params]: Condition) => {
       return row.result === value('result');
     case 'request.merchantId = :merchantId':
       return row.merchantId === value('merchantId');
+    case 'request.counterpartyId = :counterpartyId':
+      return row.counterpartyId === value('counterpartyId');
+    case 'request.paymentMethod = :paymentMethod':
+      return row.paymentMethod === value('paymentMethod');
     case 'request.amountFiat IS NOT NULL':
       return row.amountFiat !== null;
     case 'request.amountFiat IS NULL':
@@ -215,6 +221,7 @@ const lineOf = (row: MerchantRequestSummary): Record<string, string> => ({
   merchantTransactionId: row.merchantTransactionId ?? '',
   transactionId: row.transactionId ?? '',
   processedByUserId: row.processedByUserId ?? '',
+  counterpartyId: row.counterpartyId === null ? '' : String(row.counterpartyId),
   receivedAt: row.receivedAt.toISOString(),
 });
 
@@ -245,25 +252,34 @@ const victoriaFake = (archived: () => MerchantRequestSummary[]) => {
       return [{ total: String(lines.length) }];
     }
 
-    const groupedBy = /^stats by \((\w+)\)/.exec(stats ?? '');
+    const groupedBy = /^stats by \(([\w, ]+)\)/.exec(stats ?? '');
 
     if (groupedBy) {
+      const fields = groupedBy[1].split(', ');
       const counts = new Map<string, number>();
 
       for (const line of lines) {
-        const key = line[groupedBy[1]];
+        const key = JSON.stringify(fields.map((field) => line[field]));
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }
 
       return [...counts].map(([key, total]) => ({
-        [groupedBy[1]]: key,
+        ...Object.fromEntries(
+          fields.map((field, index) => [
+            field,
+            (JSON.parse(key) as string[])[index],
+          ]),
+        ),
         total: String(total),
       }));
     }
 
-    const page = /^sort by \(([^)]*)\) offset (\d+) limit (\d+)$/.exec(
-      pipes[pipes.length - 1],
-    );
+    const last = pipes[pipes.length - 1];
+    const bare = /^limit (\d+)$/.exec(last);
+
+    if (bare) return [...lines].reverse().slice(0, Number(bare[1]));
+
+    const page = /^sort by \(([^)]*)\) offset (\d+) limit (\d+)$/.exec(last);
 
     if (!page) return lines.slice(0, 1);
 
@@ -302,6 +318,11 @@ describe('MerchantRequestHistoryService', () => {
   let service: MerchantRequestHistoryService;
 
   const last = () => postgres.builders[postgres.builders.length - 1];
+  const lastQuery = (): string => {
+    const calls = victoria.selectScoped.mock.calls;
+
+    return calls[calls.length - 1][0];
+  };
 
   const query = (
     overrides: Partial<MerchantRequestListQuery> = {},
@@ -539,7 +560,7 @@ describe('MerchantRequestHistoryService', () => {
       await service.list(query({ receivedBefore: at(60) }));
 
       expect(victoria.selectScoped.mock.calls[0][0]).toBe(
-        `source:="merchant_api" receivedAt:string_range("0", "${at(30).toISOString()}") | stats count_uniq(requestId) total`,
+        `source:="merchant_api" _time:[1969-12-31T23:00:00.000Z, ${new Date(at(30).getTime() + HOUR).toISOString()}) receivedAt:string_range("0", "${at(30).toISOString()}") | stats count_uniq(requestId) total`,
       );
     });
 
@@ -589,6 +610,7 @@ describe('MerchantRequestHistoryService', () => {
 
       const filter = [
         'source:="merchant_api"',
+        `_time:[1969-12-31T23:00:00.000Z, ${new Date(at(30).getTime() + HOUR).toISOString()})`,
         `receivedAt:string_range("0", "${at(30).toISOString()}")`,
         'result:="created"',
         `merchantId:="${MERCHANT_A}"`,
@@ -617,7 +639,7 @@ describe('MerchantRequestHistoryService', () => {
       );
 
       expect(victoria.selectScoped.mock.calls[1][0]).toBe(
-        `source:="merchant_api" receivedAt:string_range("0", "${at(30).toISOString()}") requestedBankId:="7" | fields requestId, merchantId, statusCode, errorCode, durationMs, result, operation, direction, paymentMethod, amountFiat, currency, requestedBankId, payerUserId, merchantTransactionId, transactionId, processedByUserId, receivedAt | sort by (requestId) partition by (requestId) limit 1 | sort by (receivedAt, requestId) offset 0 limit 20`,
+        `source:="merchant_api" _time:[1969-12-31T23:00:00.000Z, ${new Date(at(30).getTime() + HOUR).toISOString()}) receivedAt:string_range("0", "${at(30).toISOString()}") requestedBankId:="7" | fields requestId, merchantId, statusCode, errorCode, durationMs, result, operation, direction, paymentMethod, amountFiat, currency, requestedBankId, payerUserId, merchantTransactionId, transactionId, processedByUserId, counterpartyId, receivedAt | sort by (requestId) partition by (requestId) limit 1 | sort by (receivedAt, requestId) offset 0 limit 20`,
       );
     });
 
@@ -818,6 +840,217 @@ describe('MerchantRequestHistoryService', () => {
       );
       await expect(service.findById(uuidOf(1))).rejects.toBeInstanceOf(
         ServiceUnavailableException,
+      );
+    });
+  });
+
+  describe('review guards', () => {
+    it('refuses an amount or payer sort page deeper than the merge window, even without the archive', async () => {
+      victoria.enabled = false;
+
+      await expect(
+        service.list(
+          query({
+            sortBy: MerchantRequestSortField.Amount,
+            page: 101,
+            limit: 100,
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.list(
+          query({
+            sortBy: MerchantRequestSortField.PayerUserId,
+            page: 100,
+            limit: 100,
+          }),
+        ),
+      ).resolves.toBeDefined();
+      await expect(
+        service.list(query({ page: 101, limit: 100 })),
+      ).resolves.toBeDefined();
+    });
+
+    it('answers a merged page past the end from the counts alone', async () => {
+      stored = [summary(3, 30, { amountFiat: toFiat(5) })];
+      archived = [summary(1, 10, { amountFiat: toFiat(7) })];
+
+      const page = await service.list(
+        query({ sortBy: MerchantRequestSortField.Amount, page: 3, limit: 1 }),
+      );
+
+      expect(page.items).toEqual([]);
+      expect(page.meta.total).toBe(2);
+      expect(
+        victoria.selectScoped.mock.calls.every(([q]) => q.includes('stats')),
+      ).toBe(true);
+    });
+
+    it('refuses a merged sort over more archived requests than the window', async () => {
+      stored = [summary(3, 30)];
+      archived = [summary(1, 10)];
+      victoria.selectScoped.mockResolvedValueOnce([{ total: '10001' }]);
+
+      await expect(
+        service.list(query({ sortBy: MerchantRequestSortField.PayerUserId })),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('sorts the archive part in memory by byte order, whatever order the archive returns', async () => {
+      stored = [
+        summary(3, 30, { payerUserId: '9' }),
+        summary(4, 40, { payerUserId: 'é' }),
+      ];
+      archived = [
+        summary(1, 10, { payerUserId: '10' }),
+        summary(2, 20, { payerUserId: 'Z' }),
+        summary(5, 5, { payerUserId: '100' }),
+      ];
+
+      const page = await service.list(
+        query({
+          sortBy: MerchantRequestSortField.PayerUserId,
+          sortOrder: SortOrder.Asc,
+        }),
+      );
+
+      expect(page.items.map((row) => row.payerUserId)).toEqual([
+        '10',
+        '100',
+        '9',
+        'Z',
+        'é',
+      ]);
+      expect(lastQuery()).toMatch(/ \| limit 3$/);
+    });
+
+    it('lower-cases uuids before they reach the archive', async () => {
+      stored = [summary(3, 30)];
+      const upper = uuidOf(1).toUpperCase().replace('0000-4000', 'ABCD-4000');
+
+      await service.list(
+        query({ search: upper, merchantId: MERCHANT_A.toUpperCase() }),
+      );
+
+      const [logsql] = victoria.selectScoped.mock.calls[0];
+      expect(logsql).toContain(`requestId:="${upper.toLowerCase()}"`);
+      expect(logsql).toContain(`transactionId:="${upper.toLowerCase()}"`);
+      expect(logsql).toContain(`merchantId:="${MERCHANT_A}"`);
+
+      victoria.selectScoped.mockResolvedValueOnce([]);
+      await service.findById(upper);
+      expect(lastQuery()).toContain(`requestId:="${upper.toLowerCase()}"`);
+    });
+
+    it('answers 503 for an archived line whose JSON cannot be read', async () => {
+      victoria.selectScoped.mockResolvedValueOnce([
+        { ...lineOf(summary(1, 10)), requestHeaders: '{not json' },
+      ]);
+
+      await expect(service.findById(uuidOf(1))).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+    });
+
+    it('bounds _time by the received range with an hour of slack on both sides', async () => {
+      stored = [summary(3, 30)];
+
+      await service.list(query({ receivedFrom: at(0) }));
+
+      expect(victoria.selectScoped.mock.calls[0][0]).toContain(
+        `_time:[${new Date(at(0).getTime() - HOUR).toISOString()}, ${new Date(at(30).getTime() + HOUR).toISOString()})`,
+      );
+    });
+  });
+
+  describe('for the counterparties', () => {
+    it('counts a client’s requests in both stores, by method when asked', async () => {
+      stored = [
+        summary(3, 30, { counterpartyId: 5 }),
+        summary(4, 40, { counterpartyId: 5, paymentMethod: 'card' }),
+        summary(6, 50, { counterpartyId: 6 }),
+      ];
+      archived = [summary(1, 10, { counterpartyId: 5 })];
+
+      expect(await service.countForCounterparty(5)).toBe(3);
+      expect(await service.countForCounterparty(5, 'sbp')).toBe(2);
+      expect(lastQuery()).toContain('counterpartyId:="5" paymentMethod:="sbp"');
+    });
+
+    it('lists a client’s requests by time across both stores', async () => {
+      stored = [summary(3, 30, { counterpartyId: 5 })];
+      archived = [
+        summary(1, 10, { counterpartyId: 5 }),
+        summary(2, 20, { counterpartyId: 6 }),
+      ];
+
+      const [rows, total] = await service.listForCounterparty(
+        5,
+        SortOrder.Desc,
+        10,
+      );
+
+      expect(ids(rows)).toEqual([uuidOf(3), uuidOf(1)]);
+      expect(total).toBe(2);
+    });
+
+    it('rebuilds the request counts from both stores, days in the business timezone', async () => {
+      archived = [
+        summary(1, 10, {
+          counterpartyId: 5,
+          receivedAt: new Date('2026-10-31T21:30:00.000Z'),
+        }),
+        summary(2, 20, {
+          counterpartyId: 5,
+          receivedAt: new Date('2026-10-31T20:30:00.000Z'),
+        }),
+      ];
+      const builder = {
+        select: jest.fn(() => builder),
+        addSelect: jest.fn(() => builder),
+        where: jest.fn(() => builder),
+        setParameter: jest.fn(() => builder),
+        groupBy: jest.fn(() => builder),
+        addGroupBy: jest.fn(() => builder),
+        getRawOne: jest.fn(async () => ({
+          oldest: new Date('2026-11-02T00:00:00.000Z'),
+        })),
+        getRawMany: jest.fn(async () => [
+          {
+            counterpartyId: 5,
+            day: '2026-11-02',
+            total: '2',
+            last: new Date('2026-11-02T09:00:00.000Z'),
+          },
+        ]),
+      };
+      const rebuilt = new MerchantRequestHistoryService(
+        { createQueryBuilder: () => builder } as never,
+        victoria as never,
+      );
+
+      const counts = await rebuilt.counterpartyRequestCounts('Europe/Moscow');
+
+      expect(builder.setParameter).toHaveBeenCalledWith(
+        'timeZone',
+        'Europe/Moscow',
+      );
+      expect(counts.totals).toEqual([
+        {
+          counterpartyId: 5,
+          requestCount: 4,
+          lastRequestAt: new Date('2026-11-02T09:00:00.000Z'),
+        },
+      ]);
+      expect(
+        [...counts.days].sort((a, b) => a.day.localeCompare(b.day)),
+      ).toEqual([
+        { counterpartyId: 5, day: '2026-10-31', requestCount: 1 },
+        { counterpartyId: 5, day: '2026-11-01', requestCount: 1 },
+        { counterpartyId: 5, day: '2026-11-02', requestCount: 2 },
+      ]);
+      expect(victoria.selectScoped.mock.calls[0][0]).toContain(
+        'counterpartyId:* | fields requestId, counterpartyId, receivedAt | sort by (requestId) partition by (requestId) limit 1 | stats by (counterpartyId, receivedAt) count() total',
       );
     });
   });

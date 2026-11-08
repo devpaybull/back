@@ -20,5 +20,6 @@ export interface MerchantRequestSummary {
   merchantTransactionId: string | null;
   transactionId: string | null;
   processedByUserId: string | null;
+  counterpartyId: number | null;
   receivedAt: Date;
 }

@@ -18,6 +18,13 @@ import { RateScope } from '../src/transactions/types/rate-scope.enum';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
 import { User } from '../src/users/entities/user.entity';
 import { UserStatus } from '../src/users/types/user-status.enum';
+import { toFiat } from '../src/common/utils/to-fiat';
+import { toRate } from '../src/common/utils/to-rate';
+import { TransactionDispute } from '../src/transactions/entities/transaction-dispute.entity';
+import { TransactionService } from '../src/transactions/services/transaction.service';
+import { DisputeStatus } from '../src/transactions/types/dispute-status.enum';
+import { TransactionKind } from '../src/transactions/types/transaction-kind.enum';
+import { TransactionStatus } from '../src/transactions/types/transaction-status.enum';
 import { deviceOf } from './support/device-of';
 import { E2eContext, E2eUser, startE2e } from './support/e2e-app';
 import { bearer, scan, usdtSun } from './support/flow';
@@ -451,6 +458,124 @@ describe('the trader cabinet: the switch, the summary and the balances', () => {
       main: '310.000000',
       insurancePayIn: '500.000000',
       insurancePayOut: '0.000000',
+    });
+  });
+
+  const dealOf = async (trader: E2eUser): Promise<Transaction> =>
+    e2e.app.get(TransactionService).createDeal({
+      kind: TransactionKind.PayIn,
+      method: 'sbp',
+      traderUserId: trader.user.id,
+      bankDetailsId: await armRequisite(trader),
+      merchantId,
+      amountFiat: toFiat('900'),
+      rate: toRate('90'),
+      merchantPercent: 10,
+      traderPercent: 7,
+    });
+
+  it('keeps the trader’s own insurance in place while one of their disputes is open or reviewing; an admin still moves it', async () => {
+    const trader = await e2e.createUser(Role.Trader);
+
+    await e2e.dataSource.getRepository(Wallet).save({
+      userId: trader.user.id,
+      mainBalance: toCrypto(1000),
+      insurancePayInBalance: toCrypto(500),
+      insurancePayOutBalance: toCrypto(300),
+    });
+    const deal = await dealOf(trader);
+    await e2e.dataSource
+      .getRepository(Wallet)
+      .update(
+        { userId: trader.user.id },
+        { lastAcceptedDealAt: new Date(Date.now() - 15 * DAY_MS) },
+      );
+    const disputes = e2e.dataSource.getRepository(TransactionDispute);
+    const dispute = await disputes.save({
+      transactionId: deal.id,
+      status: DisputeStatus.Open,
+      statusBefore: TransactionStatus.Active,
+      openedAt: new Date(),
+    });
+
+    for (const status of [DisputeStatus.Open, DisputeStatus.Reviewing]) {
+      await disputes.update(dispute.id, { status });
+
+      for (const direction of [
+        'insurance_pay_in_to_main',
+        'insurance_pay_out_to_main',
+      ]) {
+        const refused = await transfer(trader, direction, '10').expect(409);
+
+        expect(refused.body).toMatchObject({
+          code: 'INSURANCE_LOCKED_BY_DISPUTE',
+        });
+      }
+    }
+
+    await transfer(trader, 'main_to_insurance_pay_in', '10').expect(201);
+    await e2e.http
+      .post(`/admin/users/${trader.user.id}/balance-transfer`)
+      .set(bearer(admin))
+      .send({
+        from: 'insurance_pay_out',
+        to: 'main',
+        amount: '100',
+        comment: 'ticket 9',
+      })
+      .expect(201);
+
+    await disputes.update(dispute.id, { status: DisputeStatus.Accepted });
+    await transfer(trader, 'insurance_pay_in_to_main', '10').expect(201);
+
+    await expect(balances(trader)).resolves.toMatchObject({
+      insurancePayIn: '500.000000',
+      insurancePayOut: '200.000000',
+    });
+  });
+
+  it('without a stamp counts a pay-out the trader held from the start (no take) by its createdAt', async () => {
+    const trader = await e2e.createUser(Role.Trader);
+
+    await e2e.dataSource.getRepository(Wallet).save({
+      userId: trader.user.id,
+      mainBalance: toCrypto(1000),
+      insurancePayInBalance: toCrypto(500),
+    });
+    const payIn = await dealOf(trader);
+    const deals = e2e.dataSource.getRepository(Transaction);
+    const createdAt = new Date(Date.now() - 3 * DAY_MS);
+
+    await deals.update(payIn.id, {
+      createdAt: new Date(Date.now() - 20 * DAY_MS),
+    });
+    const payOut = await deals.save(
+      deals.create({
+        ...payIn,
+        id: undefined,
+        kind: TransactionKind.PayOut,
+        status: TransactionStatus.Canceled,
+        paymentPageToken: null,
+        payoutTakenAt: null,
+        createdAt,
+      }),
+    );
+    expect(payOut.payoutTakenAt).toBeNull();
+    await e2e.dataSource
+      .getRepository(Wallet)
+      .update(
+        { userId: trader.user.id },
+        { lastAcceptedDealAt: null as never },
+      );
+
+    const refused = await transfer(
+      trader,
+      'insurance_pay_in_to_main',
+      '1',
+    ).expect(409);
+    expect(refused.body).toMatchObject({
+      code: 'INSURANCE_WITHDRAWAL_DELAYED',
+      availableAt: new Date(createdAt.getTime() + 14 * DAY_MS).toISOString(),
     });
   });
 

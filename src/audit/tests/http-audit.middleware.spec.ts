@@ -93,6 +93,12 @@ class ProbeController {
     return { ok: true };
   }
 
+  @Post('pay/:token/paid')
+  @HttpCode(200)
+  paid(@Param('token') token: string) {
+    return { length: token.length };
+  }
+
   @Post('boom')
   boom() {
     throw new InternalServerErrorException();
@@ -182,6 +188,25 @@ describe('HttpAuditMiddleware', () => {
         login: null,
         body: {},
       });
+    });
+
+    it('keeps a payment page token out of the path and the params', async () => {
+      const token = 'Ab3_-'.repeat(8) + 'xyz';
+
+      await request(app.getHttpServer())
+        .post(`/pay/${token}/paid`)
+        .set('Authorization', 'Bearer ok')
+        .send({})
+        .expect(200);
+
+      const [entry] = await recorded();
+
+      expect(entry).toMatchObject({
+        action: 'POST /pay/:token/paid',
+        path: '/pay/:token/paid',
+        params: { token: ':token' },
+      });
+      expect(JSON.stringify(entry)).not.toContain(token);
     });
 
     it('records a guard rejection, which happens before any interceptor runs', async () => {

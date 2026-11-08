@@ -50,10 +50,10 @@ export class CounterpartyDto {
   paidCount: number;
 
   @ApiProperty({
-    nullable: true,
-    description: 'Requests for a deal; null until the merchant API exists',
+    description:
+      'Deal-creation requests of the client that reached the counterparty lookup (pay-in step 7), refusals included; kept when the log is purged',
   })
-  requestCount: number | null;
+  requestCount: number;
 
   @ApiProperty({
     nullable: true,
@@ -64,7 +64,8 @@ export class CounterpartyDto {
 
   @ApiProperty({
     nullable: true,
-    description: 'The client’s last login; null until the merchant API exists',
+    description:
+      '«Последний вход»: when the latest such request arrived; null with none',
   })
   lastLoginAt: Date | null;
 

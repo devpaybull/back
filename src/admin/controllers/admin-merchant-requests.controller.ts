@@ -51,6 +51,50 @@ import { BALANCE_EXPORT_MAX_ROWS } from './admin-balances.controller';
 
 const HEADERS_INDENT = 2;
 
+const FORWARDED_FOR = /(for=)("[^"]*"|[^;,\s]*)/gi;
+const BRACKETED = /^\[([^\]]*)\](.*)$/;
+const IPV4_WITH_PORT = /^(\d{1,3}(?:\.\d{1,3}){3})(:\d+)$/;
+
+const maskForwardedNode = (node: string): string => {
+  const quoted = node.startsWith('"') && node.endsWith('"') && node.length > 1;
+  const bare = quoted ? node.slice(1, -1) : node;
+  const bracketed = BRACKETED.exec(bare);
+  const withPort = IPV4_WITH_PORT.exec(bare);
+  const masked = bracketed
+    ? `[${maskIp(bracketed[1])}]${bracketed[2]}`
+    : withPort
+      ? `${maskIp(withPort[1])}${withPort[2]}`
+      : maskIp(bare);
+
+  return quoted ? `"${masked}"` : masked;
+};
+
+const ADDRESS_HEADERS: Record<string, (value: string) => string> = {
+  'x-forwarded-for': (value) =>
+    value
+      .split(',')
+      .map((address) => maskIp(address.trim()))
+      .join(', '),
+  'x-real-ip': (value) => maskIp(value.trim()),
+  forwarded: (value) =>
+    value.replace(
+      FORWARDED_FOR,
+      (_match, name: string, node: string) =>
+        `${name}${maskForwardedNode(node)}`,
+    ),
+};
+
+const withMaskedAddresses = (
+  headers: Record<string, string>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => {
+      const mask = ADDRESS_HEADERS[name.toLowerCase()];
+
+      return [name, mask ? mask(value) : value];
+    }),
+  );
+
 const sizeOf = (text: string | null): MerchantRequestPartSizeDto =>
   text === null || text === ''
     ? { sizeBytes: 0, lines: 0 }
@@ -141,7 +185,7 @@ export class AdminMerchantRequestsController {
   @ApiOperation({
     summary: 'One logged request with its headers, body and answer',
     description:
-      'The client address is whole for a superadmin and masked for an admin. Not in Postgres nor in the archive: 404.',
+      'The client address — `ip` and the X-Forwarded-For, X-Real-IP and Forwarded (`for=`) headers — is whole for a superadmin and masked for an admin. Not in Postgres nor in the archive: 404.',
   })
   @ApiEnvelopeResponse(MerchantRequestDetailDto)
   async findOne(
@@ -153,17 +197,18 @@ export class AdminMerchantRequestsController {
     if (!record) throw new NotFoundException('Request not found');
 
     const [row] = await this.withDetails([record]);
-    const headers = JSON.stringify(record.requestHeaders, null, HEADERS_INDENT);
+    const whole = viewer.role === Role.Superadmin;
+    const requestHeaders = whole
+      ? record.requestHeaders
+      : withMaskedAddresses(record.requestHeaders);
+    const headers = JSON.stringify(requestHeaders, null, HEADERS_INDENT);
 
     return {
       ...row,
       httpMethod: record.method,
       path: record.path,
-      ip:
-        record.ip === null || viewer.role === Role.Superadmin
-          ? record.ip
-          : maskIp(record.ip),
-      requestHeaders: record.requestHeaders,
+      ip: record.ip === null || whole ? record.ip : maskIp(record.ip),
+      requestHeaders,
       requestBody: record.requestBody,
       requestBodyTruncated: record.requestBodyTruncated,
       responseBody: record.responseBody,
@@ -251,6 +296,7 @@ export class AdminMerchantRequestsController {
         currency: row.currency,
         bank: bank ? { id: bank.id, code: bank.code, name: bank.name } : null,
         payerUserId: row.payerUserId,
+        counterpartyId: row.counterpartyId,
         merchantTransactionId: row.merchantTransactionId,
         result: row.result,
         statusCode: row.statusCode,

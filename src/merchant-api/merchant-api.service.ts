@@ -209,6 +209,8 @@ export class MerchantApiService {
       request.payerInfo.userId,
     );
 
+    log.counterpartyId = counterparty.id;
+
     if (!counterparty.enabled || counterparty.blacklistedAt) {
       throw new ForbiddenException({
         code: MerchantApiErrorCode.PayerBlocked,

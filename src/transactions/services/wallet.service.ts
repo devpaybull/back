@@ -16,6 +16,7 @@ import { toCrypto } from '../../common/utils/to-crypto';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { TraderSettingsService } from '../../trader-settings/trader-settings.service';
 import { BalanceOperation } from '../entities/balance-operation.entity';
+import { TransactionDispute } from '../entities/transaction-dispute.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { Wallet } from '../entities/wallet.entity';
 import { BalanceOperationFilter } from '../types/balance-operation-filter';
@@ -23,6 +24,7 @@ import { BalanceOperationListQuery } from '../types/balance-operation-list-query
 import { balanceOperationWhere } from '../utils/balance-operation-where';
 import { BalanceKind } from '../types/balance-kind.enum';
 import { BalanceOperationType } from '../types/balance-operation-type.enum';
+import { DisputeStatus } from '../types/dispute-status.enum';
 import { OwnBalanceMove } from '../types/own-balance-move';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { canWithdrawInsurance } from '../utils/can-withdraw-insurance';
@@ -448,6 +450,7 @@ export class WalletService {
     );
 
     if (move.from !== BalanceKind.Main && move.insuranceDelayCheckedAt) {
+      await this.assertNoLiveDisputeWithin(manager, move.userId);
       await this.assertInsuranceDelayOverWithin(
         manager,
         wallet,
@@ -577,6 +580,27 @@ export class WalletService {
     return this.getAvailableMain(wallet).gt(
       toCrypto(this.config.get<string>('MAIN_BALANCE_MIN_THRESHOLD', '0')),
     );
+  }
+
+  private async assertNoLiveDisputeWithin(
+    manager: EntityManager,
+    traderUserId: string,
+  ): Promise<void> {
+    const live = await manager.exists(TransactionDispute, {
+      where: {
+        status: In([DisputeStatus.Open, DisputeStatus.Reviewing]),
+        transaction: { traderUserId },
+      },
+    });
+
+    if (live) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'INSURANCE_LOCKED_BY_DISPUTE',
+        message:
+          'The insurance cannot be moved while one of your disputes is open or under review',
+      });
+    }
   }
 
   private async assertInsuranceDelayOverWithin(

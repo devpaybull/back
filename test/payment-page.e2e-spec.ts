@@ -14,12 +14,14 @@ import { Transaction } from '../src/transactions/entities/transaction.entity';
 import { Wallet } from '../src/transactions/entities/wallet.entity';
 import { DealExpiryService } from '../src/transactions/services/deal-expiry.service';
 import { RateScope } from '../src/transactions/types/rate-scope.enum';
+import { TransactionStatus } from '../src/transactions/types/transaction-status.enum';
 import { deviceOf } from './support/device-of';
 import { E2eContext, E2eUser, startE2e } from './support/e2e-app';
 import { bearer } from './support/flow';
 
 const PAGE_URL = 'https://pay.example/p';
 const RATE_LIMIT = 20;
+const FINAL_TTL_HOURS = 24;
 const PDF = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n');
 
 describe('the payment page /pay (MA11)', () => {
@@ -287,6 +289,82 @@ describe('the payment page /pay (MA11)', () => {
     await paid(token).expect(200);
   });
 
+  it('lets the trader decline a deal the payer marked paid: canceled, escrow back; checking_manually is still a 409', async () => {
+    const wallet = () =>
+      e2e.dataSource
+        .getRepository(Wallet)
+        .findOneByOrFail({ userId: trader.user.id });
+    const reservedBefore = (await wallet()).mainReserved;
+    const { id, token } = await payIn();
+
+    await paid(token).expect(200);
+    expect((await wallet()).mainReserved.gt(reservedBefore)).toBe(true);
+
+    const declined = await e2e.http
+      .post(`/trader/deals/${id}/decline`)
+      .set(bearer(trader))
+      .send({ reasonCode: 'limit_reached' })
+      .expect(200);
+    expect(declined.body.data.status).toBe('canceled');
+    expect((await deal(id)).declineReasonCode).toBe('limit_reached');
+    expect((await wallet()).mainReserved.toFixed(6)).toBe(
+      reservedBefore.toFixed(6),
+    );
+
+    const manual = await payIn();
+    await paid(manual.token).expect(200);
+    await e2e.dataSource
+      .getRepository(Transaction)
+      .update(manual.id, { status: TransactionStatus.CheckingManually });
+    await e2e.http
+      .post(`/trader/deals/${manual.id}/decline`)
+      .set(bearer(trader))
+      .send({ reasonCode: 'limit_reached' })
+      .expect(409);
+    await e2e.dataSource
+      .getRepository(Transaction)
+      .update(manual.id, { status: TransactionStatus.Canceled });
+  });
+
+  it('counts a client’s pay-ins in checking and checking_manually toward the failed-deal limit', async () => {
+    const payer = { payerInfo: { userId: 'client-failing' } };
+    const settings = e2e.dataSource.getRepository(MerchantSettings);
+    const first = await payIn(payer);
+    const second = await payIn(payer);
+
+    await paid(first.token).expect(200);
+    await paid(second.token).expect(200);
+    await e2e.dataSource
+      .getRepository(Transaction)
+      .update(second.id, { status: TransactionStatus.CheckingManually });
+    await settings.update(
+      { merchantId },
+      { failedDealsLimitEnabled: true, failedDealsPerHour: 2 },
+    );
+
+    try {
+      amount += 1;
+      const refused = await e2e.http
+        .post('/v1/payment/pay-in')
+        .set('X-Secure-Key', key)
+        .send({
+          method: 'sbp',
+          amount: String(amount),
+          merchantTransactionId: `in-${Math.random().toString(36).slice(2)}`,
+          ...payer,
+        })
+        .expect(403);
+      expect(refused.body.code).toBe('FAILED_DEALS_LIMIT');
+
+      await e2e.dataSource
+        .getRepository(Transaction)
+        .update([first.id, second.id], { status: TransactionStatus.Success });
+      await payIn(payer);
+    } finally {
+      await settings.update({ merchantId }, { failedDealsLimitEnabled: false });
+    }
+  });
+
   it('refuses «Я оплатил» past the timer with 409 PAYMENT_NOT_PAYABLE', async () => {
     const { id, token } = await payIn();
 
@@ -299,7 +377,7 @@ describe('the payment page /pay (MA11)', () => {
     expect((await deal(id)).status).toBe('active');
   });
 
-  it('closes the token at a final status: the trader confirms, and every /pay route is a 404', async () => {
+  it('after a final status shows the result for PAYMENT_PAGE_FINAL_TTL_HOURS while «Я оплатил» and receipts close at once', async () => {
     const { id, token } = await payIn();
 
     await paid(token).expect(200);
@@ -308,9 +386,28 @@ describe('the payment page /pay (MA11)', () => {
       .set(bearer(trader))
       .expect(200);
 
-    await page(token).expect(404);
+    const shown = await page(token).expect(200);
+    expect(shown.body.data).toMatchObject({
+      status: 'success',
+      successUrl: 'https://merchant.example/ok',
+      errorUrl: 'https://merchant.example/err',
+    });
     await paid(token).expect(404);
     await receipt(token).expect(404);
+
+    const resolvedAt = (await deal(id)).resolvedAt!;
+    await e2e.dataSource.getRepository(Transaction).update(id, {
+      resolvedAt: new Date(resolvedAt.getTime() - FINAL_TTL_HOURS * 3_600_000),
+    });
+
+    const closed = await page(token).expect(404);
+    expect(closed.body.code).toBe('PAYMENT_PAGE_NOT_FOUND');
+  });
+
+  it('refuses an upload for an unknown token with the page’s 404 before reading it', async () => {
+    const response = await receipt('A'.repeat(43)).expect(404);
+
+    expect(response.body.code).toBe('PAYMENT_PAGE_NOT_FOUND');
   });
 
   it('takes up to three receipts from the payer, typed by content, and leaves the status alone', async () => {
@@ -346,6 +443,26 @@ describe('the payment page /pay (MA11)', () => {
     ).toBe(true);
     expect((await deal(id)).status).toBe('active');
 
+    const detail = await e2e.http
+      .get(`/trader/deals/${id}`)
+      .set(bearer(trader))
+      .expect(200);
+    expect(detail.body.data.payerReceipts).toEqual(
+      files
+        .sort(
+          (one, other) =>
+            one.createdAt.getTime() - other.createdAt.getTime() ||
+            one.id.localeCompare(other.id),
+        )
+        .map((file) => ({
+          id: file.id,
+          name: 'чек.pdf',
+          mime: 'application/pdf',
+          size: PDF.length,
+          createdAt: file.createdAt.toISOString(),
+        })),
+    );
+
     const download = await e2e.http
       .get(`/trader/files/${files[0].id}`)
       .set(bearer(trader))
@@ -374,6 +491,20 @@ describe('the payment page /pay (MA11)', () => {
     await paid(token).expect(429);
 
     ip = '198.51.100.250';
+    await page(token).expect(404);
+  });
+
+  it('counts a whole IPv6 /64 as one client', async () => {
+    const token = 'A'.repeat(43);
+
+    for (let i = 0; i < RATE_LIMIT; i++) {
+      ip = `2001:db8:5:6::${(i + 1).toString(16)}`;
+      await page(token).expect(404);
+    }
+
+    ip = '2001:db8:5:6:ffff::1';
+    await page(token).expect(429);
+    ip = '2001:db8:5:7::1';
     await page(token).expect(404);
   });
 });

@@ -39,7 +39,9 @@ import { MerchantIpAddress } from '../../merchants/entities/merchant-ip-address.
 import { BankDetailsService } from '../../bank-details/bank-details.service';
 import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { Bank } from '../../banks/entities/bank.entity';
+import { CounterpartyDailyRequest } from '../../counterparties/entities/counterparty-daily-request.entity';
 import { CounterpartyDailyVolume } from '../../counterparties/entities/counterparty-daily-volume.entity';
+import { MerchantApiRequest } from '../../merchant-requests/entities/merchant-api-request.entity';
 import { CounterpartyRequisiteEvent } from '../../counterparties/entities/counterparty-requisite-event.entity';
 import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Country } from '../../countries/entities/country.entity';
@@ -87,6 +89,8 @@ describe('the devices ↔ bank-details module graph', () => {
     MobileOperator,
     Counterparty,
     CounterpartyDailyVolume,
+    CounterpartyDailyRequest,
+    MerchantApiRequest,
     CounterpartyRequisiteEvent,
     BankDetailTag,
     BankDetailTagLink,

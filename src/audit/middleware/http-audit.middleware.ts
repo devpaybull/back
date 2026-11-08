@@ -10,6 +10,8 @@ const SECRET_KEY = /password|totp|code|token|secret/i;
 const REDACTED = '[REDACTED]';
 const ADMIN_USER_ROUTE = /^\/admin\/users\/:id(\/|$)/;
 const UNAUDITED_ACTIONS = new Set(['POST /device/heartbeat']);
+const TOKEN_PARAM = 'token';
+const TOKEN_PLACEHOLDER = ':token';
 const redactSecrets = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value === null || typeof value !== 'object') return value;
@@ -69,6 +71,14 @@ export class HttpAuditMiddleware implements NestMiddleware {
     if (UNAUDITED_ACTIONS.has(`${request.method} ${route}`)) return null;
 
     const params: Record<string, unknown> = { ...(request.params ?? {}) };
+    const token = params[TOKEN_PARAM];
+    const fullPath = request.originalUrl.split('?')[0];
+    const path =
+      typeof token === 'string' && token
+        ? fullPath.split(token).join(TOKEN_PLACEHOLDER)
+        : fullPath;
+
+    if (token !== undefined) params[TOKEN_PARAM] = TOKEN_PLACEHOLDER;
     const targetId = params.id;
     const body: unknown = request.body ?? null;
     const anonymousLogin =
@@ -87,7 +97,7 @@ export class HttpAuditMiddleware implements NestMiddleware {
           : null,
       action: `${request.method} ${route}`,
       method: request.method,
-      path: request.originalUrl.split('?')[0],
+      path,
       params: Object.keys(params).length > 0 ? params : null,
       statusCode: response.statusCode,
       ip: request.ip ?? null,

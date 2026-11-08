@@ -1723,7 +1723,7 @@ describe('TransactionService, the merchant API lookups', () => {
     });
   });
 
-  it('failed pay-ins are active + canceled pay-ins of the client created since the given moment', async () => {
+  it('failed pay-ins are active, checking, checking_manually and canceled pay-ins of the client created since the given moment', async () => {
     const { repository, service } = buildLookups();
     const since = new Date('2026-11-04T09:00:00Z');
 
@@ -1738,7 +1738,12 @@ describe('TransactionService, the merchant API lookups', () => {
       kind: TransactionKind.PayIn,
       merchantId: MERCHANT,
       counterpartyId: 11,
-      status: In([TransactionStatus.Active, TransactionStatus.Canceled]),
+      status: In([
+        TransactionStatus.Active,
+        TransactionStatus.Checking,
+        TransactionStatus.CheckingManually,
+        TransactionStatus.Canceled,
+      ]),
     });
     expect(options.where.createdAt).toMatchObject({
       _type: 'moreThanOrEqual',

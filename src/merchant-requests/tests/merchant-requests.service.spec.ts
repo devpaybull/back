@@ -7,12 +7,29 @@ import { MerchantRequestOperation } from '../types/merchant-request-operation.en
 import { MerchantRequestResult } from '../types/merchant-request-result.enum';
 
 const build = (maxBytes = 65536) => {
-  const requests = { insert: jest.fn(async () => undefined) };
+  const manager = { insert: jest.fn(async () => undefined) };
+  const requests = {
+    insert: jest.fn(async () => undefined),
+    manager: {
+      transaction: jest.fn(async (work: (m: typeof manager) => unknown) =>
+        work(manager),
+      ),
+    },
+  };
   const config = { get: jest.fn(() => maxBytes) };
+  const counterpartyStats = {
+    recordRequestWithin: jest.fn(async () => undefined),
+  };
 
   return {
     requests,
-    service: new MerchantRequestsService(requests as never, config as never),
+    manager,
+    counterpartyStats,
+    service: new MerchantRequestsService(
+      requests as never,
+      config as never,
+      counterpartyStats as never,
+    ),
   };
 };
 
@@ -49,7 +66,7 @@ describe('MerchantRequestsService.record', () => {
     },
   );
 
-  it('masks the key to its first and last four characters and drops Authorization and Cookie', async () => {
+  it('masks the key to its first and last four characters and drops Authorization, Proxy-Authorization and Cookie', async () => {
     const { service, requests } = build();
 
     await service.record(
@@ -57,6 +74,7 @@ describe('MerchantRequestsService.record', () => {
         requestHeaders: {
           'X-Secure-Key': '0123abcd-ef00-4000-8000-00000000wxyz',
           authorization: 'Bearer t',
+          'Proxy-Authorization': 'Basic dTpw',
           cookie: 'refresh=1',
           accept: ['a', 'b'],
           'x-empty': undefined,
@@ -214,6 +232,47 @@ describe('MerchantRequestsService.record — a create request', () => {
       transactionId: null,
       processedByUserId: null,
     });
+  });
+
+  it('writes the row alone, with no counterparty, when the request never reached the counterparty lookup', async () => {
+    const { service, requests, counterpartyStats } = build();
+
+    await service.record(entry());
+
+    expect(inserted(requests).counterpartyId).toBeNull();
+    expect(requests.manager.transaction).not.toHaveBeenCalled();
+    expect(counterpartyStats.recordRequestWithin).not.toHaveBeenCalled();
+  });
+
+  it('counts the request toward its counterparty in the same transaction as the row', async () => {
+    const { service, requests, manager, counterpartyStats } = build();
+    const receivedAt = new Date('2026-11-04T10:00:00Z');
+
+    await service.record(
+      entry({
+        statusCode: 403,
+        responseBody: '{"code":"PAYER_BLOCKED"}',
+        details: {
+          operation: MerchantRequestOperation.PayInCreate,
+          payerUserId: 'client-1',
+          counterpartyId: 5,
+        },
+      }),
+    );
+
+    expect(requests.insert).not.toHaveBeenCalled();
+    expect(manager.insert).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        counterpartyId: 5,
+        errorCode: 'PAYER_BLOCKED',
+      }),
+    );
+    expect(counterpartyStats.recordRequestWithin).toHaveBeenCalledWith(
+      manager,
+      5,
+      receivedAt,
+    );
   });
 
   it('leaves the descriptive columns null for a request that is not a create', async () => {

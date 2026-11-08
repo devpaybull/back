@@ -523,12 +523,21 @@ export class RateService {
   }
 
   async merchantSourceRate(markupPercent: number): Promise<Rate> {
-    const fiatPerUsdt = await this.rapira.getFiatPerUsdt();
+    const [rate] = await this.merchantSourceRates([markupPercent]);
 
-    return roundRate(
-      fiatPerUsdt
-        .times(toDecimal(RAPIRA_PLUS_ONE_SOURCE_MARKUP).plus(1))
-        .times(toDecimal(markupPercent).div(100).plus(1)),
+    return rate;
+  }
+
+  async merchantSourceRates(
+    markupPercents: readonly number[],
+  ): Promise<Rate[]> {
+    const fiatPerUsdt = await this.rapira.getFiatPerUsdt();
+    const source = fiatPerUsdt.times(
+      toDecimal(RAPIRA_PLUS_ONE_SOURCE_MARKUP).plus(1),
+    );
+
+    return markupPercents.map((markupPercent) =>
+      roundRate(source.times(toDecimal(markupPercent).div(100).plus(1))),
     );
   }
 

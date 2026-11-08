@@ -98,6 +98,7 @@ describe('PaymentPageService', () => {
       files as never,
       settings as never,
       audit as never,
+      { getOrThrow: () => 24 } as never,
     );
 
     return { service, manager, transactions, files, audit, settings };
@@ -146,13 +147,16 @@ describe('PaymentPageService', () => {
       ['an unknown token', null, TOKEN],
       ['a malformed token', dealOf(), 'short'],
       [
-        'a deal that reached success',
-        dealOf({ status: TransactionStatus.Success }),
+        'a deal resolved 24 hours ago',
+        dealOf({
+          status: TransactionStatus.Success,
+          resolvedAt: new Date(NOW.getTime() - 24 * 3_600_000),
+        }),
         TOKEN,
       ],
       [
-        'a deal that was canceled',
-        dealOf({ status: TransactionStatus.Canceled }),
+        'a final deal with no resolvedAt',
+        dealOf({ status: TransactionStatus.Canceled, resolvedAt: null }),
         TOKEN,
       ],
     ])('is a 404 PAYMENT_PAGE_NOT_FOUND for %s', async (_case, deal, token) => {
@@ -166,6 +170,27 @@ describe('PaymentPageService', () => {
         code: 'PAYMENT_PAGE_NOT_FOUND',
       });
       if (token === 'short') expect(manager.findOne).not.toHaveBeenCalled();
+    });
+
+    it('shows a final deal with the merchant’s URLs for 24 hours after it was resolved', async () => {
+      for (const status of [
+        TransactionStatus.Success,
+        TransactionStatus.SuccessChanged,
+        TransactionStatus.Canceled,
+      ]) {
+        const { service } = build(
+          dealOf({
+            status,
+            resolvedAt: new Date(NOW.getTime() - 24 * 3_600_000 + 1),
+          }),
+        );
+
+        await expect(service.view(TOKEN, NOW)).resolves.toMatchObject({
+          status,
+          successUrl: 'https://merchant.example/ok',
+          errorUrl: 'https://merchant.example/err',
+        });
+      }
     });
 
     it('still serves a deal in checking, checking_manually or a dispute', async () => {
@@ -261,8 +286,10 @@ describe('PaymentPageService', () => {
       expect(transactions.transitionLocked).not.toHaveBeenCalled();
     });
 
-    it('is a 404 on a final deal', async () => {
-      const { service } = build(dealOf({ status: TransactionStatus.Success }));
+    it('is a 404 on a final deal, even one the page still shows', async () => {
+      const { service } = build(
+        dealOf({ status: TransactionStatus.Success, resolvedAt: NOW }),
+      );
 
       await expect(service.markPaid(TOKEN, NOW)).rejects.toBeInstanceOf(
         NotFoundException,
@@ -322,15 +349,53 @@ describe('PaymentPageService', () => {
       expect(files.discard).toHaveBeenCalledWith(STORED);
     });
 
-    it('is a 404 on a final deal and stores nothing', async () => {
+    it('is a 404 on a final deal, even one the page still shows, and stores nothing', async () => {
       const { service, files } = build(
-        dealOf({ status: TransactionStatus.Canceled }),
+        dealOf({ status: TransactionStatus.Canceled, resolvedAt: NOW }),
       );
 
       await expect(service.uploadReceipt(TOKEN, upload)).rejects.toBeInstanceOf(
         NotFoundException,
       );
       expect(files.store).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertAcceptsReceipt', () => {
+    it('passes a live deal with room for a receipt', async () => {
+      const { service } = build(dealOf(), { receipts: [2] });
+
+      await expect(
+        service.assertAcceptsReceipt(TOKEN),
+      ).resolves.toBeUndefined();
+    });
+
+    it('is the page’s 404 for a malformed, unknown or final token', async () => {
+      for (const [deal, token] of [
+        [dealOf(), 'x'],
+        [null, TOKEN],
+        [dealOf({ status: TransactionStatus.Success, resolvedAt: NOW }), TOKEN],
+      ] as const) {
+        const { service } = build(deal);
+        const error = await service
+          .assertAcceptsReceipt(token)
+          .catch((caught: unknown) => caught);
+
+        expect((error as NotFoundException).getResponse()).toMatchObject({
+          code: 'PAYMENT_PAGE_NOT_FOUND',
+        });
+      }
+    });
+
+    it('is 409 RECEIPT_LIMIT_REACHED with three receipts already there', async () => {
+      const { service } = build(dealOf(), { receipts: [3] });
+      const error = await service
+        .assertAcceptsReceipt(TOKEN)
+        .catch((caught: unknown) => caught);
+
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'RECEIPT_LIMIT_REACHED',
+      });
     });
   });
 });

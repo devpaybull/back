@@ -39,6 +39,8 @@ import { MerchantsService } from '../../merchants/services/merchants.service';
 import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TraderDealActionsService } from '../../transactions/services/trader-deal-actions.service';
 import { TraderDealsService } from '../../transactions/services/trader-deals.service';
+import { TransactionFilesService } from '../../transactions/services/transaction-files.service';
+import { TransactionFileKind } from '../../transactions/types/transaction-file-kind.enum';
 import { TraderDealFilter } from '../../transactions/types/trader-deal-filter';
 import { TransactionSortField } from '../../transactions/types/transaction-sort-field.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
@@ -81,6 +83,7 @@ export class TraderDealsController {
     private readonly merchants: MerchantsService,
     private readonly counterparties: CounterpartiesService,
     private readonly config: ConfigService,
+    private readonly files: TransactionFilesService,
   ) {}
 
   @Get()
@@ -270,9 +273,10 @@ export class TraderDealsController {
   }
 
   private async detailOf(deal: Transaction): Promise<TraderDealDetailDto> {
-    const [[row], tags] = await Promise.all([
+    const [[row], tags, files] = await Promise.all([
       this.withDetails([deal]),
       this.bankDetails.tagsOf([deal.bankDetailsId]),
+      this.files.listOf([deal.id]),
     ]);
 
     return {
@@ -288,6 +292,15 @@ export class TraderDealsController {
         : null,
       declineReasonCode: deal.declineReasonCode ?? null,
       declineComment: deal.declineComment ?? null,
+      payerReceipts: files
+        .filter((file) => file.kind === TransactionFileKind.PayerReceipt)
+        .map((file) => ({
+          id: file.id,
+          name: file.name,
+          mime: file.mime,
+          size: file.size,
+          createdAt: file.createdAt,
+        })),
     };
   }
 

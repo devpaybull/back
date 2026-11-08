@@ -4,6 +4,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { dealFileUploadOptions } from '../file-storage/utils/deal-file-upload-options';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { PayPageRateLimitGuard } from './guards/pay-page-rate-limit.guard';
+import { PayReceiptGuard } from './guards/pay-receipt.guard';
 import { PaymentPageController } from './payment-page.controller';
 
 @Module({
@@ -15,6 +16,6 @@ import { PaymentPageController } from './payment-page.controller';
     }),
   ],
   controllers: [PaymentPageController],
-  providers: [PayPageRateLimitGuard],
+  providers: [PayPageRateLimitGuard, PayReceiptGuard],
 })
 export class PaymentPageModule {}

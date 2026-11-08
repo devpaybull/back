@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { PUBLIC_METADATA_KEY } from '../../common/decorators/public.decorator';
 import { PayPageRateLimitGuard } from '../guards/pay-page-rate-limit.guard';
+import { PayReceiptGuard } from '../guards/pay-receipt.guard';
 import { PaymentPageController } from '../payment-page.controller';
 
 const TOKEN = 'a'.repeat(43);
@@ -28,6 +29,12 @@ describe('PaymentPageController', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, PaymentPageController)).toEqual(
       [PayPageRateLimitGuard],
     );
+    expect(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        PaymentPageController.prototype.receipt,
+      ),
+    ).toEqual([PayReceiptGuard]);
   });
 
   it('hands the token to the service', async () => {

@@ -7,9 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
+import { clientKeyOf } from '../utils/client-key-of';
 
 const WINDOW_MS = 60_000;
-const UNKNOWN_CLIENT = 'unknown';
+const MAX_TRACKED_CLIENTS = 100_000;
 
 interface ClientWindow {
   startedAt: number;
@@ -30,7 +31,7 @@ export class PayPageRateLimitGuard implements CanActivate {
 
     this.sweep(now);
 
-    const client = request.ip ?? UNKNOWN_CLIENT;
+    const client = clientKeyOf(request.ip);
     const current = this.windows.get(client);
     const window =
       current && now - current.startedAt < WINDOW_MS
@@ -38,7 +39,7 @@ export class PayPageRateLimitGuard implements CanActivate {
         : { startedAt: now, count: 0 };
 
     window.count += 1;
-    this.windows.set(client, window);
+    if (window !== current) this.open(client, window);
 
     if (window.count <= this.limit()) return true;
 
@@ -63,12 +64,25 @@ export class PayPageRateLimitGuard implements CanActivate {
     return this.config.getOrThrow<number>('PAY_PAGE_RATE_LIMIT_PER_MINUTE');
   }
 
+  private open(client: string, window: ClientWindow): void {
+    this.windows.delete(client);
+
+    if (this.windows.size >= MAX_TRACKED_CLIENTS) {
+      const oldest = this.windows.keys().next().value;
+
+      if (oldest !== undefined) this.windows.delete(oldest);
+    }
+
+    this.windows.set(client, window);
+  }
+
   private sweep(now: number): void {
     if (now - this.sweptAt < WINDOW_MS) return;
 
     this.sweptAt = now;
     for (const [client, window] of this.windows) {
-      if (now - window.startedAt >= WINDOW_MS) this.windows.delete(client);
+      if (now - window.startedAt < WINDOW_MS) return;
+      this.windows.delete(client);
     }
   }
 }

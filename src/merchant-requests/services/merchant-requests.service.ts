@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
 import { MerchantApiRequest } from '../entities/merchant-api-request.entity';
 import { MerchantRequestDetails } from '../types/merchant-request-details';
 import { MerchantRequestEntry } from '../types/merchant-request-entry';
@@ -10,6 +11,7 @@ import { MerchantRequestResult } from '../types/merchant-request-result.enum';
 const API_KEY_HEADER = 'x-secure-key';
 const DROPPED_HEADERS: ReadonlySet<string> = new Set([
   'authorization',
+  'proxy-authorization',
   'cookie',
 ]);
 const KEY_VISIBLE_EDGE = 4;
@@ -56,6 +58,7 @@ export class MerchantRequestsService {
     @InjectRepository(MerchantApiRequest)
     private readonly requests: Repository<MerchantApiRequest>,
     private readonly config: ConfigService,
+    private readonly counterpartyStats: CounterpartyStatsService,
   ) {}
 
   async record(entry: MerchantRequestEntry): Promise<void> {
@@ -64,7 +67,7 @@ export class MerchantRequestsService {
     const failed = entry.statusCode >= ERROR_STATUS_FROM;
     const details = entry.details ?? {};
 
-    await this.requests.insert({
+    const row = {
       id: entry.id,
       merchantId: entry.merchantId,
       apiKeyId: entry.apiKeyId,
@@ -91,7 +94,24 @@ export class MerchantRequestsService {
       transactionId: details.transactionId ?? null,
       processedByUserId: details.processedByUserId ?? null,
       selectionSummary: details.selectionSummary ?? null,
+      counterpartyId: details.counterpartyId ?? null,
       receivedAt: entry.receivedAt,
+    };
+
+    if (row.counterpartyId === null) {
+      await this.requests.insert(row);
+      return;
+    }
+
+    const counterpartyId = row.counterpartyId;
+
+    await this.requests.manager.transaction(async (manager) => {
+      await manager.insert(MerchantApiRequest, row);
+      await this.counterpartyStats.recordRequestWithin(
+        manager,
+        counterpartyId,
+        entry.receivedAt,
+      );
     });
   }
 

@@ -4,6 +4,9 @@
 
 {{ paybull_api_domain }} {
 	encode zstd gzip
+	request_body /pay/* {
+		max_size {{ (stack_env.DISPUTE_FILE_MAX_BYTES | default(52428800) | int) + 65536 }}
+	}
 	reverse_proxy backend:3000
 }
 

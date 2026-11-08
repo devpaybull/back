@@ -26,6 +26,7 @@ import {
 } from '../transactions/dto/payment-page.dto';
 import { PaymentPageService } from '../transactions/services/payment-page.service';
 import { PayPageRateLimitGuard } from './guards/pay-page-rate-limit.guard';
+import { PayReceiptGuard } from './guards/pay-receipt.guard';
 
 @ApiTags('Payment page')
 @ApiParam({
@@ -43,7 +44,7 @@ export class PaymentPageController {
     summary:
       'What the payer’s page shows: the amount, the requisite, the timer',
     description:
-      'No key, no JWT: the token is the access. An unknown token and a deal that reached a final status are both 404 PAYMENT_PAGE_NOT_FOUND. Requests per client IP are limited (429).',
+      'No key, no JWT: the token is the access. A final deal is shown for PAYMENT_PAGE_FINAL_TTL_HOURS after it was resolved; an unknown token and a deal past that are both 404 PAYMENT_PAGE_NOT_FOUND. Requests per client (an IPv6 /64 counts as one) are limited (429).',
   })
   @ApiEnvelopeResponse(PaymentPageDto)
   view(@Param('token') token: string): Promise<PaymentPageDto> {
@@ -55,7 +56,7 @@ export class PaymentPageController {
   @ApiOperation({
     summary: '«Я оплатил»: the payer says the money is sent',
     description:
-      'An active pay-in moves to checking; the timer keeps running, and at expiresAt the deal goes to checking_manually. Once per deal: a repeat answers the page as it is. 409 PAYMENT_NOT_PAYABLE when the deal is no longer waiting for the payer.',
+      'An active pay-in moves to checking; the timer keeps running, and at expiresAt the deal goes to checking_manually. Once per deal: a repeat answers the page as it is. 409 PAYMENT_NOT_PAYABLE when the deal is no longer waiting for the payer; 404 once it is final.',
   })
   @ApiEnvelopeResponse(PaymentPageDto)
   paid(@Param('token') token: string): Promise<PaymentPageDto> {
@@ -63,6 +64,7 @@ export class PaymentPageController {
   }
 
   @Post(':token/receipt')
+  @UseGuards(PayReceiptGuard)
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -75,7 +77,7 @@ export class PaymentPageController {
   @ApiOperation({
     summary: 'The payer uploads a receipt',
     description:
-      'The type is read from the content: pdf, png, jpeg, heic, heif, mp4, mov, 3gp, avi, mkv, webm, mpeg. Over the size limit is a 413. At most 3 per deal (409 RECEIPT_LIMIT_REACHED). The status does not change.',
+      'The type is read from the content: pdf, png, jpeg, heic, heif, mp4, mov, 3gp, avi, mkv, webm, mpeg. Over the size limit is a 413. At most 3 per deal (409 RECEIPT_LIMIT_REACHED). The token, the deal and the count are checked before the body is read; at most 2 uploads in progress per client (429 TOO_MANY_UPLOADS). The status does not change.',
   })
   @ApiEnvelopeResponse(PaymentPageReceiptDto, {
     status: HttpStatus.CREATED,

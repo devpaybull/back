@@ -181,6 +181,26 @@ export class ListCounterpartiesQueryDto extends PaginationQueryDto {
   paid30dTo?: number;
 
   @ApiPropertyOptional({
+    description:
+      'Deal-creation requests over the last 30 days (today and the 29 days before, BUSINESS_TIMEZONE), at least',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  requests30dFrom?: number;
+
+  @ApiPropertyOptional({
+    description: 'Deal-creation requests over the last 30 days, at most',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsNotBelow('requests30dFrom')
+  requests30dTo?: number;
+
+  @ApiPropertyOptional({
     enum: CounterpartySortField,
     default: CounterpartySortField.CreatedAt,
   })

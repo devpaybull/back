@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Bank } from '../../banks/entities/bank.entity';
+import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Fiat } from '../../common/types/fiat';
 import { fiatColumn } from '../../common/utils/fiat-column';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
@@ -23,6 +24,7 @@ import { MerchantRequestResult } from '../types/merchant-request-result.enum';
 @Entity('merchant_api_requests')
 @Index(['receivedAt', 'id'])
 @Index(['merchantId', 'receivedAt'])
+@Index(['counterpartyId', 'receivedAt'])
 export class MerchantApiRequest {
   @PrimaryColumn({ type: 'uuid' })
   id: string;
@@ -102,6 +104,13 @@ export class MerchantApiRequest {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   payerUserId: string | null;
+
+  @ManyToOne(() => Counterparty, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'counterpartyId' })
+  counterparty: Counterparty | null;
+
+  @Column({ type: 'int', nullable: true })
+  counterpartyId: number | null;
 
   @Index()
   @Column({ type: 'varchar', length: 255, nullable: true })

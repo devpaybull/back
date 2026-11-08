@@ -41,7 +41,7 @@ export class MerchantRequestDetailDto extends MerchantRequestDto {
     type: 'object',
     additionalProperties: { type: 'string' },
     description:
-      'as sent, names lower-cased; X-Secure-Key masked, Authorization and Cookie dropped',
+      'as sent, names lower-cased; X-Secure-Key masked, Authorization, Proxy-Authorization and Cookie dropped; for an admin the addresses in X-Forwarded-For, X-Real-IP and Forwarded for= are masked like ip',
   })
   requestHeaders: Record<string, string>;
 

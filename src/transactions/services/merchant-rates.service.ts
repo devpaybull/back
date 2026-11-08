@@ -98,23 +98,27 @@ export class MerchantRatesService {
         merchantId,
       ) ?? []
     ).filter((row) => row.currency.isocode === RAPIRA_CURRENCY);
-    const rates: MerchantExchangeRate[] = [];
 
-    for (const row of currencies) {
-      rates.push(
-        {
-          currency: row.currency.isocode,
-          type: TransactionKind.PayIn,
-          rate: await this.rates.merchantSourceRate(row.payInMarkupPercent),
-        },
-        {
-          currency: row.currency.isocode,
-          type: TransactionKind.PayOut,
-          rate: await this.rates.merchantSourceRate(row.payOutMarkupPercent),
-        },
-      );
-    }
+    if (currencies.length === 0) return [];
 
-    return rates;
+    const rates = await this.rates.merchantSourceRates(
+      currencies.flatMap((row) => [
+        row.payInMarkupPercent,
+        row.payOutMarkupPercent,
+      ]),
+    );
+
+    return currencies.flatMap((row, index) => [
+      {
+        currency: row.currency.isocode,
+        type: TransactionKind.PayIn,
+        rate: rates[2 * index],
+      },
+      {
+        currency: row.currency.isocode,
+        type: TransactionKind.PayOut,
+        rate: rates[2 * index + 1],
+      },
+    ]);
   }
 }

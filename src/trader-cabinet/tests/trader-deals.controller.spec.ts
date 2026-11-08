@@ -1,3 +1,4 @@
+import { TransactionFileKind } from '../../transactions/types/transaction-file-kind.enum';
 import 'reflect-metadata';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
@@ -107,6 +108,26 @@ const build = () => {
       key === 'BUSINESS_TIMEZONE' ? 'Europe/Moscow' : 2,
     ),
   };
+  const files = {
+    listOf: jest.fn(async () => [
+      {
+        id: uuidOf(40),
+        kind: TransactionFileKind.PayerReceipt,
+        name: 'чек.pdf',
+        mime: 'application/pdf',
+        size: 4,
+        createdAt: new Date('2026-11-07T10:00:00Z'),
+      },
+      {
+        id: uuidOf(41),
+        kind: TransactionFileKind.DisputeReceipt,
+        name: 'спор.pdf',
+        mime: 'application/pdf',
+        size: 5,
+        createdAt: new Date('2026-11-07T11:00:00Z'),
+      },
+    ]),
+  };
   const controller = new TraderDealsController(
     deals as never,
     actions as never,
@@ -114,9 +135,10 @@ const build = () => {
     merchants as never,
     counterparties as never,
     config as never,
+    files as never,
   );
 
-  return { controller, deals, actions, merchants, counterparties };
+  return { controller, deals, actions, merchants, counterparties, files };
 };
 
 const query = (overrides: object = {}): ListTraderDealsQueryDto =>
@@ -265,6 +287,15 @@ describe('TraderDealsController', () => {
         tags: [{ id: 8, name: 'основной' }],
         originalAmountFiat: null,
         declineReasonCode: null,
+        payerReceipts: [
+          {
+            id: uuidOf(40),
+            name: 'чек.pdf',
+            mime: 'application/pdf',
+            size: 4,
+            createdAt: new Date('2026-11-07T10:00:00Z'),
+          },
+        ],
       }),
     );
   });

@@ -16,6 +16,7 @@ const row: MerchantRequestDto = {
   currency: 'RUB',
   bank: { id: 7, code: 'tbank', name: 'Т-банк' },
   payerUserId: '=HYPERLINK("x")',
+  counterpartyId: 42,
   merchantTransactionId: 'order-1',
   result: MerchantRequestResult.NotCreated,
   statusCode: 403,
@@ -30,10 +31,10 @@ describe('merchantRequestsCsv', () => {
     const lines = merchantRequestsCsv([row]).split('\r\n');
 
     expect(lines[0]).toBe(
-      'receivedAt,id,merchantId,merchant,operation,direction,method,amount,currency,bank,payerUserId,merchantTransactionId,result,statusCode,errorCode,processedBy,durationMs,transactionId',
+      'receivedAt,id,merchantId,merchant,operation,direction,method,amount,currency,bank,payerUserId,counterpartyId,merchantTransactionId,result,statusCode,errorCode,processedBy,durationMs,transactionId',
     );
     expect(lines[1]).toBe(
-      `2026-11-05T08:25:54.000Z,${uuidOf(1)},${uuidOf(3)},"Casino, ""Royal""",pay_in_create,pay_in,sbp,2000.00,RUB,tbank,"'=HYPERLINK(""x"")",order-1,not_created,403,NO_REQUISITE_FOUND_FOR_THIS_AMOUNT,,50,`,
+      `2026-11-05T08:25:54.000Z,${uuidOf(1)},${uuidOf(3)},"Casino, ""Royal""",pay_in_create,pay_in,sbp,2000.00,RUB,tbank,"'=HYPERLINK(""x"")",42,order-1,not_created,403,NO_REQUISITE_FOUND_FOR_THIS_AMOUNT,,50,`,
     );
     expect(lines[2]).toBe('');
   });
@@ -50,6 +51,7 @@ describe('merchantRequestsCsv', () => {
         currency: null,
         bank: null,
         payerUserId: null,
+        counterpartyId: null,
         merchantTransactionId: null,
         result: MerchantRequestResult.Ok,
         statusCode: 200,
@@ -58,7 +60,7 @@ describe('merchantRequestsCsv', () => {
     ]).split('\r\n');
 
     expect(line).toBe(
-      `2026-11-05T08:25:54.000Z,${uuidOf(1)},${uuidOf(3)},,,,,,,,,,ok,200,,,50,`,
+      `2026-11-05T08:25:54.000Z,${uuidOf(1)},${uuidOf(3)},,,,,,,,,,,ok,200,,,50,`,
     );
   });
 });

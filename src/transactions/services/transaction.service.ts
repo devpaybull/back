@@ -72,6 +72,12 @@ import { WalletService } from './wallet.service';
 
 const MINUTE_MS = 60_000;
 const PAYMENT_PAGE_TOKEN_BYTES = 32;
+const FAILED_DEAL_STATUSES: readonly TransactionStatus[] = [
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
+  TransactionStatus.CheckingManually,
+  TransactionStatus.Canceled,
+];
 const DEFERRED_DEAL_SUCCEEDED = 'deal_succeeded';
 const DEFERRED_DEAL_CANCELED = 'deal_canceled';
 const DEFERRED_STARTED = 'deferred_dispute_started';
@@ -150,7 +156,7 @@ export class TransactionService {
         kind: TransactionKind.PayIn,
         merchantId,
         counterpartyId,
-        status: In([TransactionStatus.Active, TransactionStatus.Canceled]),
+        status: In(FAILED_DEAL_STATUSES),
         createdAt: MoreThanOrEqual(since),
       },
     });

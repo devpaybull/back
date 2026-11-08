@@ -11,6 +11,7 @@ export interface MerchantRequestDetails {
   currency?: string | null;
   requestedBankId?: number | null;
   payerUserId?: string;
+  counterpartyId?: number;
   merchantTransactionId?: string;
   transactionId?: string | null;
   processedByUserId?: string | null;

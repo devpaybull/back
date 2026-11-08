@@ -7,7 +7,9 @@ import { AuditInstallation } from '../../audit/entities/audit-installation.entit
 import { AuditLog } from '../../audit/entities/audit-log.entity';
 import { Bank } from '../../banks/entities/bank.entity';
 import { Country } from '../../countries/entities/country.entity';
+import { CounterpartyDailyRequest } from '../../counterparties/entities/counterparty-daily-request.entity';
 import { CounterpartyDailyVolume } from '../../counterparties/entities/counterparty-daily-volume.entity';
+import { MerchantApiRequest } from '../../merchant-requests/entities/merchant-api-request.entity';
 import { CounterpartyRequisiteEvent } from '../../counterparties/entities/counterparty-requisite-event.entity';
 import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { Currency } from '../../currencies/entities/currency.entity';
@@ -127,6 +129,10 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(Counterparty))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(CounterpartyDailyVolume))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(CounterpartyDailyRequest))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(MerchantApiRequest))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(CounterpartyRequisiteEvent))
       .useValue(repository)

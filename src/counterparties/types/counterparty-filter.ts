@@ -16,4 +16,5 @@ export interface CounterpartyFilter {
   windowVolumes?: ReadonlyMap<VolumeWindow, AmountRange>;
   totalVolume?: AmountRange;
   paid30d?: CountRange;
+  requests30d?: CountRange;
 }

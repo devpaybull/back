@@ -336,8 +336,28 @@ describe('TraderDealActionsService', () => {
       ).toThrow(BadRequestException);
     });
 
+    it('declines a deal the payer marked paid (checking) the same way, the requisite switched off for requisite_blocked', async () => {
+      const deal = dealIn(TransactionStatus.Checking);
+      const { service, transactions, requisites } = build(deal);
+
+      await service.decline(
+        actor,
+        DEAL,
+        PayInDeclineReason.RequisiteBlocked,
+        null,
+      );
+
+      expect(deal.declineReasonCode).toBe(PayInDeclineReason.RequisiteBlocked);
+      expect(requisites.disableOwnWithin).toHaveBeenCalled();
+      expect(transactions.transitionLocked.mock.calls[0][2]).toEqual({
+        toStatus: TransactionStatus.Canceled,
+        source: StatusEventSource.Trader,
+        actorUserId: TRADER,
+        reason: PayInDeclineReason.RequisiteBlocked,
+      });
+    });
+
     it.each([
-      TransactionStatus.Checking,
       TransactionStatus.CheckingManually,
       TransactionStatus.Dispute,
       TransactionStatus.Success,

@@ -44,6 +44,7 @@ const record: MerchantRequestRecord = {
   merchantTransactionId: 'order-1',
   transactionId: uuidOf(50),
   processedByUserId: TRADER,
+  counterpartyId: 42,
   receivedAt: RECEIVED,
   apiKeyId: 2,
   method: 'POST',
@@ -151,6 +152,7 @@ describe('AdminMerchantRequestsController', () => {
         currency: 'RUB',
         bank: { id: 7, code: 'tbank', name: 'Т-банк' },
         payerUserId: '4214',
+        counterpartyId: 42,
         merchantTransactionId: 'order-1',
         result: 'created',
         statusCode: 201,
@@ -274,6 +276,7 @@ describe('AdminMerchantRequestsController', () => {
 
     expect(card).toMatchObject({
       id: uuidOf(1),
+      counterpartyId: 42,
       httpMethod: 'POST',
       path: '/v1/payment/pay-in',
       ip: '::ffff:203.0.113.7',

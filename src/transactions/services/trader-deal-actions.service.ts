@@ -29,6 +29,11 @@ const CONFIRMABLE_STATUSES: readonly TransactionStatus[] = [
   TransactionStatus.CheckingManually,
 ];
 
+const DECLINABLE_STATUSES: readonly TransactionStatus[] = [
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
+];
+
 @Injectable()
 export class TraderDealActionsService {
   constructor(
@@ -156,7 +161,7 @@ export class TraderDealActionsService {
     return this.dataSource.transaction(async (manager) => {
       const deal = await this.lockOwn(manager, actor, id);
 
-      if (deal.status !== TransactionStatus.Active) {
+      if (!DECLINABLE_STATUSES.includes(deal.status)) {
         throw new ConflictException('The deal cannot be declined');
       }
 

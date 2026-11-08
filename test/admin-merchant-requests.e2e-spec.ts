@@ -1,10 +1,12 @@
 import { Role } from '../src/common/enums/role.enum';
 import { maskIp } from '../src/common/utils/mask-ip';
 import { toCrypto } from '../src/common/utils/to-crypto';
+import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
 import { Device } from '../src/devices/entities/device.entity';
 import { MerchantApiRequest } from '../src/merchant-requests/entities/merchant-api-request.entity';
 import { MerchantMethod } from '../src/merchants/entities/merchant-method.entity';
 import { MerchantsService } from '../src/merchants/services/merchants.service';
+import { CounterpartyDealStatsService } from '../src/transactions/services/counterparty-deal-stats.service';
 import { User } from '../src/users/entities/user.entity';
 import { TraderSettings } from '../src/trader-settings/entities/trader-settings.entity';
 import { MethodRate } from '../src/transactions/entities/method-rate.entity';
@@ -202,6 +204,7 @@ describe('the admin request history (RH)', () => {
       currency: 'RUB',
       bank: { id: bankId, code: 'tbank', name: 'Т-банк' },
       payerUserId: '4214',
+      counterpartyId: expect.any(Number),
       merchantTransactionId: 'order-ok',
       result: 'created',
       statusCode: 201,
@@ -222,7 +225,16 @@ describe('the admin request history (RH)', () => {
       operation: null,
       result: 'ok',
       amount: null,
+      counterpartyId: null,
     });
+
+    const clients = e2e.dataSource.getRepository(Counterparty);
+    expect(response.body.data[2].counterpartyId).toBe(
+      (await clients.findOneByOrFail({ merchantId, externalId: '4214' })).id,
+    );
+    expect(response.body.data[1].counterpartyId).toBe(
+      (await clients.findOneByOrFail({ merchantId, externalId: '4215' })).id,
+    );
   });
 
   it('filters by the tab, the operation, the bank, the amount, the merchant and the period', async () => {
@@ -318,6 +330,7 @@ describe('the admin request history (RH)', () => {
 
     expect(card).toMatchObject({
       id: created.requestId,
+      counterpartyId: expect.any(Number),
       httpMethod: 'POST',
       path: '/v1/payment/pay-in',
       statusCode: 201,
@@ -382,6 +395,141 @@ describe('the admin request history (RH)', () => {
       `${created.requestId},${merchantId},Casino,pay_in_create`,
     );
     expect(lines[2]).toContain('super_maks');
+    expect(lines[0]).toContain('payerUserId,counterpartyId,');
     expect(response.text).not.toContain('x-secure-key');
+  });
+
+  describe('the counterparty side (AC-RH.8)', () => {
+    let early: string;
+
+    const clientOf = (externalId: string) =>
+      e2e.dataSource
+        .getRepository(Counterparty)
+        .findOneByOrFail({ merchantId, externalId });
+
+    const cardOf = async (id: number) =>
+      (await get(`/admin/counterparties/${id}`).expect(200)).body.data;
+
+    beforeAll(async () => {
+      early = (
+        await payIn({
+          method: 'crypto',
+          amount: '2000',
+          merchantTransactionId: 'order-early',
+          payerInfo: { userId: '4214' },
+        })
+          .set('Proxy-Authorization', 'Basic dTpw')
+          .expect(400)
+      ).headers['x-request-id'];
+      await settle();
+    });
+
+    it('stores no counterparty on a request refused before the counterparty lookup, and drops Proxy-Authorization', async () => {
+      const card = (
+        await get(`/admin/merchant-requests/${early}`, superadmin).expect(200)
+      ).body.data;
+
+      expect(card.counterpartyId).toBeNull();
+      expect(card.errorCode).toBe('METHOD_NOT_SUPPORTED');
+      expect(Object.keys(card.requestHeaders)).not.toContain(
+        'proxy-authorization',
+      );
+    });
+
+    it('counts only the requests that reached the counterparty lookup, refusals included, with the last one as «Последний вход»', async () => {
+      const paying = await clientOf('4214');
+      const refusedClient = await clientOf('4215');
+      const createdRow = await e2e.dataSource
+        .getRepository(MerchantApiRequest)
+        .findOneByOrFail({ id: created.requestId });
+
+      expect(await cardOf(paying.id)).toMatchObject({
+        requestCount: 1,
+        lastLoginAt: createdRow.receivedAt.toISOString(),
+      });
+      expect((await cardOf(refusedClient.id)).requestCount).toBe(1);
+    });
+
+    it('filters the list by the requests of the last 30 days', async () => {
+      const ids = async (query: string) =>
+        (
+          (
+            await get(
+              `/admin/counterparties?merchantId=${merchantId}${query}`,
+            ).expect(200)
+          ).body.data as { id: number }[]
+        ).map((row) => row.id);
+
+      expect(await ids('&requests30dFrom=1')).toHaveLength(2);
+      expect(await ids('&requests30dFrom=2')).toEqual([]);
+      expect(await ids('&requests30dTo=0')).toEqual([]);
+    });
+
+    it('fills the funnel’s requests, by method too', async () => {
+      const paying = await clientOf('4214');
+      const stats = (method = '') =>
+        get(`/admin/counterparties/${paying.id}/stats${method}`).expect(200);
+
+      expect((await stats()).body.data.funnel.requests).toBe(1);
+      expect((await stats('?method=sbp')).body.data.funnel.requests).toBe(1);
+      expect((await stats('?method=card')).body.data.funnel.requests).toBe(0);
+    });
+
+    it('shows each creation request in the deal events, by time with the status changes', async () => {
+      const paying = await clientOf('4214');
+      const events = (
+        await get(`/admin/counterparties/${paying.id}/deal-events`).expect(200)
+      ).body;
+      const requests = events.data.filter(
+        (event: { kind: string }) => event.kind === 'deal_requested',
+      );
+
+      expect(requests).toEqual([
+        expect.objectContaining({
+          id: null,
+          deal: null,
+          trader: expect.objectContaining({ login: 'super_maks' }),
+          request: expect.objectContaining({
+            id: created.requestId,
+            method: 'sbp',
+            amountFiat: '2000.00',
+            result: 'created',
+            statusCode: 201,
+            dealId: created.dealId,
+          }),
+        }),
+      ]);
+      expect(events.meta.total).toBe(events.data.length);
+      expect(
+        events.data.map((event: { createdAt: string }) => event.createdAt),
+      ).toEqual(
+        [...events.data.map((event: { createdAt: string }) => event.createdAt)]
+          .sort()
+          .reverse(),
+      );
+    });
+
+    it('rebuilds the same request counters from the log', async () => {
+      const paying = await clientOf('4214');
+      const before = await cardOf(paying.id);
+
+      await e2e.dataSource.query(
+        `UPDATE counterparties SET "requestCount" = 99, "lastRequestAt" = NULL`,
+      );
+      await e2e.app
+        .get(CounterpartyDealStatsService)
+        .rebuildCounterpartyStats();
+
+      const after = await cardOf(paying.id);
+      expect(after.requestCount).toBe(before.requestCount);
+      expect(after.lastLoginAt).toBe(before.lastLoginAt);
+      expect(
+        (
+          await get(
+            `/admin/counterparties?merchantId=${merchantId}&requests30dFrom=1`,
+          ).expect(200)
+        ).body.meta.total,
+      ).toBe(2);
+    });
   });
 });

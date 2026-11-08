@@ -9,6 +9,7 @@ import { sortDirection } from '../../common/utils/sort-direction';
 import { toFiat } from '../../common/utils/to-fiat';
 import { zonedMidnight } from '../../common/utils/zoned-midnight';
 import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
+import { MerchantRequestHistoryService } from '../../merchant-requests/services/merchant-request-history.service';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { CounterpartyDealEventListQuery } from '../types/counterparty-deal-event-list-query';
@@ -40,6 +41,7 @@ export class CounterpartyDealStatsService {
     @InjectRepository(TransactionStatusEvent)
     private readonly events: Repository<TransactionStatusEvent>,
     private readonly counterpartyStats: CounterpartyStatsService,
+    private readonly requestLog: MerchantRequestHistoryService,
     private readonly config: ConfigService,
   ) {}
 
@@ -124,8 +126,12 @@ export class CounterpartyDealStatsService {
         paidAmount: string;
       }>();
 
-    await this.dataSource.transaction((manager) =>
-      this.counterpartyStats.replaceAllWithin(
+    const requests = await this.requestLog.counterpartyRequestCounts(
+      this.timeZone(),
+    );
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.counterpartyStats.replaceAllWithin(
         manager,
         totals.map((row) => ({
           counterpartyId: Number(row.counterpartyId),
@@ -137,8 +143,13 @@ export class CounterpartyDealStatsService {
           paidCount: Number(row.paidCount),
           paidAmount: toFiat(row.paidAmount),
         })),
-      ),
-    );
+      );
+      await this.counterpartyStats.replaceRequestsWithin(
+        manager,
+        requests.totals,
+        requests.days,
+      );
+    });
   }
 
   private countedDeals(

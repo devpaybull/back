@@ -4,10 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
 import { calendarDateIn } from '../../common/utils/calendar-date-in';
 import { formatFiat } from '../../common/utils/format-fiat';
+import { CounterpartyDailyRequest } from '../entities/counterparty-daily-request.entity';
 import { CounterpartyDailyVolume } from '../entities/counterparty-daily-volume.entity';
 import { Counterparty } from '../entities/counterparty.entity';
+import { CounterpartyDayRequests } from '../types/counterparty-day-requests';
 import { CounterpartyDayVolume } from '../types/counterparty-day-volume';
 import { CounterpartyDealOutcome } from '../types/counterparty-deal-outcome';
+import { CounterpartyRequestTotals } from '../types/counterparty-request-totals';
 import { CounterpartyStatsTotals } from '../types/counterparty-stats-totals';
 
 const ADD_TO_DAY = `INSERT INTO counterparty_daily_volumes ("counterpartyId", "day", "paidCount", "paidAmount")
@@ -15,6 +18,12 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT ("counterpartyId", "day") DO UPDATE SET
   "paidCount" = counterparty_daily_volumes."paidCount" + EXCLUDED."paidCount",
   "paidAmount" = counterparty_daily_volumes."paidAmount" + EXCLUDED."paidAmount",
+  "updatedAt" = now()`;
+
+const ADD_REQUESTS_TO_DAY = `INSERT INTO counterparty_daily_requests ("counterpartyId", "day", "requestCount")
+VALUES ($1, $2, $3)
+ON CONFLICT ("counterpartyId", "day") DO UPDATE SET
+  "requestCount" = counterparty_daily_requests."requestCount" + EXCLUDED."requestCount",
   "updatedAt" = now()`;
 
 @Injectable()
@@ -153,6 +162,65 @@ export class CounterpartyStatsService {
         day.day,
         day.paidCount,
         formatFiat(day.paidAmount),
+      ]);
+    }
+  }
+
+  async recordRequestWithin(
+    manager: EntityManager,
+    counterpartyId: number,
+    receivedAt: Date,
+  ): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .update(Counterparty)
+      .set({
+        requestCount: () => '"requestCount" + 1',
+        lastRequestAt: () =>
+          'GREATEST("lastRequestAt", CAST(:receivedAt AS timestamptz))',
+      })
+      .where('id = :counterpartyId', { counterpartyId })
+      .setParameter('receivedAt', receivedAt)
+      .execute();
+    await manager.query(ADD_REQUESTS_TO_DAY, [
+      counterpartyId,
+      this.dayOf(receivedAt),
+      1,
+    ]);
+  }
+
+  async replaceRequestsWithin(
+    manager: EntityManager,
+    totals: readonly CounterpartyRequestTotals[],
+    days: readonly CounterpartyDayRequests[],
+  ): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .update(Counterparty)
+      .set({ requestCount: 0, lastRequestAt: null })
+      .execute();
+    await manager
+      .createQueryBuilder()
+      .delete()
+      .from(CounterpartyDailyRequest)
+      .execute();
+
+    for (const row of totals) {
+      await manager
+        .createQueryBuilder()
+        .update(Counterparty)
+        .set({
+          requestCount: row.requestCount,
+          lastRequestAt: row.lastRequestAt,
+        })
+        .where('id = :counterpartyId', { counterpartyId: row.counterpartyId })
+        .execute();
+    }
+    for (const day of days) {
+      await manager.query(ADD_REQUESTS_TO_DAY, [
+        day.counterpartyId,
+        day.day,
+        day.requestCount,
       ]);
     }
   }

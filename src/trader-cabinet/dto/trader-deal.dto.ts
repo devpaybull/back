@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PayInDeclineReason } from '../../transactions/types/pay-in-decline-reason.enum';
 import { TransactionStatus } from '../../transactions/types/transaction-status.enum';
+import { PayoutReceiptDto } from './trader-payout.dto';
 
 export class TraderDealRequisiteDto {
   @ApiProperty({ format: 'uuid' })
@@ -107,4 +108,12 @@ export class TraderDealDetailDto extends TraderDealDto {
 
   @ApiProperty({ type: String, nullable: true })
   declineComment: string | null;
+
+  @ApiProperty({
+    type: PayoutReceiptDto,
+    isArray: true,
+    description:
+      'Receipts the payer uploaded on the payment page; download through GET /trader/files/:id',
+  })
+  payerReceipts: PayoutReceiptDto[];
 }

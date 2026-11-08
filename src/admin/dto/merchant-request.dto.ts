@@ -76,10 +76,16 @@ export class MerchantRequestDto {
 
   @ApiProperty({
     nullable: true,
-    description:
-      'payerInfo.userId — the client’s id at the merchant; the counterparty is (merchant, this id)',
+    description: 'payerInfo.userId — the client’s id at the merchant',
   })
   payerUserId: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'the counterparty (merchant, payerUserId) names — null when there is no payer or no such counterparty',
+  })
+  counterpartyId: number | null;
 
   @ApiProperty({ nullable: true })
   merchantTransactionId: string | null;

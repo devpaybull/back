@@ -43,6 +43,7 @@ const toLine = (row: MerchantApiRequest): ArchiveLine => ({
   currency: row.currency,
   requestedBankId: row.requestedBankId,
   payerUserId: row.payerUserId,
+  counterpartyId: row.counterpartyId,
   merchantTransactionId: row.merchantTransactionId,
   transactionId: row.transactionId,
   processedByUserId: row.processedByUserId,

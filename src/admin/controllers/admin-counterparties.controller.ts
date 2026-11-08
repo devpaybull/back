@@ -23,12 +23,14 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { WriteAccess } from '../../common/decorators/write-access.decorator';
 import { Role } from '../../common/enums/role.enum';
+import { SortOrder } from '../../common/enums/sort-order.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
 import { Fiat } from '../../common/types/fiat';
-import { Page } from '../../common/types/page';
+import { Page, toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { formatFiat } from '../../common/utils/format-fiat';
+import { MERGED_SORT_WINDOW_MAX } from '../../common/utils/merged-sort-window-max';
 import { INT4_MAX } from '../../common/utils/int4-max';
 import { roundFiat } from '../../common/utils/round-fiat';
 import { toDecimal } from '../../common/utils/to-decimal';
@@ -41,6 +43,7 @@ import { CounterpartyWindowVolumes } from '../../counterparties/types/counterpar
 import { VolumeWindow } from '../../counterparties/types/volume-window';
 import { counterpartyHealth } from '../../counterparties/utils/counterparty-health';
 import { COUNTERPARTY_STATS_CURRENCY } from '../../counterparties/utils/counterparty-stats-currency';
+import { MerchantRequestHistoryService } from '../../merchant-requests/services/merchant-request-history.service';
 import { MerchantsService } from '../../merchants/services/merchants.service';
 import { CounterpartyDealStatsService } from '../../transactions/services/counterparty-deal-stats.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -57,6 +60,7 @@ import { ListCounterpartiesQueryDto } from '../dto/list-counterparties-query.dto
 import { ListCounterpartyEventsQueryDto } from '../dto/list-counterparty-events-query.dto';
 import { ReplaceCounterpartyRequisiteDto } from '../dto/replace-counterparty-requisite.dto';
 import { UpdateCounterpartyDto } from '../dto/update-counterparty.dto';
+import { CounterpartyDealEventKind } from '../types/counterparty-deal-event-kind.enum';
 
 const PERCENT = 100;
 
@@ -100,6 +104,7 @@ export class AdminCounterpartiesController {
     private readonly bankDetails: BankDetailsService,
     private readonly merchants: MerchantsService,
     private readonly directory: UserDirectoryService,
+    private readonly requestLog: MerchantRequestHistoryService,
   ) {}
 
   @Get()
@@ -154,8 +159,13 @@ export class AdminCounterpartiesController {
     @Param('id', ParseIntPipe) id: number,
     @Query() query: CounterpartyStatsQueryDto,
   ): Promise<CounterpartyStatsDto> {
-    await this.require(id);
-    const stats = await this.dealStats.statsOf(id, query.method, new Date());
+    const counterparty = await this.require(id);
+    const [stats, requests] = await Promise.all([
+      this.dealStats.statsOf(id, query.method, new Date()),
+      query.method === undefined
+        ? counterparty.requestCount
+        : this.requestLog.countForCounterparty(id, query.method),
+    ]);
 
     return {
       method: query.method ?? null,
@@ -166,7 +176,7 @@ export class AdminCounterpartiesController {
       disputes: stats.disputeCount,
       averageCheck: averageCheckOf(stats.paidAmount, stats.paidCount),
       lastDepositAt: stats.lastDepositAt,
-      funnel: { requests: null, deals: stats.dealCount, paid: stats.paidCount },
+      funnel: { requests, deals: stats.dealCount, paid: stats.paidCount },
       volume7d: formatFiat(stats.volume7d),
       volume30d: formatFiat(stats.volume30d),
       volumeTotal: formatFiat(stats.paidAmount),
@@ -245,31 +255,113 @@ export class AdminCounterpartiesController {
   }
 
   @Get(':id/deal-events')
-  @ApiOperation({ summary: 'Every status change of the counterparty’s deals' })
+  @ApiOperation({
+    summary:
+      'Every status change of the counterparty’s deals and every creation request it made, by time',
+    description: `«Запрос на создание сделки» rows come from the request log, Postgres and the archive. A page may end at most ${MERGED_SORT_WINDOW_MAX} events deep (400 beyond).`,
+  })
   @ApiPagedResponse(CounterpartyDealEventDto)
   async dealEvents(
     @Param('id', ParseIntPipe) id: number,
     @Query() query: ListCounterpartyEventsQueryDto,
   ): Promise<Page<CounterpartyDealEventDto>> {
     await this.require(id);
-    const page = await this.dealStats.listDealEvents(id, query);
+    const window = query.page * query.limit;
+
+    if (window > MERGED_SORT_WINDOW_MAX) {
+      throw new BadRequestException(
+        `A page of events may end at most ${MERGED_SORT_WINDOW_MAX} events deep`,
+      );
+    }
+
+    const [statusPage, [requests, requestTotal]] = await Promise.all([
+      this.dealStats.listDealEvents(id, {
+        page: 1,
+        limit: window,
+        sortOrder: query.sortOrder,
+      }),
+      this.requestLog.listForCounterparty(id, query.sortOrder, window),
+    ]);
+    const sign = query.sortOrder === SortOrder.Asc ? 1 : -1;
+    const merged = [
+      ...statusPage.items.map((event) => ({
+        at: event.createdAt,
+        key: `s${String(event.id).padStart(12, '0')}`,
+        status: event,
+        request: null,
+      })),
+      ...requests.map((request) => ({
+        at: request.receivedAt,
+        key: `r${request.id}`,
+        status: null,
+        request,
+      })),
+    ]
+      .sort(
+        (a, b) =>
+          sign *
+          (a.at.getTime() - b.at.getTime() ||
+            (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+      )
+      .slice((query.page - 1) * query.limit, window);
     const [traders, requisites] = await Promise.all([
       this.directory.findByIds(
-        distinct(page.items.map((event) => event.transaction.traderUserId)),
+        distinct(
+          merged.map((entry) =>
+            entry.status
+              ? entry.status.transaction.traderUserId
+              : entry.request.processedByUserId,
+          ),
+        ),
       ),
       this.bankDetails.findByIdsWithDeleted(
-        distinct(page.items.map((event) => event.transaction.bankDetailsId)),
+        distinct(
+          merged.map((entry) => entry.status?.transaction.bankDetailsId),
+        ),
       ),
     ]);
     const traderById = new Map(traders.map((user) => [user.id, user]));
     const requisiteById = new Map(requisites.map((row) => [row.id, row]));
+    const items = merged.map((entry): CounterpartyDealEventDto => {
+      if (entry.request) {
+        const request = entry.request;
+        const trader = request.processedByUserId
+          ? traderById.get(request.processedByUserId)
+          : undefined;
 
-    return page.map((event) => {
+        return {
+          kind: CounterpartyDealEventKind.DealRequested,
+          id: null,
+          createdAt: request.receivedAt,
+          fromStatus: null,
+          toStatus: null,
+          source: null,
+          deal: null,
+          trader: trader ? toCounterpartyTraderDto(trader) : null,
+          requisite: null,
+          request: {
+            id: request.id,
+            method: request.paymentMethod,
+            amountFiat:
+              request.amountFiat === null
+                ? null
+                : formatFiat(request.amountFiat),
+            currency: request.currency,
+            result: request.result,
+            statusCode: request.statusCode,
+            errorCode: request.errorCode,
+            dealId: request.transactionId,
+          },
+        };
+      }
+
+      const event = entry.status;
       const deal = event.transaction;
       const trader = traderById.get(deal.traderUserId);
       const requisite = requisiteById.get(deal.bankDetailsId);
 
       return {
+        kind: CounterpartyDealEventKind.StatusChanged,
         id: event.id,
         createdAt: event.createdAt,
         fromStatus: event.fromStatus ?? null,
@@ -289,8 +381,11 @@ export class AdminCounterpartiesController {
               user: trader,
             } as BankDetails)
           : null,
+        request: null,
       };
     });
+
+    return toPage([items, statusPage.meta.total + requestTotal], query);
   }
 
   @Get(':id/requisite-events')
@@ -390,6 +485,10 @@ export class AdminCounterpartiesController {
         query.paid30dFrom === undefined && query.paid30dTo === undefined
           ? undefined
           : { from: query.paid30dFrom, to: query.paid30dTo },
+      requests30d:
+        query.requests30dFrom === undefined && query.requests30dTo === undefined
+          ? undefined
+          : { from: query.requests30dFrom, to: query.requests30dTo },
     };
   }
 
@@ -456,9 +555,9 @@ export class AdminCounterpartiesController {
         dealCount: row.dealCount,
         completedCount: row.completedCount,
         paidCount: row.paidCount,
-        requestCount: null,
+        requestCount: row.requestCount,
         conversion: conversionOf(row.paidCount, row.completedCount),
-        lastLoginAt: null,
+        lastLoginAt: row.lastRequestAt,
         lastDepositAt: row.lastDepositAt,
         averageCheck: averageCheckOf(row.paidAmount, row.paidCount),
         volume7d: formatFiat(windows.volume7d),

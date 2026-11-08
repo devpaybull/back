@@ -1,4 +1,5 @@
 import { toFiat } from '../../common/utils/to-fiat';
+import { CounterpartyDailyRequest } from '../entities/counterparty-daily-request.entity';
 import { CounterpartyDailyVolume } from '../entities/counterparty-daily-volume.entity';
 import { Counterparty } from '../entities/counterparty.entity';
 import { CounterpartyStatsService } from '../services/counterparty-stats.service';
@@ -210,6 +211,77 @@ describe('CounterpartyStatsService', () => {
         expect.stringContaining('counterparty_daily_volumes'),
         [1, '2026-11-01', 3, '300.50'],
       );
+    });
+  });
+
+  describe('recordRequestWithin', () => {
+    it('bumps the request count and keeps the latest request time', async () => {
+      const receivedAt = new Date('2026-11-05T10:00:00Z');
+
+      await service.recordRequestWithin(manager as never, 4, receivedAt);
+
+      const [builder] = builders;
+      expect(builder.update).toHaveBeenCalledWith(Counterparty);
+      expect(Object.keys(assignedColumns(builder))).toEqual([
+        'requestCount',
+        'lastRequestAt',
+      ]);
+      expect(builder.where).toHaveBeenCalledWith('id = :counterpartyId', {
+        counterpartyId: 4,
+      });
+      expect(builder.setParameter).toHaveBeenCalledWith(
+        'receivedAt',
+        receivedAt,
+      );
+    });
+
+    it('adds one to the day of the request in the business timezone', async () => {
+      await service.recordRequestWithin(
+        manager as never,
+        4,
+        new Date('2026-11-04T21:30:00Z'),
+      );
+
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('counterparty_daily_requests'),
+        [4, '2026-11-05', 1],
+      );
+    });
+  });
+
+  describe('replaceRequestsWithin', () => {
+    it('resets the request counters and days, then writes the rebuilt ones', async () => {
+      const last = new Date('2026-11-05T10:00:00Z');
+
+      await service.replaceRequestsWithin(
+        manager as never,
+        [{ counterpartyId: 2, requestCount: 3, lastRequestAt: last }],
+        [{ counterpartyId: 2, day: '2026-11-05', requestCount: 3 }],
+      );
+
+      expect(assignedColumns(builders[0])).toEqual({
+        requestCount: 0,
+        lastRequestAt: null,
+      });
+      expect(builders[0].where).not.toHaveBeenCalled();
+      expect(builders[1].from).toHaveBeenCalledWith(CounterpartyDailyRequest);
+      expect(assignedColumns(builders[2])).toEqual({
+        requestCount: 3,
+        lastRequestAt: last,
+      });
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('counterparty_daily_requests'),
+        [2, '2026-11-05', 3],
+      );
+    });
+
+    it('does not touch the deal counters', async () => {
+      await service.replaceRequestsWithin(manager as never, [], []);
+
+      expect(Object.keys(assignedColumns(builders[0]))).toEqual([
+        'requestCount',
+        'lastRequestAt',
+      ]);
     });
   });
 });

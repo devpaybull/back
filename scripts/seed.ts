@@ -28,6 +28,9 @@ import { MerchantApiKey } from '../src/merchants/entities/merchant-api-key.entit
 import { Counterparty } from '../src/counterparties/entities/counterparty.entity';
 import { CounterpartyStatsService } from '../src/counterparties/services/counterparty-stats.service';
 import { CounterpartyBindingType } from '../src/counterparties/types/counterparty-binding-type.enum';
+import { VictoriaLogsService } from '../src/audit/services/victoria-logs.service';
+import { MerchantApiRequest } from '../src/merchant-requests/entities/merchant-api-request.entity';
+import { MerchantRequestHistoryService } from '../src/merchant-requests/services/merchant-request-history.service';
 import { CounterpartyDealStatsService } from '../src/transactions/services/counterparty-deal-stats.service';
 import { AccountTransaction } from '../src/account-transactions/entities/account-transaction.entity';
 import { AccountTransactionStatus } from '../src/account-transactions/types/account-transaction-status.enum';
@@ -1355,6 +1358,10 @@ async function main(): Promise<void> {
     dataSource.getRepository(Transaction),
     dataSource.getRepository(TransactionStatusEvent),
     new CounterpartyStatsService(timeZoneConfig),
+    new MerchantRequestHistoryService(
+      dataSource.getRepository(MerchantApiRequest),
+      { enabled: false } as VictoriaLogsService,
+    ),
     timeZoneConfig,
   ).rebuildCounterpartyStats();
 

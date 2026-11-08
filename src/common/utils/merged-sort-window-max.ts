@@ -1,0 +1,1 @@
+export const MERGED_SORT_WINDOW_MAX = 10000;

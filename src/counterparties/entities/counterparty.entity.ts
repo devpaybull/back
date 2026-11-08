@@ -97,6 +97,12 @@ export class Counterparty {
   @Column({ type: 'timestamptz', nullable: true })
   lastDepositAt: Date | null;
 
+  @Column({ type: 'int', default: 0 })
+  requestCount: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lastRequestAt: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

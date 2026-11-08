@@ -11,13 +11,17 @@ import { VictoriaLogsService } from '../../audit/services/victoria-logs.service'
 import { VictoriaLine } from '../../audit/types/victoria-line';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { Page, toPage } from '../../common/types/page';
+import { calendarDateIn } from '../../common/utils/calendar-date-in';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { toFiat } from '../../common/utils/to-fiat';
 import { SelectionSummary } from '../../transactions/types/selection-summary';
 import { TransactionKind } from '../../transactions/types/transaction-kind.enum';
+import { CounterpartyDayRequests } from '../../counterparties/types/counterparty-day-requests';
+import { CounterpartyRequestTotals } from '../../counterparties/types/counterparty-request-totals';
 import { MerchantApiRequest } from '../entities/merchant-api-request.entity';
 import { MerchantRequestArchiveReach } from '../types/merchant-request-archive-reach';
+import { CounterpartyRequestCounts } from '../types/counterparty-request-counts';
 import { MerchantRequestCounters } from '../types/merchant-request-counters';
 import { MerchantRequestFilter } from '../types/merchant-request-filter';
 import { MerchantRequestListQuery } from '../types/merchant-request-list-query';
@@ -29,6 +33,7 @@ import { MerchantRequestSlice } from '../types/merchant-request-slice';
 import { MerchantRequestSortField } from '../types/merchant-request-sort-field.enum';
 import { MerchantRequestSummary } from '../types/merchant-request-summary';
 import { MERCHANT_REQUEST_ARCHIVE_SOURCE } from '../utils/merchant-request-archive-source';
+import { MERGED_SORT_WINDOW_MAX } from '../../common/utils/merged-sort-window-max';
 
 const SUMMARY_COLUMNS = [
   'id',
@@ -47,6 +52,7 @@ const SUMMARY_COLUMNS = [
   'merchantTransactionId',
   'transactionId',
   'processedByUserId',
+  'counterpartyId',
   'receivedAt',
 ] as const;
 const ARCHIVE_SUMMARY_FIELDS = SUMMARY_COLUMNS.map((column) =>
@@ -57,6 +63,8 @@ const ONE_LINE_PER_REQUEST =
 const RANGE_FLOOR = '0';
 const RANGE_CEILING = '~';
 const UNRANKED = Number.MAX_SAFE_INTEGER;
+const ARCHIVE_TIME_SLACK_MS = 60 * 60 * 1000;
+const EPOCH = new Date(0);
 const ARCHIVE_UNAVAILABLE = 'The request log archive is unavailable';
 
 const SORT_COLUMN: Record<
@@ -87,6 +95,12 @@ const quoted = (value: string): string => JSON.stringify(value);
 const codeUnitOrder = (a: string, b: string): number =>
   a < b ? -1 : a > b ? 1 : 0;
 
+const byteOrder = (a: string, b: string): number =>
+  Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+
+const lowerUuid = (value: string): string =>
+  isUUID(value) ? value.toLowerCase() : value;
+
 const keyOrder: Record<
   KeyedSort,
   (a: MerchantRequestSummary, b: MerchantRequestSummary) => number
@@ -97,7 +111,7 @@ const keyOrder: Record<
       b.amountFiat as NonNullable<typeof b.amountFiat>,
     ),
   [MerchantRequestSortField.PayerUserId]: (a, b) =>
-    codeUnitOrder(a.payerUserId ?? '', b.payerUserId ?? ''),
+    byteOrder(a.payerUserId ?? '', b.payerUserId ?? ''),
 };
 
 const rowOrder =
@@ -134,6 +148,7 @@ const orNull = (value: string | undefined): string | null =>
 const summaryOf = (line: VictoriaLine): MerchantRequestSummary => {
   const amount = orNull(line.amountFiat);
   const bankId = orNull(line.requestedBankId);
+  const counterparty = orNull(line.counterpartyId);
 
   return {
     id: line.requestId as string,
@@ -152,6 +167,7 @@ const summaryOf = (line: VictoriaLine): MerchantRequestSummary => {
     merchantTransactionId: orNull(line.merchantTransactionId),
     transactionId: orNull(line.transactionId),
     processedByUserId: orNull(line.processedByUserId),
+    counterpartyId: counterparty === null ? null : Number(counterparty),
     receivedAt: new Date(line.receivedAt as string),
   };
 };
@@ -190,6 +206,18 @@ export class MerchantRequestHistoryService {
   async list(
     query: MerchantRequestListQuery,
   ): Promise<Page<MerchantRequestSummary>> {
+    const window = query.page * query.limit;
+
+    if (
+      (query.sortBy === MerchantRequestSortField.Amount ||
+        query.sortBy === MerchantRequestSortField.PayerUserId) &&
+      window > MERGED_SORT_WINDOW_MAX
+    ) {
+      throw new BadRequestException(
+        `Sorted by ${query.sortBy}, a page may end at most ${MERGED_SORT_WINDOW_MAX} rows deep; narrow the filters or sort by receivedAt`,
+      );
+    }
+
     const reach = await this.archiveReach();
     const segments =
       query.sortBy === MerchantRequestSortField.Merchant
@@ -255,11 +283,137 @@ export class MerchantRequestHistoryService {
 
     if (!this.victoria.enabled) return null;
 
-    const [line] = await this.archive(
-      `source:=${quoted(MERCHANT_REQUEST_ARCHIVE_SOURCE)} requestId:=${quoted(id)} | limit 1`,
+    const [record] = await this.archive(
+      `source:=${quoted(MERCHANT_REQUEST_ARCHIVE_SOURCE)} requestId:=${quoted(id.toLowerCase())} | limit 1`,
+      recordOf,
     );
 
-    return line ? recordOf(line) : null;
+    return record ?? null;
+  }
+
+  async countForCounterparty(
+    counterpartyId: number,
+    paymentMethod?: string,
+  ): Promise<number> {
+    const reach = await this.archiveReach();
+    const slice = { counterpartyId, paymentMethod };
+    const [stored, archived] = await Promise.all([
+      this.where(slice).getCount(),
+      reach ? this.archiveCount(slice, reach) : 0,
+    ]);
+
+    return stored + archived;
+  }
+
+  async listForCounterparty(
+    counterpartyId: number,
+    order: SortOrder,
+    take: number,
+  ): Promise<[MerchantRequestSummary[], number]> {
+    const reach = await this.archiveReach();
+
+    return concat(this.timeSegments({ counterpartyId }, order, reach), 0, take);
+  }
+
+  async counterpartyRequestCounts(
+    timeZone: string,
+  ): Promise<CounterpartyRequestCounts> {
+    const reach = await this.archiveReach();
+    const [stored, archived] = await Promise.all([
+      this.requests
+        .createQueryBuilder('request')
+        .select('request.counterpartyId', 'counterpartyId')
+        .addSelect(
+          `to_char(request.receivedAt AT TIME ZONE :timeZone, 'YYYY-MM-DD')`,
+          'day',
+        )
+        .addSelect('COUNT(*)', 'total')
+        .addSelect('MAX(request.receivedAt)', 'last')
+        .where('request.counterpartyId IS NOT NULL')
+        .setParameter('timeZone', timeZone)
+        .groupBy('request.counterpartyId')
+        .addGroupBy('day')
+        .getRawMany<{
+          counterpartyId: number;
+          day: string;
+          total: string;
+          last: Date | string;
+        }>(),
+      this.archivedCounterpartyBuckets(reach),
+    ]);
+    const days = new Map<string, CounterpartyDayRequests>();
+    const totals = new Map<number, CounterpartyRequestTotals>();
+    const add = (
+      counterpartyId: number,
+      day: string,
+      count: number,
+      last: Date,
+    ): void => {
+      const dayKey = `${counterpartyId}:${day}`;
+      const bucket = days.get(dayKey);
+      const total = totals.get(counterpartyId);
+
+      days.set(dayKey, {
+        counterpartyId,
+        day,
+        requestCount: (bucket?.requestCount ?? 0) + count,
+      });
+      totals.set(counterpartyId, {
+        counterpartyId,
+        requestCount: (total?.requestCount ?? 0) + count,
+        lastRequestAt:
+          total?.lastRequestAt && total.lastRequestAt > last
+            ? total.lastRequestAt
+            : last,
+      });
+    };
+
+    for (const row of stored) {
+      add(
+        Number(row.counterpartyId),
+        row.day,
+        Number(row.total),
+        new Date(row.last),
+      );
+    }
+
+    for (const bucket of archived) {
+      add(
+        bucket.counterpartyId,
+        calendarDateIn(bucket.receivedAt, timeZone),
+        bucket.count,
+        bucket.receivedAt,
+      );
+    }
+
+    return { totals: [...totals.values()], days: [...days.values()] };
+  }
+
+  private async archivedCounterpartyBuckets(
+    reach: MerchantRequestArchiveReach | null,
+  ): Promise<{ counterpartyId: number; receivedAt: Date; count: number }[]> {
+    if (!reach) return [];
+
+    const filter = this.archiveFilter({}, reach);
+
+    if (filter === null) return [];
+
+    return this.archive(
+      `${filter} counterpartyId:* | fields requestId, counterpartyId, receivedAt | ${ONE_LINE_PER_REQUEST} | stats by (counterpartyId, receivedAt) count() total`,
+      (line) => {
+        const receivedAt = new Date(line.receivedAt as string);
+
+        if (Number.isNaN(receivedAt.getTime())) {
+          throw new Error(`Unreadable receivedAt ${line.receivedAt}`);
+        }
+
+        return {
+          counterpartyId: Number(line.counterpartyId),
+          receivedAt,
+          count: Number(line.total ?? 0),
+        };
+      },
+    );
   }
 
   private keyedSegments(
@@ -314,17 +468,30 @@ export class MerchantRequestHistoryService {
 
     if (!reach) return stored;
 
-    const archived = this.archiveSegment(slice, key, order, reach);
-
     return async (skip, take) => {
-      const fetched = take > 0 ? skip + take : 0;
-      const [[storedRows, storedTotal], [archivedRows, archivedTotal]] =
-        await Promise.all([stored(0, fetched), archived(0, fetched)]);
+      const [[, storedTotal], archivedTotal] = await Promise.all([
+        stored(0, 0),
+        this.archiveCount(slice, reach),
+      ]);
+      const total = storedTotal + archivedTotal;
+
+      if (take <= 0 || skip >= total) return [[], total];
+
+      if (archivedTotal > MERGED_SORT_WINDOW_MAX) {
+        throw new BadRequestException(
+          `More than ${MERGED_SORT_WINDOW_MAX} archived requests match; narrow the period or sort by receivedAt`,
+        );
+      }
+
+      const [[storedRows], archivedRows] = await Promise.all([
+        stored(0, skip + take),
+        this.archiveAll(slice, reach, archivedTotal),
+      ]);
       const rows = [...storedRows, ...archivedRows]
         .sort(rowOrder(key, order))
         .slice(skip, skip + take);
 
-      return [rows, storedTotal + archivedTotal];
+      return [rows, total];
     };
   }
 
@@ -408,12 +575,12 @@ export class MerchantRequestHistoryService {
 
       if (filter === null) return [[], 0];
 
-      const [counted] = await this.archive(
+      const [total] = await this.archive(
         `${filter} | stats count_uniq(requestId) total`,
+        (line) => Number(line.total ?? 0),
       );
-      const total = Number(counted?.total ?? 0);
 
-      if (take <= 0 || total === 0) return [[], total];
+      if (take <= 0 || !total || skip >= total) return [[], total ?? 0];
 
       const suffix = order === SortOrder.Asc ? '' : ' desc';
       const sortKeys = [
@@ -425,11 +592,12 @@ export class MerchantRequestHistoryService {
       ]
         .map((field) => `${field}${suffix}`)
         .join(', ');
-      const lines = await this.archive(
+      const rows = await this.archive(
         `${filter} | fields ${ARCHIVE_SUMMARY_FIELDS} | ${ONE_LINE_PER_REQUEST} | sort by (${sortKeys}) offset ${skip} limit ${take}`,
+        summaryOf,
       );
 
-      return [lines.map(summaryOf), total];
+      return [rows, total];
     };
   }
 
@@ -444,13 +612,17 @@ export class MerchantRequestHistoryService {
 
     if (filter === null) return [];
 
-    const lines = await this.archive(
+    const counts = await this.archive(
       `${filter} | stats by (${field}) count_uniq(requestId) total`,
+      (line): [string | null, number] => [
+        orNull(line[field]),
+        Number(line.total ?? 0),
+      ],
     );
 
-    return lines
-      .filter((line) => orNull(line[field]) !== null)
-      .map((line) => [line[field] as string, Number(line.total ?? 0)]);
+    return counts.filter(
+      (entry): entry is [string, number] => entry[0] !== null,
+    );
   }
 
   private where(
@@ -477,6 +649,12 @@ export class MerchantRequestHistoryService {
     if (slice.merchantId) {
       builder.andWhere('request.merchantId = :merchantId', {
         merchantId: slice.merchantId,
+      });
+    }
+
+    if (slice.counterpartyId !== undefined) {
+      builder.andWhere('request.counterpartyId = :counterpartyId', {
+        counterpartyId: slice.counterpartyId,
       });
     }
 
@@ -568,13 +746,28 @@ export class MerchantRequestHistoryService {
     const exact = (field: string, value: string | number): string =>
       `${field}:=${quoted(String(value))}`;
     const search = slice.search;
-    const merchantIds = slice.searchMerchantIds ?? [];
+    const merchantIds = (slice.searchMerchantIds ?? []).map(lowerUuid);
+    const timeRange = upper
+      ? [
+          `_time:[${new Date((lower ?? EPOCH).getTime() - ARCHIVE_TIME_SLACK_MS).toISOString()}, ${new Date(upper.getTime() + ARCHIVE_TIME_SLACK_MS).toISOString()})`,
+        ]
+      : lower
+        ? [
+            `_time:>=${new Date(lower.getTime() - ARCHIVE_TIME_SLACK_MS).toISOString()}`,
+          ]
+        : [];
 
     return [
       exact('source', MERCHANT_REQUEST_ARCHIVE_SOURCE),
+      ...timeRange,
       `receivedAt:string_range(${quoted(lower?.toISOString() ?? RANGE_FLOOR)}, ${quoted(upper?.toISOString() ?? RANGE_CEILING)})`,
       ...(slice.result ? [exact('result', slice.result)] : []),
-      ...(slice.merchantId ? [exact('merchantId', slice.merchantId)] : []),
+      ...(slice.merchantId
+        ? [exact('merchantId', lowerUuid(slice.merchantId))]
+        : []),
+      ...(slice.counterpartyId !== undefined
+        ? [exact('counterpartyId', slice.counterpartyId)]
+        : []),
       ...(slice.operations?.length
         ? [`operation:in(${slice.operations.map(quoted).join(',')})`]
         : []),
@@ -594,8 +787,8 @@ export class MerchantRequestHistoryService {
       ...(search
         ? [
             `(${[
-              exact('requestId', search),
-              exact('transactionId', search),
+              exact('requestId', lowerUuid(search)),
+              exact('transactionId', lowerUuid(search)),
               exact('merchantTransactionId', search),
               ...(merchantIds.length > 0
                 ? [`merchantId:in(${merchantIds.map(quoted).join(',')})`]
@@ -625,9 +818,43 @@ export class MerchantRequestHistoryService {
     return { below: oldest === null ? null : new Date(oldest) };
   }
 
-  private async archive(logsql: string): Promise<VictoriaLine[]> {
+  private async archiveCount(
+    slice: MerchantRequestSlice,
+    reach: MerchantRequestArchiveReach,
+  ): Promise<number> {
+    const filter = this.archiveFilter(slice, reach);
+
+    if (filter === null) return 0;
+
+    const [total] = await this.archive(
+      `${filter} | stats count_uniq(requestId) total`,
+      (line) => Number(line.total ?? 0),
+    );
+
+    return total ?? 0;
+  }
+
+  private async archiveAll(
+    slice: MerchantRequestSlice,
+    reach: MerchantRequestArchiveReach,
+    expected: number,
+  ): Promise<MerchantRequestSummary[]> {
+    const filter = this.archiveFilter(slice, reach);
+
+    if (filter === null || expected === 0) return [];
+
+    return this.archive(
+      `${filter} | fields ${ARCHIVE_SUMMARY_FIELDS} | ${ONE_LINE_PER_REQUEST} | limit ${expected}`,
+      summaryOf,
+    );
+  }
+
+  private async archive<T>(
+    logsql: string,
+    map: (line: VictoriaLine) => T,
+  ): Promise<T[]> {
     try {
-      return await this.victoria.selectScoped(logsql);
+      return (await this.victoria.selectScoped(logsql)).map(map);
     } catch (error) {
       this.logger.error(
         `Request log archive read failed: ${(error as Error).message}`,

@@ -136,13 +136,13 @@ describe('MerchantRatesService', () => {
 describe('MerchantRatesService.exchangeRates', () => {
   const build = (fiatPerUsdt: Promise<string>) => {
     const rates = {
-      merchantSourceRate: jest.fn(async (markup: number) =>
-        roundRate(
-          toDecimal(await fiatPerUsdt)
-            .times(1.01)
-            .times(toDecimal(markup).div(100).plus(1)),
-        ),
-      ),
+      merchantSourceRates: jest.fn(async (markups: number[]) => {
+        const source = toDecimal(await fiatPerUsdt).times(1.01);
+
+        return markups.map((markup) =>
+          roundRate(source.times(toDecimal(markup).div(100).plus(1))),
+        );
+      }),
     };
     const currencies = {
       currenciesByMerchant: jest.fn(
@@ -190,7 +190,7 @@ describe('MerchantRatesService.exchangeRates', () => {
       { currency: 'RUB', type: 'pay_in', rate: '92.718000' },
       { currency: 'RUB', type: 'pay_out', rate: '89.536500' },
     ]);
-    expect(rates.merchantSourceRate.mock.calls).toEqual([[2], [-1.5]]);
+    expect(rates.merchantSourceRates.mock.calls).toEqual([[[2, -1.5]]]);
   });
 
   it('leaves out a currency the rate source does not price', async () => {

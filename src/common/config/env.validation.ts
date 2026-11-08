@@ -499,6 +499,11 @@ export class EnvironmentVariables {
 
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  PAYMENT_PAGE_FINAL_TTL_HOURS: number = 24;
+
+  @Type(() => Number)
+  @IsInt()
   @Min(1)
   DEBT_AUTO_WRITE_OFF_INTERVAL_SECONDS: number = 60;
 

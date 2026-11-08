@@ -205,6 +205,18 @@ describe('applyCounterpartyFilter', () => {
       expect(wheres()[1][1]).toEqual({ paid30dTo: 9 });
     });
 
+    it('filters the thirty day request count from the request buckets', () => {
+      run({ requests30d: { from: 1, to: 4 } });
+
+      expect(wheres()).toHaveLength(2);
+      expect(wheres()[0][0]).toContain('counterparty_daily_requests');
+      expect(wheres()[0][0]).toContain('requests.day >= :since30');
+      expect(wheres()[0][0]).toContain('>= :requests30dFrom');
+      expect(wheres()[0][1]).toEqual({ requests30dFrom: 1 });
+      expect(wheres()[1][0]).toContain('<= :requests30dTo');
+      expect(wheres()[1][1]).toEqual({ requests30dTo: 4 });
+    });
+
     it('accepts a zero lower bound of the paid count', () => {
       run({ paid30d: { from: 0 } });
 

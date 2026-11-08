@@ -2,7 +2,10 @@ import { ConflictException } from '@nestjs/common';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { toCrypto } from '../../common/utils/to-crypto';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
+import { In } from 'typeorm';
+import { TransactionDispute } from '../entities/transaction-dispute.entity';
 import { Transaction } from '../entities/transaction.entity';
+import { DisputeStatus } from '../types/dispute-status.enum';
 import { Wallet } from '../entities/wallet.entity';
 import { WalletService } from '../services/wallet.service';
 import { BalanceKind } from '../types/balance-kind.enum';
@@ -31,6 +34,7 @@ const build = (
   env: Record<string, unknown> = {},
   insuranceMinimum = '500',
   latestAssignedDealAt: Date | null = null,
+  liveDispute = false,
 ) => {
   const updated = {
     set: jest.fn().mockReturnThis(),
@@ -52,6 +56,7 @@ const build = (
     save: jest.fn(async (value: unknown) => value),
     create: jest.fn((_entity: unknown, value: object) => ({ ...value })),
     update: jest.fn(async () => undefined),
+    exists: jest.fn(async () => liveDispute),
     createQueryBuilder: jest.fn((entity?: unknown) =>
       entity
         ? latestDeal
@@ -239,6 +244,51 @@ describe('WalletService.moveBetweenOwnBalancesWithin', () => {
       await service.moveBetweenOwnBalancesWithin(manager as never, back);
 
       expect(latestDeal.getRawOne).not.toHaveBeenCalled();
+    });
+
+    it('refuses the trader’s own move out of either insurance while a dispute of theirs is open or reviewing, under the wallet lock', async () => {
+      for (const from of [
+        BalanceKind.InsurancePayIn,
+        BalanceKind.InsurancePayOut,
+      ]) {
+        const wallet = walletOf();
+        const { service, manager } = build(wallet, {}, '500', null, true);
+
+        const error = await service
+          .moveBetweenOwnBalancesWithin(manager as never, { ...back, from })
+          .catch((e: unknown) => e);
+
+        expect((error as ConflictException).getResponse()).toMatchObject({
+          statusCode: 409,
+          code: 'INSURANCE_LOCKED_BY_DISPUTE',
+        });
+        expect(manager.exists).toHaveBeenCalledWith(TransactionDispute, {
+          where: {
+            status: In([DisputeStatus.Open, DisputeStatus.Reviewing]),
+            transaction: { traderUserId: USER },
+          },
+        });
+        expect(manager.findOne.mock.invocationCallOrder[0]).toBeLessThan(
+          manager.exists.mock.invocationCallOrder[0],
+        );
+        expect(manager.save).not.toHaveBeenCalled();
+      }
+    });
+
+    it('lets an admin move the insurance whatever the disputes, and lets money into the insurance', async () => {
+      const wallet = walletOf();
+      const { service, manager } = build(wallet, {}, '500', null, true);
+
+      await service.moveBetweenOwnBalancesWithin(manager as never, {
+        ...back,
+        insuranceDelayCheckedAt: undefined,
+      });
+      await service.moveBetweenOwnBalancesWithin(manager as never, {
+        ...move,
+        insuranceDelayCheckedAt: NOW,
+      });
+
+      expect(manager.exists).not.toHaveBeenCalled();
     });
 
     it('is not applied without a check moment: an admin moves any time', async () => {
