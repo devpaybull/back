@@ -23,6 +23,7 @@ import { MerchantMethod } from '../../merchants/entities/merchant-method.entity'
 import { MerchantSettings } from '../../merchants/entities/merchant-settings.entity';
 import { Merchant } from '../../merchants/entities/merchant.entity';
 import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
+import { NotificationSetting } from '../../trader-settings/entities/notification-setting.entity';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { EmailVerification } from '../../users/entities/email-verification.entity';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
@@ -113,6 +114,8 @@ describe('the transactions module graph', () => {
       .overrideProvider(getRepositoryToken(TraderLead))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(TraderSettings))
+      .useValue(repository)
+      .overrideProvider(getRepositoryToken(NotificationSetting))
       .useValue(repository)
       .overrideProvider(getRepositoryToken(AuditLog))
       .useValue(repository)

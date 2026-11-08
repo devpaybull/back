@@ -1466,6 +1466,79 @@ describe('BankDetailsService', () => {
       });
     });
 
+    describe('moveOwnCounterparty (TC08)', () => {
+      beforeEach(() => {
+        Object.assign(manager, {
+          find: jest.fn(async (_entity, options) =>
+            stored
+              .filter((row) => row.userId === options.where.userId)
+              .map((row) => ({ id: row.id })),
+          ),
+        });
+      });
+
+      afterEach(() => {
+        delete (manager as Record<string, unknown>).find;
+      });
+
+      it('locks the target, then replaces within the owner’s own requisites, naming the impersonator', async () => {
+        stored = [
+          card({ counterpartyOnly: true }),
+          card({ id: uuidOf(101), counterpartyOnly: true }),
+          card({ id: uuidOf(102), userId: stranger }),
+        ];
+
+        await service.moveOwnCounterparty(owner, 5, uuidOf(100), uuidOf(9));
+
+        expect(lockedFind).toHaveBeenCalledWith(BankDetails, {
+          where: { id: uuidOf(100) },
+          lock: { mode: 'pessimistic_write' },
+        });
+        expect(counterparties.replaceWithin).toHaveBeenCalledWith(
+          manager,
+          5,
+          expect.objectContaining({ id: uuidOf(100), userId: owner }),
+          owner,
+          {
+            boundToAnyOf: [uuidOf(100), uuidOf(101)],
+            impersonatorUserId: uuidOf(9),
+          },
+        );
+      });
+
+      it('answers 404 for another trader’s or a missing requisite and moves nothing', async () => {
+        stored = [card({ userId: stranger, counterpartyOnly: true })];
+
+        for (const target of [uuidOf(100), uuidOf(404)]) {
+          await expect(
+            service.moveOwnCounterparty(owner, 5, target, null),
+          ).rejects.toThrow(NotFoundException);
+        }
+        expect(counterparties.replaceWithin).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('the owner’s counterparty-only requisites', () => {
+      it('lists only the caller’s, optionally one of them', async () => {
+        await service.listOwnCounterpartyOnly(owner, {
+          page: 1,
+          limit: 20,
+          sortOrder: SortOrder.Desc,
+          bankDetailsId: uuidOf(100),
+        });
+
+        expect(bankDetails.findAndCount).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              userId: owner,
+              counterpartyOnly: true,
+              id: uuidOf(100),
+            },
+          }),
+        );
+      });
+    });
+
     describe('listCounterpartyOnly', () => {
       const query = { page: 2, limit: 10, sortOrder: SortOrder.Asc };
 

@@ -623,6 +623,121 @@ describe('CounterpartiesService mutations and reads', () => {
     });
   });
 
+  describe('a trader’s scope (TC08)', () => {
+    const own = [uuidOf(31), uuidOf(30)];
+
+    it('moves a client bound to one of the scope’s requisites, naming the impersonator', async () => {
+      stored = row({
+        bankDetailsId: uuidOf(31),
+        bindingType: CounterpartyBindingType.Cards,
+      });
+
+      await service.replaceWithin(manager as never, 5, requisite(), traderId, {
+        boundToAnyOf: own,
+        impersonatorUserId: uuidOf(99),
+      });
+
+      expect(stored).toMatchObject({ bankDetailsId: uuidOf(30) });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: traderId,
+          impersonatorUserId: uuidOf(99),
+          action: 'counterparty.requisite_replaced',
+        }),
+        manager,
+      );
+    });
+
+    it('answers 404 for a client bound elsewhere or not bound at all, under the lock, writing nothing', async () => {
+      for (const bankDetailsId of [uuidOf(77), null]) {
+        stored = row({
+          bankDetailsId,
+          bindingType: CounterpartyBindingType.Cards,
+        });
+
+        await expect(
+          service.replaceWithin(manager as never, 5, requisite(), traderId, {
+            boundToAnyOf: own,
+          }),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          service.unbind(5, traderId, { boundToAnyOf: own }),
+        ).rejects.toMatchObject({ status: 404 });
+      }
+
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Counterparty,
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('unbinds a client of the scope and audits the trader', async () => {
+      stored = row({ bankDetailsId: uuidOf(31) });
+
+      await service.unbind(5, traderId, {
+        boundToAnyOf: own,
+        impersonatorUserId: null,
+      });
+
+      expect(stored).toMatchObject({ bankDetailsId: null });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: traderId,
+          impersonatorUserId: null,
+          action: 'counterparty.requisite_unbound',
+        }),
+        manager,
+      );
+    });
+  });
+
+  describe('boundTo', () => {
+    it('answers nothing without asking for no requisites', async () => {
+      const find = jest.fn();
+      (repository as unknown as { find: jest.Mock }).find = find;
+
+      expect(await service.boundTo([])).toEqual([]);
+      expect(find).not.toHaveBeenCalled();
+    });
+
+    it('lists the clients bound to the requisites, unavailable when disabled or blacklisted', async () => {
+      const find = jest.fn(async () => [
+        {
+          id: 1,
+          bankDetailsId: uuidOf(30),
+          enabled: true,
+          blacklistedAt: null,
+        },
+        {
+          id: 2,
+          bankDetailsId: uuidOf(30),
+          enabled: false,
+          blacklistedAt: null,
+        },
+        {
+          id: 3,
+          bankDetailsId: uuidOf(31),
+          enabled: false,
+          blacklistedAt: new Date(),
+        },
+      ]);
+      (repository as unknown as { find: jest.Mock }).find = find;
+
+      expect(await service.boundTo([uuidOf(30), uuidOf(31)])).toEqual([
+        { id: 1, bankDetailsId: uuidOf(30), available: true },
+        { id: 2, bankDetailsId: uuidOf(30), available: false },
+        { id: 3, bankDetailsId: uuidOf(31), available: false },
+      ]);
+      expect(find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { bankDetailsId: In([uuidOf(30), uuidOf(31)]) },
+        }),
+      );
+    });
+  });
+
   describe('unbindRequisiteWithin', () => {
     it('clears every counterparty bound to the requisite as the system', async () => {
       const first = row({ id: 1, bankDetailsId: uuidOf(30) });

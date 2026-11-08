@@ -13,6 +13,7 @@ import { BankDetails } from '../../bank-details/entities/bank-details.entity';
 import { User } from '../../users/entities/user.entity';
 import { SelectionFilter } from '../types/selection-filter.enum';
 import { SelectionOutcome } from '../types/selection-outcome.enum';
+import { TransactionMethod } from '../types/transaction-method';
 import { Transaction } from './transaction.entity';
 
 @Entity('selection_attempts')
@@ -51,6 +52,9 @@ export class SelectionAttempt {
   @Index()
   @Column({ type: 'uuid' })
   bankDetailsId: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  method: TransactionMethod | null;
 
   @Column({ type: 'enum', enum: SelectionOutcome })
   outcome: SelectionOutcome;

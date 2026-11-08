@@ -8,6 +8,7 @@ export interface VictoriaAuditQuery {
   take: number;
   targetUserId?: string;
   actorUserId?: string;
+  actorUserIdOrSystem?: string;
   impersonatorUserId?: string;
   action?: string;
   actions?: readonly string[];

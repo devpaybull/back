@@ -9,6 +9,7 @@ export interface AuditListQuery {
   sortOrder: SortOrder;
   targetUserId?: string;
   actorUserId?: string;
+  actorUserIdOrSystem?: string;
   impersonatorUserId?: string;
   action?: string;
   actions?: readonly string[];

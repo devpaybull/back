@@ -512,6 +512,7 @@ export class RequisiteSelectionService {
             transactionId: row.transactionId,
             traderUserId: row.candidate.traderUserId,
             bankDetailsId: row.candidate.bankDetailsId,
+            method: request.method,
             outcome: row.outcome,
             reason: row.reason,
           }),

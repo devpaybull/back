@@ -1,5 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { In } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { AuditService } from '../services/audit.service';
@@ -210,6 +210,23 @@ describe('AuditService', () => {
       );
     });
 
+    it('reads the rows an account or the system wrote, never another actor’s', async () => {
+      await service.list({
+        ...query,
+        targetUserId: uuidOf(1),
+        actorUserIdOrSystem: uuidOf(1),
+      });
+
+      expect(repo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            { targetUserId: uuidOf(1), actorUserId: uuidOf(1) },
+            { targetUserId: uuidOf(1), actorUserId: IsNull() },
+          ],
+        }),
+      );
+    });
+
     it('lets an exact action win over a list of actions', async () => {
       await service.list({ ...query, action: 'a.one', actions: ['a.two'] });
 
@@ -239,6 +256,14 @@ describe('AuditService', () => {
 
         expect(victoria.find).toHaveBeenCalledWith(
           expect.objectContaining({ belowId: 101, statusCode: 403 }),
+        );
+      });
+
+      it('hands the actor-or-system filter to the archive too', async () => {
+        await service.list({ ...query, actorUserIdOrSystem: uuidOf(5) });
+
+        expect(victoria.find).toHaveBeenCalledWith(
+          expect.objectContaining({ actorUserIdOrSystem: uuidOf(5) }),
         );
       });
 

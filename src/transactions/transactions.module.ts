@@ -27,6 +27,7 @@ import { MerchantDealsService } from './services/merchant-deals.service';
 import { MerchantRatesService } from './services/merchant-rates.service';
 import { PaymentPageService } from './services/payment-page.service';
 import { MerchantStatsService } from './services/merchant-stats.service';
+import { TraderStatsService } from './services/trader-stats.service';
 import { MerchantVolumeService } from './services/merchant-volume.service';
 import { NightStopService } from './services/night-stop.service';
 import { TransactionFile } from './entities/transaction-file.entity';
@@ -90,6 +91,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     MerchantBalanceService,
     MerchantVolumeService,
     MerchantStatsService,
+    TraderStatsService,
     MerchantDealsService,
     MerchantRatesService,
     PaymentPageService,
@@ -134,6 +136,7 @@ import { RequisiteRanking } from './types/requisite-ranking';
     MerchantBalanceService,
     MerchantVolumeService,
     MerchantStatsService,
+    TraderStatsService,
     MerchantDealsService,
     TransactionService,
     NightStopService,

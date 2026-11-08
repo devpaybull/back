@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { SortOrder } from '../../common/enums/sort-order.enum';
 import { Page, toPage } from '../../common/types/page';
 import { addCalendarDays } from '../../common/utils/add-calendar-days';
 import { calendarDateIn } from '../../common/utils/calendar-date-in';
@@ -17,6 +18,11 @@ import { CounterpartyDealEventListQuery } from '../types/counterparty-deal-event
 import { CounterpartyDealStats } from '../types/counterparty-deal-stats';
 import { CounterpartyRebuildResult } from '../types/counterparty-rebuild-result';
 import { CounterpartyRequestCountersRebuild } from '../types/counterparty-request-counters-rebuild.enum';
+import { TraderCounterpartyDeposits } from '../types/trader-counterparty-deposits';
+import { TraderCounterpartyListQuery } from '../types/trader-counterparty-list-query';
+import { TraderCounterpartyRef } from '../types/trader-counterparty-ref';
+import { TraderCounterpartySortField } from '../types/trader-counterparty-sort-field.enum';
+import { TraderCounterpartyStats } from '../types/trader-counterparty-stats';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { COUNTERPARTY_STATS_METHOD_CODES } from '../utils/counterparty-stats-method-codes';
@@ -24,6 +30,18 @@ import { COUNTERPARTY_STATS_METHOD_CODES } from '../utils/counterparty-stats-met
 const PAID = `deal.status IN ('${TransactionStatus.Success}', '${TransactionStatus.SuccessChanged}')`;
 const COMPLETED = `deal.status IN ('${TransactionStatus.Success}', '${TransactionStatus.SuccessChanged}', '${TransactionStatus.Canceled}')`;
 const DISPUTED = `EXISTS (SELECT 1 FROM transaction_status_events disputed WHERE disputed."transactionId" = deal.id AND disputed."toStatus" = '${TransactionStatus.Dispute}')`;
+
+const TRADER_DEALS = `deal."traderUserId" = $1 AND deal.kind = '${TransactionKind.PayIn}' AND deal.method = ANY($2::varchar[])`;
+
+const TRADER_SORT: Record<TraderCounterpartySortField, string> = {
+  [TraderCounterpartySortField.Id]: 'listed.id',
+  [TraderCounterpartySortField.Conversion]:
+    'CASE WHEN listed."completedCount" = 0 THEN NULL ELSE listed."paidCount"::numeric / listed."completedCount" END',
+  [TraderCounterpartySortField.AverageCheck]:
+    'CASE WHEN listed."paidCount" = 0 THEN NULL ELSE listed."paidAmount" / listed."paidCount" END',
+  [TraderCounterpartySortField.Volume]: 'listed."paidAmount"',
+  [TraderCounterpartySortField.LastDealAt]: 'listed."lastDealAt"',
+};
 
 interface TotalsRow {
   dealCount: string;
@@ -189,6 +207,134 @@ export class CounterpartyDealStatsService {
 
       return null;
     }
+  }
+
+  async traderCounterpartyPage(
+    traderUserId: string,
+    bound: readonly TraderCounterpartyRef[],
+    query: TraderCounterpartyListQuery,
+    now: Date,
+  ): Promise<Page<TraderCounterpartyStats>> {
+    if (bound.length === 0) return toPage([[], 0], query);
+
+    const direction = query.sortOrder === SortOrder.Asc ? 'ASC' : 'DESC';
+    const rows = `
+      WITH bound AS (
+        SELECT * FROM unnest($3::int[], $4::uuid[], $5::boolean[]) AS b(id, "bankDetailsId", available)
+      ), stats AS (
+        SELECT deal."counterpartyId" AS id,
+          COUNT(*) FILTER (WHERE ${COMPLETED}) AS "completedCount",
+          COUNT(*) FILTER (WHERE ${PAID}) AS "paidCount",
+          COALESCE(SUM(deal."amountFiat") FILTER (WHERE ${PAID}), 0) AS "paidAmount",
+          MAX(deal."resolvedAt") FILTER (WHERE ${PAID}) AS "lastPaidAt",
+          MAX(deal."createdAt") AS "lastDealAt"
+        FROM transactions deal
+        WHERE ${TRADER_DEALS} AND deal."counterpartyId" = ANY($3::int[])
+        GROUP BY deal."counterpartyId"
+      ), listed AS (
+        SELECT bound.id, bound."bankDetailsId",
+          COALESCE(bound.available AND stats."lastPaidAt" >= $6, false) AS active,
+          COALESCE(stats."completedCount", 0) AS "completedCount",
+          COALESCE(stats."paidCount", 0) AS "paidCount",
+          COALESCE(stats."paidAmount", 0) AS "paidAmount",
+          stats."lastDealAt"
+        FROM bound LEFT JOIN stats ON stats.id = bound.id
+      )`;
+    const shown = 'FROM listed WHERE ($7::boolean = false OR listed.active)';
+    const parameters = [
+      traderUserId,
+      COUNTERPARTY_STATS_METHOD_CODES,
+      bound.map((ref) => ref.id),
+      bound.map((ref) => ref.bankDetailsId),
+      bound.map((ref) => ref.available),
+      this.windowStart(now, 30),
+      query.hideInactive,
+    ];
+    const [page, counted] = await Promise.all([
+      this.dataSource.query(
+        `${rows} SELECT listed.* ${shown} ORDER BY ${TRADER_SORT[query.sortBy]} ${direction} NULLS LAST, listed.id ${direction} LIMIT $8 OFFSET $9`,
+        [...parameters, query.limit, (query.page - 1) * query.limit],
+      ) as Promise<
+        {
+          id: number;
+          bankDetailsId: string;
+          active: boolean;
+          completedCount: string;
+          paidCount: string;
+          paidAmount: string;
+          lastDealAt: Date | null;
+        }[]
+      >,
+      this.dataSource.query(
+        `${rows} SELECT COUNT(*) AS total ${shown}`,
+        parameters,
+      ) as Promise<{ total: string }[]>,
+    ]);
+
+    return toPage(
+      [
+        page.map((row) => ({
+          id: Number(row.id),
+          bankDetailsId: row.bankDetailsId,
+          active: row.active,
+          completedCount: Number(row.completedCount),
+          paidCount: Number(row.paidCount),
+          paidAmount: toFiat(row.paidAmount),
+          lastDealAt: row.lastDealAt ? new Date(row.lastDealAt) : null,
+        })),
+        Number(counted[0]?.total ?? 0),
+      ],
+      query,
+    );
+  }
+
+  async traderCounterpartyDeposits(
+    traderUserId: string,
+    bound: readonly TraderCounterpartyRef[],
+    now: Date,
+  ): Promise<TraderCounterpartyDeposits[]> {
+    if (bound.length === 0) return [];
+
+    const rows = (await this.dataSource.query(
+      `SELECT bound."bankDetailsId",
+          COUNT(*) FILTER (WHERE ${COMPLETED}) AS "completedCount",
+          COUNT(*) FILTER (WHERE ${PAID}) AS "paidCount",
+          COALESCE(SUM(deal."amountFiat") FILTER (WHERE ${PAID}), 0) AS "paidAmount",
+          COALESCE(SUM(deal."amountFiat") FILTER (WHERE ${PAID} AND deal."resolvedAt" >= $5), 0) AS "deposits30d"
+        FROM unnest($3::int[], $4::uuid[]) AS bound(id, "bankDetailsId")
+        JOIN transactions deal ON deal."counterpartyId" = bound.id AND ${TRADER_DEALS}
+        GROUP BY bound."bankDetailsId"`,
+      [
+        traderUserId,
+        COUNTERPARTY_STATS_METHOD_CODES,
+        bound.map((ref) => ref.id),
+        bound.map((ref) => ref.bankDetailsId),
+        this.windowStart(now, 30),
+      ],
+    )) as {
+      bankDetailsId: string;
+      completedCount: string;
+      paidCount: string;
+      paidAmount: string;
+      deposits30d: string;
+    }[];
+
+    return rows.map((row) => ({
+      bankDetailsId: row.bankDetailsId,
+      completedCount: Number(row.completedCount),
+      paidCount: Number(row.paidCount),
+      paidAmount: toFiat(row.paidAmount),
+      deposits30d: toFiat(row.deposits30d),
+    }));
+  }
+
+  private windowStart(now: Date, days: number): Date {
+    const timeZone = this.timeZone();
+
+    return zonedMidnight(
+      addCalendarDays(calendarDateIn(now, timeZone), 1 - days),
+      timeZone,
+    );
   }
 
   private countedDeals(

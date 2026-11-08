@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
@@ -7,7 +7,17 @@ import { ActivityAction } from '../audit/types/activity-action.enum';
 import { Crypto } from '../common/types/crypto';
 import { formatCrypto } from '../common/utils/format-crypto';
 import { toCrypto } from '../common/utils/to-crypto';
+import { NotificationSetting } from './entities/notification-setting.entity';
 import { TraderSettings } from './entities/trader-settings.entity';
+import { NotificationLimitType } from './types/notification-limit-type.enum';
+import { NotificationParams } from './types/notification-params';
+import { NotificationSettingChange } from './types/notification-setting-change';
+import { NotificationSettingState } from './types/notification-setting-state';
+import {
+  ALWAYS_ON_NOTIFICATIONS,
+  NOTIFICATION_TYPES,
+  NotificationType,
+} from './types/notification-type.enum';
 import {
   TraderSettingsAudit,
   TraderSettingsChanges,
@@ -32,6 +42,8 @@ const UNSAVED_DEFAULTS = {
   nightStopEnabled: true,
   nightStopThreshold: null,
 } as const;
+
+const ALL_METHODS = 'all';
 
 const isUniqueViolation = (error: unknown): boolean =>
   (error as { code?: unknown } | null)?.code === UNIQUE_VIOLATION;
@@ -248,6 +260,148 @@ export class TraderSettingsService {
       );
 
       return settings;
+    });
+  }
+
+  async notificationSettings(
+    userId: string,
+  ): Promise<NotificationSettingState[]> {
+    return this.notificationStatesOf(
+      await this.dataSource.manager.find(NotificationSetting, {
+        where: { userId },
+      }),
+    );
+  }
+
+  async updateNotificationSettings(
+    userId: string,
+    changes: readonly NotificationSettingChange[],
+    impersonatorUserId: string | null,
+  ): Promise<NotificationSettingState[]> {
+    if (new Set(changes.map((change) => change.type)).size !== changes.length) {
+      throw new BadRequestException('A notification type is named twice');
+    }
+    changes.forEach((change) => this.assertParamsFit(change));
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.ensureWithin(manager, userId);
+
+      const stored = new Map(
+        (await manager.find(NotificationSetting, { where: { userId } })).map(
+          (row) => [row.type, row.params],
+        ),
+      );
+      const rows = changes.map((change) => {
+        const params = this.notificationParamsOf(
+          change,
+          stored.get(change.type) ?? null,
+        );
+        const enabled =
+          ALWAYS_ON_NOTIFICATIONS.includes(change.type) || change.enabled;
+
+        if (
+          change.type === NotificationType.BalanceBelowThreshold &&
+          enabled &&
+          !params?.threshold
+        ) {
+          throw new BadRequestException(
+            'balance_below_threshold needs a threshold to be switched on',
+          );
+        }
+
+        return { userId, type: change.type, enabled, params };
+      });
+
+      await manager.upsert(NotificationSetting, rows, ['userId', 'type']);
+      await this.audit.record(
+        {
+          actorUserId: userId,
+          impersonatorUserId,
+          targetUserId: userId,
+          action: 'notification_settings.updated',
+          metadata: {
+            settings: rows.map((row) => ({
+              type: row.type,
+              enabled: row.enabled,
+              ...row.params,
+            })),
+          },
+        },
+        manager,
+      );
+
+      return this.notificationStatesOf(
+        await manager.find(NotificationSetting, { where: { userId } }),
+      );
+    });
+  }
+
+  private assertParamsFit(change: NotificationSettingChange): void {
+    if (
+      change.threshold !== undefined &&
+      change.type !== NotificationType.BalanceBelowThreshold
+    ) {
+      throw new BadRequestException(
+        `threshold belongs to ${NotificationType.BalanceBelowThreshold} only`,
+      );
+    }
+    if (
+      (change.method !== undefined || change.limitType !== undefined) &&
+      change.type !== NotificationType.RequisiteLimitReached
+    ) {
+      throw new BadRequestException(
+        `method and limitType belong to ${NotificationType.RequisiteLimitReached} only`,
+      );
+    }
+  }
+
+  private notificationParamsOf(
+    change: NotificationSettingChange,
+    previous: NotificationParams | null,
+  ): NotificationParams | null {
+    if (change.type === NotificationType.BalanceBelowThreshold) {
+      return {
+        threshold:
+          change.threshold !== undefined
+            ? formatCrypto(change.threshold)
+            : (previous?.threshold ?? null),
+      };
+    }
+    if (change.type === NotificationType.RequisiteLimitReached) {
+      return {
+        method: change.method ?? previous?.method ?? ALL_METHODS,
+        limitType:
+          change.limitType ?? previous?.limitType ?? NotificationLimitType.All,
+      };
+    }
+
+    return null;
+  }
+
+  private notificationStatesOf(
+    rows: readonly NotificationSetting[],
+  ): NotificationSettingState[] {
+    const byType = new Map(rows.map((row) => [row.type, row]));
+
+    return NOTIFICATION_TYPES.map((type) => {
+      const row = byType.get(type);
+      const alwaysOn = ALWAYS_ON_NOTIFICATIONS.includes(type);
+      const limit = type === NotificationType.RequisiteLimitReached;
+      const threshold =
+        type === NotificationType.BalanceBelowThreshold
+          ? (row?.params?.threshold ?? null)
+          : null;
+
+      return {
+        type,
+        enabled: alwaysOn || (row?.enabled ?? false),
+        alwaysOn,
+        threshold: threshold === null ? null : toCrypto(threshold),
+        method: limit ? (row?.params?.method ?? ALL_METHODS) : null,
+        limitType: limit
+          ? (row?.params?.limitType ?? NotificationLimitType.All)
+          : null,
+      };
     });
   }
 

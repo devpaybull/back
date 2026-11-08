@@ -6,6 +6,8 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, IsNull, Not, Repository } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { MerchantActivityAction } from '../../audit/types/merchant-activity-action.enum';
+import { TraderActivityAction } from '../../audit/types/trader-activity-action.enum';
+import { Role } from '../../common/enums/role.enum';
 import { MERCHANT_SIDE_ROLES } from '../../common/utils/merchant-side-roles';
 import { TokenType } from '../../common/types/token';
 import { sha256Hex } from '../../common/utils/sha256-hex';
@@ -61,6 +63,7 @@ export class SessionService {
     const session = await this.issueSession(user, context);
 
     await this.recordMerchantActivity(user, MerchantActivityAction.Login);
+    await this.recordTraderActivity(user, TraderActivityAction.Login);
 
     return session;
   }
@@ -70,6 +73,19 @@ export class SessionService {
     action: MerchantActivityAction,
   ): Promise<void> {
     if (!MERCHANT_SIDE_ROLES.includes(user.role)) return;
+
+    await this.audit.record({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      action,
+    });
+  }
+
+  private async recordTraderActivity(
+    user: Pick<User, 'id' | 'role'>,
+    action: TraderActivityAction,
+  ): Promise<void> {
+    if (user.role !== Role.Trader) return;
 
     await this.audit.record({
       actorUserId: user.id,
@@ -137,6 +153,7 @@ export class SessionService {
 
     if (user) {
       await this.recordMerchantActivity(user, MerchantActivityAction.Logout);
+      await this.recordTraderActivity(user, TraderActivityAction.Logout);
     }
   }
 

@@ -26,14 +26,13 @@ import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { WriteAccessGuard } from '../../common/guards/write-access.guard';
-import { Fiat } from '../../common/types/fiat';
 import { Page, toPage } from '../../common/types/page';
 import { AuthenticatedUser } from '../../common/types/token';
 import { formatFiat } from '../../common/utils/format-fiat';
 import { MERGED_SORT_WINDOW_MAX } from '../../common/utils/merged-sort-window-max';
 import { INT4_MAX } from '../../common/utils/int4-max';
-import { roundFiat } from '../../common/utils/round-fiat';
-import { toDecimal } from '../../common/utils/to-decimal';
+import { averageCheckOf } from '../../common/utils/average-check-of';
+import { percentOf } from '../../common/utils/percent-of';
 import { toFiat } from '../../common/utils/to-fiat';
 import { Counterparty } from '../../counterparties/entities/counterparty.entity';
 import { CounterpartiesService } from '../../counterparties/services/counterparties.service';
@@ -62,8 +61,6 @@ import { ReplaceCounterpartyRequisiteDto } from '../dto/replace-counterparty-req
 import { UpdateCounterpartyDto } from '../dto/update-counterparty.dto';
 import { CounterpartyDealEventKind } from '../types/counterparty-deal-event-kind.enum';
 
-const PERCENT = 100;
-
 const assertIdInRange = (id: number): void => {
   if (id < 1 || id > INT4_MAX) {
     throw new BadRequestException('Counterparty id is out of range');
@@ -83,14 +80,6 @@ const distinct = <T>(values: (T | null | undefined)[]): T[] => [
     values.filter((value): value is T => value !== null && value !== undefined),
   ),
 ];
-
-const conversionOf = (paid: number, completed: number): number | null =>
-  completed === 0
-    ? null
-    : Math.round((paid / completed) * PERCENT * PERCENT) / PERCENT;
-
-const averageCheckOf = (paidAmount: Fiat, paid: number): string | null =>
-  paid === 0 ? null : formatFiat(roundFiat(toDecimal(paidAmount).div(paid)));
 
 @ApiTags('Admin · Counterparties')
 @ApiBearerAuth()
@@ -170,7 +159,7 @@ export class AdminCounterpartiesController {
     return {
       method: query.method ?? null,
       currency: COUNTERPARTY_STATS_CURRENCY,
-      conversion: conversionOf(stats.paidCount, stats.completedCount),
+      conversion: percentOf(stats.paidCount, stats.completedCount),
       completedCount: stats.completedCount,
       paidCount: stats.paidCount,
       disputes: stats.disputeCount,
@@ -556,7 +545,7 @@ export class AdminCounterpartiesController {
         completedCount: row.completedCount,
         paidCount: row.paidCount,
         requestCount: row.requestCount,
-        conversion: conversionOf(row.paidCount, row.completedCount),
+        conversion: percentOf(row.paidCount, row.completedCount),
         lastLoginAt: row.lastRequestAt,
         lastDepositAt: row.lastDepositAt,
         averageCheck: averageCheckOf(row.paidAmount, row.paidCount),

@@ -26,6 +26,7 @@ import { User } from '../../users/entities/user.entity';
 import { UserBackupCode } from '../../users/entities/user-backup-code.entity';
 import { EmailVerification } from '../../users/entities/email-verification.entity';
 import { TraderLead } from '../../users/entities/trader-lead.entity';
+import { NotificationSetting } from '../../trader-settings/entities/notification-setting.entity';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { Merchant } from '../../merchants/entities/merchant.entity';
 import { MerchantApiKey } from '../../merchants/entities/merchant-api-key.entity';
@@ -108,6 +109,7 @@ describe('the devices ↔ bank-details module graph', () => {
     EmailVerification,
     TraderLead,
     TraderSettings,
+    NotificationSetting,
     Merchant,
     MerchantApiKey,
     MerchantGroup,

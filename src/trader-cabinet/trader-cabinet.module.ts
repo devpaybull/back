@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
 import { dealFileUploadOptions } from '../file-storage/utils/deal-file-upload-options';
 import { AccountTransactionsModule } from '../account-transactions/account-transactions.module';
+import { AuditModule } from '../audit/audit.module';
 import { BankDetailsModule } from '../bank-details/bank-details.module';
 import { BanksModule } from '../banks/banks.module';
 import { CounterpartiesModule } from '../counterparties/counterparties.module';
@@ -18,10 +19,15 @@ import { TraderDealsController } from './controllers/trader-deals.controller';
 import { TraderFilesController } from './controllers/trader-files.controller';
 import { TraderMessagesController } from './controllers/trader-messages.controller';
 import { TraderPayoutsController } from './controllers/trader-payouts.controller';
+import { TraderStatsController } from './controllers/trader-stats.controller';
+import { TraderCounterpartiesController } from './controllers/trader-counterparties.controller';
+import { TraderActivityController } from './controllers/trader-activity.controller';
+import { TraderNotificationSettingsController } from './controllers/trader-notification-settings.controller';
 
 @Module({
   imports: [
     AccountTransactionsModule,
+    AuditModule,
     BankDetailsModule,
     BanksModule,
     CounterpartiesModule,
@@ -43,6 +49,10 @@ import { TraderPayoutsController } from './controllers/trader-payouts.controller
     TraderFilesController,
     TraderAppealsController,
     TraderMessagesController,
+    TraderStatsController,
+    TraderCounterpartiesController,
+    TraderActivityController,
+    TraderNotificationSettingsController,
   ],
 })
 export class TraderCabinetModule {}

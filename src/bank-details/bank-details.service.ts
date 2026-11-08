@@ -55,6 +55,7 @@ import { BankDetailsType } from './types/bank-details-type.enum';
 import { CounterpartyRequisiteQuery } from './types/counterparty-requisite-query';
 import { CreateBankDetailsInput } from './types/create-bank-details-input';
 import { OwnBankDetailsChanges } from './types/own-bank-details-changes';
+import { OwnCounterpartyRequisiteQuery } from './types/own-counterparty-requisite-query';
 import { bankDetailsActivityMetadata } from './utils/bank-details-activity-metadata';
 import { bankDetailsListOrder } from './utils/bank-details-list-order';
 import { bankDetailsListWhere } from './utils/bank-details-list-where';
@@ -277,6 +278,75 @@ export class BankDetailsService {
         await this.lockWithin(manager, bankDetailsId),
         actorUserId,
       ),
+    );
+  }
+
+  moveOwnCounterparty(
+    userId: string,
+    counterpartyId: number,
+    bankDetailsId: string,
+    impersonatorUserId: string | null,
+  ): Promise<Counterparty> {
+    return this.bankDetails.manager.transaction(async (manager) => {
+      const target = await this.lockWithin(manager, bankDetailsId);
+
+      if (target.userId !== userId) {
+        throw new NotFoundException('Bank details not found');
+      }
+
+      const own = await manager.find(BankDetails, {
+        select: { id: true },
+        where: { userId },
+      });
+
+      return this.counterparties.replaceWithin(
+        manager,
+        counterpartyId,
+        target,
+        userId,
+        {
+          boundToAnyOf: own.map((row) => row.id),
+          impersonatorUserId,
+        },
+      );
+    });
+  }
+
+  async ownCounterpartyOnlyIds(
+    userId: string,
+    bankDetailsId?: string,
+  ): Promise<string[]> {
+    const rows = await this.bankDetails.find({
+      select: { id: true },
+      where: {
+        userId,
+        counterpartyOnly: true,
+        ...(bankDetailsId ? { id: bankDetailsId } : {}),
+      },
+    });
+
+    return rows.map((row) => row.id);
+  }
+
+  async listOwnCounterpartyOnly(
+    userId: string,
+    query: OwnCounterpartyRequisiteQuery,
+  ): Promise<Page<BankDetails>> {
+    const direction = sortDirection(query.sortOrder);
+
+    return toPage(
+      await this.bankDetails.findAndCount({
+        where: {
+          userId,
+          counterpartyOnly: true,
+          ...(query.bankDetailsId ? { id: query.bankDetailsId } : {}),
+        },
+        order: { createdAt: direction, id: direction },
+        relations: RELATIONS,
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      query,
     );
   }
 

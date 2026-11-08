@@ -147,13 +147,19 @@ describe('SessionService', () => {
       );
     });
 
-    it('writes a merchant-side sign-in into its activity feed, a trader’s not', async () => {
+    it('writes a merchant-side sign-in into its activity feed, a trader’s into the trader one', async () => {
       userCredentials.verifyPassword.mockResolvedValue(true);
       userCredentials.verifySecondFactor.mockResolvedValue(true);
 
       userDirectory.findAuthenticatableByLogin.mockResolvedValue(activeUser);
       await service.login(credentials);
-      expect(audit.record).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: activeUser.id,
+        targetUserId: activeUser.id,
+        action: 'trader_activity.login',
+      });
+      audit.record.mockClear();
 
       userDirectory.findAuthenticatableByLogin.mockResolvedValue(telegramUser);
       await service.login(credentials);
@@ -541,7 +547,7 @@ describe('SessionService', () => {
       });
     });
 
-    it('writes nothing for a trader, a link session or a token already revoked', async () => {
+    it('writes a trader’s sign-out into the trader feed', async () => {
       refreshTokens.update.mockResolvedValue({ affected: 1 });
       userDirectory.findById.mockResolvedValue({
         id: uuidOf(3),
@@ -552,7 +558,40 @@ describe('SessionService', () => {
         userId: uuidOf(3),
         impersonatedByUserId: null,
       });
+
       await service.logout('trader-token');
+
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith({
+        actorUserId: uuidOf(3),
+        targetUserId: uuidOf(3),
+        action: 'trader_activity.logout',
+      });
+    });
+
+    it('writes nothing for a link session, a token already revoked or any other role', async () => {
+      refreshTokens.update.mockResolvedValue({ affected: 1 });
+      userDirectory.findById.mockResolvedValue({
+        id: uuidOf(3),
+        role: Role.Admin,
+      });
+      refreshTokens.findOne.mockResolvedValue({
+        id: 4,
+        userId: uuidOf(3),
+        impersonatedByUserId: null,
+      });
+      await service.logout('admin-token');
+
+      userDirectory.findById.mockResolvedValue({
+        id: uuidOf(3),
+        role: Role.Trader,
+      });
+      refreshTokens.findOne.mockResolvedValue({
+        id: 7,
+        userId: uuidOf(3),
+        impersonatedByUserId: uuidOf(9),
+      });
+      await service.logout('trader-link-token');
 
       userDirectory.findById.mockResolvedValue({
         id: uuidOf(2),

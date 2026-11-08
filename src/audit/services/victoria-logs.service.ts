@@ -132,6 +132,11 @@ const toFilter = (query: VictoriaAuditQuery, installationId: string): string =>
     ...FILTERED_FIELDS.filter((field) => query[field] !== undefined).map(
       (field) => `${field}:=${JSON.stringify(String(query[field]))}`,
     ),
+    ...(query.actorUserIdOrSystem
+      ? [
+          `(actorUserId:=${JSON.stringify(query.actorUserIdOrSystem)} or actorUserId:"")`,
+        ]
+      : []),
     ...(query.action === undefined && query.actions
       ? [toActionsFilter(query.actions)]
       : []),

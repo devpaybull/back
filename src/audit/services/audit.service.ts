@@ -8,6 +8,7 @@ import {
   EntityManager,
   FindOptionsWhere,
   In,
+  IsNull,
   MoreThan,
   Repository,
 } from 'typeorm';
@@ -121,6 +122,12 @@ export class AuditService {
         ? { createdAt: MoreThan(query.createdAfter) }
         : {}),
     };
+    const conditions = query.actorUserIdOrSystem
+      ? [
+          { ...where, actorUserId: query.actorUserIdOrSystem },
+          { ...where, actorUserId: IsNull() },
+        ]
+      : where;
     const order =
       query.sortBy === AuditSortField.Id
         ? { id: direction }
@@ -128,8 +135,8 @@ export class AuditService {
 
     return async (skip, take) =>
       take > 0
-        ? this.logs.findAndCount({ where, order, skip, take })
-        : [[], await this.logs.count({ where })];
+        ? this.logs.findAndCount({ where: conditions, order, skip, take })
+        : [[], await this.logs.count({ where: conditions })];
   }
 
   private archiveSegment(
@@ -145,6 +152,7 @@ export class AuditService {
           take,
           targetUserId: query.targetUserId,
           actorUserId: query.actorUserId,
+          actorUserIdOrSystem: query.actorUserIdOrSystem,
           impersonatorUserId: query.impersonatorUserId,
           action: query.action,
           actions: query.actions,

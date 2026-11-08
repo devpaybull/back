@@ -17,6 +17,8 @@ import { CounterpartyDailyVolume } from '../entities/counterparty-daily-volume.e
 import { CounterpartyRequisiteEvent } from '../entities/counterparty-requisite-event.entity';
 import { Counterparty } from '../entities/counterparty.entity';
 import { BindableRequisite } from '../types/bindable-requisite';
+import { BindingScope } from '../types/binding-scope';
+import { BoundCounterparty } from '../types/bound-counterparty';
 import { CounterpartyBindingType } from '../types/counterparty-binding-type.enum';
 import { CounterpartyChanges } from '../types/counterparty-changes';
 import { CounterpartyData } from '../types/counterparty-data';
@@ -292,10 +294,12 @@ export class CounterpartiesService {
     counterpartyId: number,
     requisite: BindableRequisite,
     actorUserId: string,
+    scope: BindingScope = {},
   ): Promise<Counterparty> {
     const counterparty = await this.lockWithin(manager, counterpartyId);
     const previousId = counterparty.bankDetailsId;
 
+    this.assertInScope(previousId, scope);
     if (previousId === null) {
       throw new ConflictException(
         'The counterparty has no requisite to replace',
@@ -328,6 +332,7 @@ export class CounterpartiesService {
     await this.audit.record(
       {
         actorUserId,
+        impersonatorUserId: scope.impersonatorUserId ?? null,
         action: 'counterparty.requisite_replaced',
         metadata: {
           counterpartyId,
@@ -346,11 +351,13 @@ export class CounterpartiesService {
   async unbind(
     counterpartyId: number,
     actorUserId: string,
+    scope: BindingScope = {},
   ): Promise<Counterparty> {
     return this.counterparties.manager.transaction(async (manager) => {
       const counterparty = await this.lockWithin(manager, counterpartyId);
       const previousId = counterparty.bankDetailsId;
 
+      this.assertInScope(previousId, scope);
       if (previousId === null) {
         throw new NotFoundException('The counterparty has no requisite');
       }
@@ -368,6 +375,7 @@ export class CounterpartiesService {
       await this.audit.record(
         {
           actorUserId,
+          impersonatorUserId: scope.impersonatorUserId ?? null,
           action: 'counterparty.requisite_unbound',
           metadata: {
             counterpartyId,
@@ -427,6 +435,29 @@ export class CounterpartiesService {
     rows.forEach((row) => counts.set(row.bankDetailsId, Number(row.bound)));
 
     return counts;
+  }
+
+  async boundTo(
+    bankDetailsIds: readonly string[],
+  ): Promise<BoundCounterparty[]> {
+    if (bankDetailsIds.length === 0) return [];
+
+    const rows = await this.counterparties.find({
+      select: {
+        id: true,
+        bankDetailsId: true,
+        enabled: true,
+        blacklistedAt: true,
+      },
+      where: { bankDetailsId: In([...bankDetailsIds]) },
+      order: { id: 'ASC' },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      bankDetailsId: row.bankDetailsId as string,
+      available: row.enabled && row.blacklistedAt === null,
+    }));
   }
 
   async listRequisiteEvents(
@@ -490,6 +521,15 @@ export class CounterpartiesService {
     if (!counterparty) throw new NotFoundException(NOT_FOUND);
 
     return counterparty;
+  }
+
+  private assertInScope(previousId: string | null, scope: BindingScope): void {
+    if (
+      scope.boundToAnyOf &&
+      (previousId === null || !scope.boundToAnyOf.includes(previousId))
+    ) {
+      throw new NotFoundException(NOT_FOUND);
+    }
   }
 
   private assertBindable(

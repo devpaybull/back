@@ -22,6 +22,7 @@ import { MerchantIpAddress } from '../../merchants/entities/merchant-ip-address.
 import { MerchantMethod } from '../../merchants/entities/merchant-method.entity';
 import { MerchantSettings } from '../../merchants/entities/merchant-settings.entity';
 import { Merchant } from '../../merchants/entities/merchant.entity';
+import { NotificationSetting } from '../../trader-settings/entities/notification-setting.entity';
 import { TraderSettings } from '../../trader-settings/entities/trader-settings.entity';
 import { BalanceOperation } from '../../transactions/entities/balance-operation.entity';
 import { LeadRate } from '../../transactions/entities/lead-rate.entity';
@@ -96,6 +97,7 @@ describe('the account transactions module graph', () => {
     EmailVerification,
     TraderLead,
     TraderSettings,
+    NotificationSetting,
     AuditLog,
     AuditInstallation,
     ActivityRead,
