@@ -589,6 +589,46 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
       expect(await snapshot()).toEqual(live);
       expect(await clientSnapshot()).toEqual(liveClients);
 
+      for (const id of [settledA, canceledC]) {
+        const row = await e2e.dataSource
+          .getRepository(TransactionDispute)
+          .findOneOrFail({
+            where: { transactionId: id },
+            order: { id: 'DESC' },
+          });
+        await e2e.http
+          .post(`/admin/disputes/${row.id}/accept`)
+          .set(bearer(admin))
+          .send({})
+          .expect(200);
+      }
+      expect((await deal(settledA)).status).toBe('success_changed');
+      expect((await deal(canceledC)).status).toBe('success');
+
+      const decided = await snapshot();
+      const decidedClients = await clientSnapshot();
+      expect(
+        decided.totals.find(
+          (row) =>
+            row.counterpartyId === a && row.traderUserId === pageTrader.user.id,
+        ),
+      ).toMatchObject({
+        completedCount: 1,
+        paidCount: 1,
+        paidAmount: '6500.00',
+      });
+      expect(
+        decided.totals.find(
+          (row) =>
+            row.counterpartyId === c && row.traderUserId === pageTrader.user.id,
+        ),
+      ).toMatchObject({ completedCount: 1, paidCount: 1 });
+      await e2e.app
+        .get(CounterpartyDealStatsService)
+        .rebuildCounterpartyStats();
+      expect(await snapshot()).toEqual(decided);
+      expect(await clientSnapshot()).toEqual(decidedClients);
+
       await settings.update(
         { userId: trader.user.id },
         { tradingEnabled: true },

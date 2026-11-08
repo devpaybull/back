@@ -202,7 +202,7 @@ describe('CounterpartyDealStatsService.rebuildCounterpartyStats', () => {
     );
   });
 
-  it('reads the archive first, then counts Postgres and replaces the request counters under the exclusive lock in the deals’ transaction', async () => {
+  it('reads the archive first, takes both exclusive locks before writing any row, then counts Postgres and replaces the request counters in the deals’ transaction', async () => {
     const { service, steps, manager, counterpartyStats, requestLog } = build();
 
     const result = await service.rebuildCounterpartyStats();
@@ -211,13 +211,13 @@ describe('CounterpartyDealStatsService.rebuildCounterpartyStats', () => {
       'archive',
       'begin',
       'deal lock',
+      'lock',
       'read',
       'read',
       'read',
       'read',
       'deals',
       'traders',
-      'lock',
       'stored',
       'requests',
       'commit',

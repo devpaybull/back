@@ -125,6 +125,12 @@ export class CounterpartyDealStatsService {
 
     await this.dataSource.transaction(async (manager) => {
       await this.counterpartyStats.lockDealCountersWithin(manager, 'exclusive');
+      if (archived !== null) {
+        await this.counterpartyStats.lockRequestCountersWithin(
+          manager,
+          'exclusive',
+        );
+      }
       const totals = await this.withTotals(
         this.countedDeals(COUNTERPARTY_STATS_METHOD_CODES, manager),
         EVER_PAID,
@@ -249,11 +255,6 @@ export class CounterpartyDealStatsService {
       );
 
       if (archived === null) return;
-
-      await this.counterpartyStats.lockRequestCountersWithin(
-        manager,
-        'exclusive',
-      );
 
       const requests =
         await this.requestLog.storedCounterpartyRequestCountsWithin(
