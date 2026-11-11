@@ -40,7 +40,7 @@ export class MethodRate {
   @Column({ type: 'uuid', nullable: true })
   subjectUserId: string;
 
-  @ManyToOne(() => Merchant, { nullable: true, onDelete: 'RESTRICT' })
+  @ManyToOne(() => Merchant, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'subjectMerchantId' })
   subjectMerchant: Merchant;
 

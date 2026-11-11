@@ -35,7 +35,7 @@ export class BalanceOperation {
   @Column({ type: 'enum', enum: BalanceKind })
   balanceKind: BalanceKind;
 
-  @ManyToOne(() => Transaction, { nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => Transaction, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'transactionId' })
   transaction: Transaction;
 
