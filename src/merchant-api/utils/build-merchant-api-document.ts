@@ -1,11 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import {
+  CallbacksObject,
   DocumentBuilder,
   getSchemaPath,
   OpenAPIObject,
   SwaggerModule,
 } from '@nestjs/swagger';
-import { CallbacksObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { PaymentPageModule } from '../../payment-page/payment-page.module';
 import { CallbackPayloadDto } from '../dto/callback-payload.dto';
 import { MerchantApiErrorDto } from '../dto/merchant-api-error.dto';
