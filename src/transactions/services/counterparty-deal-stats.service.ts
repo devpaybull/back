@@ -26,8 +26,6 @@ import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { COUNTERPARTY_STATS_METHOD_CODES } from '../utils/counterparty-stats-method-codes';
 
-const PAID = `deal.status IN ('${TransactionStatus.Success}', '${TransactionStatus.SuccessChanged}')`;
-const COMPLETED = `deal.status IN ('${TransactionStatus.Success}', '${TransactionStatus.SuccessChanged}', '${TransactionStatus.Canceled}')`;
 const reached = (statuses: readonly TransactionStatus[]): string =>
   `EXISTS (SELECT 1 FROM transaction_status_events reached WHERE reached."transactionId" = deal.id AND reached."toStatus" IN (${statuses.map((status) => `'${status}'`).join(', ')}))`;
 const EVER_PAID = reached([
@@ -80,11 +78,11 @@ export class CounterpartyDealStatsService {
       this.countedDeals(method ? [method] : COUNTERPARTY_STATS_METHOD_CODES),
     )
       .addSelect(
-        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${PAID} AND deal.resolvedAt >= :from7), 0)`,
+        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${EVER_PAID} AND deal.resolvedAt >= :from7), 0)`,
         'volume7d',
       )
       .addSelect(
-        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${PAID} AND deal.resolvedAt >= :from30), 0)`,
+        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${EVER_PAID} AND deal.resolvedAt >= :from30), 0)`,
         'volume30d',
       )
       .andWhere('deal.counterpartyId = :counterpartyId', { counterpartyId })
@@ -133,8 +131,6 @@ export class CounterpartyDealStatsService {
       }
       const totals = await this.withTotals(
         this.countedDeals(COUNTERPARTY_STATS_METHOD_CODES, manager),
-        EVER_PAID,
-        EVER_COMPLETED,
       )
         .addSelect('deal.counterpartyId', 'counterpartyId')
         .groupBy('deal.counterpartyId')
@@ -308,20 +304,18 @@ export class CounterpartyDealStatsService {
 
   private withTotals(
     builder: SelectQueryBuilder<Transaction>,
-    paid = PAID,
-    completed = COMPLETED,
   ): SelectQueryBuilder<Transaction> {
     return builder
       .select('COUNT(*)', 'dealCount')
-      .addSelect(`COUNT(*) FILTER (WHERE ${completed})`, 'completedCount')
-      .addSelect(`COUNT(*) FILTER (WHERE ${paid})`, 'paidCount')
+      .addSelect(`COUNT(*) FILTER (WHERE ${EVER_COMPLETED})`, 'completedCount')
+      .addSelect(`COUNT(*) FILTER (WHERE ${EVER_PAID})`, 'paidCount')
       .addSelect(`COUNT(*) FILTER (WHERE ${DISPUTED})`, 'disputeCount')
       .addSelect(
-        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${paid}), 0)`,
+        `COALESCE(SUM(deal.amountFiat) FILTER (WHERE ${EVER_PAID}), 0)`,
         'paidAmount',
       )
       .addSelect(
-        `MAX(deal.resolvedAt) FILTER (WHERE ${paid})`,
+        `MAX(deal.resolvedAt) FILTER (WHERE ${EVER_PAID})`,
         'lastDepositAt',
       );
   }

@@ -333,14 +333,37 @@ describe('CounterpartyStatsService', () => {
       });
       expect(builders[0].where).not.toHaveBeenCalled();
       expect(builders[1].from).toHaveBeenCalledWith(CounterpartyDailyRequest);
-      expect(assignedColumns(builders[2])).toEqual({
-        requestCount: 3,
-        lastRequestAt: last,
-      });
-      expect(manager.query).toHaveBeenCalledWith(
-        expect.stringContaining('counterparty_daily_requests'),
-        [2, '2026-11-05', 3],
-      );
+      expect(builders).toHaveLength(2);
+      expect(writes()).toEqual([
+        [
+          expect.stringContaining('UPDATE counterparties'),
+          [[2], [3], ['2026-11-05T10:00:00.000Z']],
+        ],
+        [
+          expect.stringContaining('INSERT INTO counterparty_daily_requests'),
+          [[2], ['2026-11-05'], [3]],
+        ],
+      ]);
+    });
+
+    it('writes the rebuilt rows in batches of 5000, one statement per batch', async () => {
+      const totals = Array.from({ length: 5001 }, (_, index) => ({
+        counterpartyId: index + 1,
+        requestCount: 1,
+        lastRequestAt: null,
+      }));
+      const days = Array.from({ length: 5001 }, (_, index) => ({
+        counterpartyId: index + 1,
+        day: '2026-11-05',
+        requestCount: 1,
+      }));
+
+      await service.replaceRequestsWithin(manager as never, totals, days);
+
+      expect(writes().map(([, [ids]]) => (ids as number[]).length)).toEqual([
+        5000, 1, 5000, 1,
+      ]);
+      expect(writes()[1][1][2]).toEqual([null]);
     });
 
     it('does not touch the deal counters', async () => {

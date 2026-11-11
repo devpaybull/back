@@ -479,28 +479,6 @@ describe('TraderSettingsService', () => {
     });
   });
 
-  describe('effectiveInsurancePayInMin', () => {
-    beforeEach(() => build(base()));
-
-    it('reads the personal value from the row', async () => {
-      repository.findOne.mockResolvedValue(
-        base({ insurancePayInMin: toCrypto(250) }),
-      );
-
-      await expect(
-        service.effectiveInsurancePayInMin(uuidOf(1)),
-      ).resolves.toEqual(toCrypto(250));
-    });
-
-    it('uses the global value when there is no row', async () => {
-      repository.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.effectiveInsurancePayInMin(uuidOf(1)),
-      ).resolves.toEqual(toCrypto(GLOBAL_MIN));
-    });
-  });
-
   describe('insurancePayOutMin', () => {
     it('stores a personal minimum and audits it', async () => {
       build(base());

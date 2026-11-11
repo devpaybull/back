@@ -93,12 +93,6 @@ export class TraderSettingsService {
     );
   }
 
-  async effectiveInsurancePayInMin(userId: string): Promise<Crypto> {
-    return this.insurancePayInMinOf(
-      await this.settings.findOne({ where: { userId } }),
-    );
-  }
-
   insurancePayOutMinOf(settings: TraderSettings | null | undefined): Crypto {
     return (
       settings?.insurancePayOutMin ??

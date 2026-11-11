@@ -524,6 +524,24 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
           })),
         };
       };
+      const cards = async (ids: number[]) =>
+        Promise.all(
+          ids.map(async (id) => {
+            const card = await e2e.app
+              .get(CounterpartyDealStatsService)
+              .statsOf(id, undefined, new Date());
+
+            return {
+              id,
+              dealCount: card.dealCount,
+              completedCount: card.completedCount,
+              paidCount: card.paidCount,
+              disputeCount: card.disputeCount,
+              paidAmount: card.paidAmount.toFixed(2),
+              lastDepositAt: card.lastDepositAt?.toISOString() ?? null,
+            };
+          }),
+        );
       const evidence = async (id: string): Promise<string> =>
         (
           await e2e.http
@@ -563,6 +581,9 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
 
       const live = await snapshot();
       const liveClients = await clientSnapshot();
+      expect(await cards(liveClients.rows.map((row) => row.id))).toEqual(
+        liveClients.rows,
+      );
       expect(live.totals.length).toBeGreaterThanOrEqual(5);
       expect(
         live.totals.find(
@@ -607,6 +628,9 @@ describe('the trader cabinet: counterparties, statistics, activity, notification
 
       const decided = await snapshot();
       const decidedClients = await clientSnapshot();
+      expect(await cards(decidedClients.rows.map((row) => row.id))).toEqual(
+        decidedClients.rows,
+      );
       expect(
         decided.totals.find(
           (row) =>

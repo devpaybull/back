@@ -70,6 +70,17 @@ SELECT * FROM unnest($1::int[], $2::uuid[], $3::int[], $4::int[], $5::numeric[],
 const INSERT_TRADER_DAYS = `INSERT INTO counterparty_trader_daily_volumes ("counterpartyId", "traderUserId", "day", "paidCount", "paidAmount")
 SELECT * FROM unnest($1::int[], $2::uuid[], $3::date[], $4::int[], $5::numeric[])`;
 
+const SET_CLIENT_REQUESTS = `UPDATE counterparties AS counterparty SET
+  "requestCount" = source."requestCount",
+  "lastRequestAt" = source."lastRequestAt",
+  "updatedAt" = now()
+FROM unnest($1::int[], $2::int[], $3::timestamptz[])
+  AS source(id, "requestCount", "lastRequestAt")
+WHERE counterparty.id = source.id`;
+
+const INSERT_CLIENT_REQUEST_DAYS = `INSERT INTO counterparty_daily_requests ("counterpartyId", "day", "requestCount")
+SELECT * FROM unnest($1::int[], $2::date[], $3::int[])`;
+
 const BULK_BATCH_ROWS = 5000;
 
 const DEAL_COUNTERS_LOCK = 'counterparty_deal_counters';
@@ -393,22 +404,18 @@ export class CounterpartyStatsService {
       .from(CounterpartyDailyRequest)
       .execute();
 
-    for (const row of totals) {
-      await manager
-        .createQueryBuilder()
-        .update(Counterparty)
-        .set({
-          requestCount: row.requestCount,
-          lastRequestAt: row.lastRequestAt,
-        })
-        .where('id = :counterpartyId', { counterpartyId: row.counterpartyId })
-        .execute();
+    for (const batch of batchesOf(totals)) {
+      await manager.query(SET_CLIENT_REQUESTS, [
+        batch.map((row) => row.counterpartyId),
+        batch.map((row) => row.requestCount),
+        batch.map((row) => instantOrNull(row.lastRequestAt)),
+      ]);
     }
-    for (const day of days) {
-      await manager.query(ADD_REQUESTS_TO_DAY, [
-        day.counterpartyId,
-        day.day,
-        day.requestCount,
+    for (const batch of batchesOf(days)) {
+      await manager.query(INSERT_CLIENT_REQUEST_DAYS, [
+        batch.map((day) => day.counterpartyId),
+        batch.map((day) => day.day),
+        batch.map((day) => day.requestCount),
       ]);
     }
   }
