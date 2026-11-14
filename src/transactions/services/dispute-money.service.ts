@@ -8,7 +8,9 @@ import { TransactionLeadShare } from '../entities/transaction-lead-share.entity'
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
-import { recomputeChangedPayIn } from '../utils/recompute-changed-pay-in';
+import { OverdraftParty } from '../types/overdraft-party.enum';
+import { overdraftNotConfirmed } from '../utils/overdraft-not-confirmed';
+import { recomputeChangedDeal } from '../utils/recompute-changed-deal';
 import { MerchantBalanceService } from './merchant-balance.service';
 import { WalletService } from './wallet.service';
 import { CounterpartyStatsService } from '../../counterparties/services/counterparty-stats.service';
@@ -35,10 +37,83 @@ export class DisputeMoneyService {
     statusBefore: TransactionStatus,
     amountFiat: Fiat | null,
     now: Date,
+    confirmOverdraft = false,
   ): Promise<TransactionStatus> {
-    return deal.kind === TransactionKind.PayIn
-      ? this.acceptPayIn(manager, deal, statusBefore, amountFiat, now)
+    if (deal.kind === TransactionKind.PayIn) {
+      return this.acceptPayIn(manager, deal, statusBefore, amountFiat, now);
+    }
+
+    return statusBefore === TransactionStatus.Canceled
+      ? this.acceptCanceledPayOut(manager, deal, now, confirmOverdraft)
       : this.acceptPayOut(manager, deal, statusBefore, now);
+  }
+
+  private async acceptCanceledPayOut(
+    manager: EntityManager,
+    deal: Transaction,
+    now: Date,
+    confirmOverdraft: boolean,
+  ): Promise<TransactionStatus> {
+    const shares = (
+      await manager.find(TransactionLeadShare, {
+        where: { transactionId: deal.id },
+        order: { id: 'ASC' },
+      })
+    ).filter((share) => share.amount.gt(0));
+    const leadUserIds = shares.map((share) => share.leadUserId);
+
+    await this.wallets.lockWalletsWithin(
+      manager,
+      [deal.traderUserId, ...leadUserIds],
+      leadUserIds,
+    );
+
+    if (deal.merchantId) {
+      const balance = await this.merchantBalances.lockBalanceWithin(
+        manager,
+        deal.merchantId,
+      );
+      const after = roundCrypto(balance.balance.minus(deal.merchantAmount));
+
+      if (after.lt(0) && !confirmOverdraft) {
+        throw overdraftNotConfirmed([
+          {
+            party: OverdraftParty.Merchant,
+            id: deal.merchantId,
+            shortfall: roundCrypto(after.neg()),
+          },
+        ]);
+      }
+    }
+
+    await this.wallets.creditMainWithin(
+      manager,
+      deal.traderUserId,
+      deal.traderAmount,
+      deal.id,
+    );
+
+    for (const share of shares) {
+      await this.wallets.creditLeadShareWithin(
+        manager,
+        share.leadUserId,
+        share.amount,
+        deal.id,
+      );
+    }
+
+    if (deal.merchantId) {
+      await this.merchantBalances.chargePayOutWithin(
+        manager,
+        deal.merchantId,
+        deal.merchantAmount,
+        deal.id,
+      );
+    }
+
+    deal.resolvedAt = now;
+
+    return TransactionStatus.Success;
   }
 
   private async acceptPayIn(
@@ -72,7 +147,7 @@ export class DisputeMoneyService {
     );
 
     if (changed) {
-      const figures = recomputeChangedPayIn(deal, shares, amountFiat);
+      const figures = recomputeChangedDeal(deal, shares, amountFiat);
       const newShare = new Map(
         figures.leadShares.map((share) => [share.shareId, share.amount]),
       );
@@ -147,12 +222,21 @@ export class DisputeMoneyService {
           deal.id,
         );
       } else {
-        await this.merchantBalances.creditDealWithin(
+        const credited = await this.merchantBalances.creditDealWithin(
           manager,
           deal.merchantId,
           deal.merchantAmount,
           deal.id,
         );
+
+        if (!credited) {
+          await this.merchantBalances.creditDisputeWithin(
+            manager,
+            deal.merchantId,
+            deal.merchantAmount,
+            deal.id,
+          );
+        }
       }
     }
 

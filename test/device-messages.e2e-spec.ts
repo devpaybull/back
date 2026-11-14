@@ -1,9 +1,9 @@
 import { AuditLog } from '../src/audit/entities/audit-log.entity';
+import { Bank } from '../src/banks/entities/bank.entity';
 import { BankDetails } from '../src/bank-details/entities/bank-details.entity';
 import { Role } from '../src/common/enums/role.enum';
 import { toCrypto } from '../src/common/utils/to-crypto';
 import { DeviceMessage } from '../src/device-messages/entities/device-message.entity';
-import { DeviceMessageRetentionService } from '../src/device-messages/services/device-message-retention.service';
 import { Device } from '../src/devices/entities/device.entity';
 import { MerchantCallback } from '../src/merchant-callbacks/entities/merchant-callback.entity';
 import { MerchantMethod } from '../src/merchants/entities/merchant-method.entity';
@@ -702,18 +702,130 @@ describe('device messages and automatic confirmation', () => {
     });
   });
 
-  it('retention deletes the messages older than DEVICE_MESSAGE_RETENTION_DAYS', async () => {
-    const repository = e2e.dataSource.getRepository(DeviceMessage);
-    const total = await repository.count();
+  describe('the admin’s «Сообщения»', () => {
+    type AdminRow = {
+      id: number;
+      sender: string;
+      senderName: string | null;
+      currency: string | null;
+      parsedAmount: string | null;
+      matchStatus: string;
+      trader: { id: string; login: string } | null;
+      device: { id: number; name: string } | null;
+      transaction: { id: string; status: string; amountFiat: string } | null;
+      template: { id: number } | null;
+    };
 
-    await expect(
-      e2e.app.get(DeviceMessageRetentionService).run(new Date()),
-    ).resolves.toBe(0);
-    await expect(
-      e2e.app
-        .get(DeviceMessageRetentionService)
-        .run(new Date(Date.now() + 91 * 24 * 60 * 60 * 1000)),
-    ).resolves.toBe(total);
-    expect(await repository.count()).toBe(0);
+    it('lists every trader’s messages with the trader, the device, the bank of the template and the deal', async () => {
+      await send(strangerToken, {
+        text: 'Пополнение на 77 ₽. Баланс 5 ₽',
+      }).expect(200);
+
+      const listed = await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(admin))
+        .query({ period: 'all_time', limit: 100 })
+        .expect(200);
+      const rows = listed.body.data as AdminRow[];
+      const ownersSeen = new Set(rows.map((row) => row.trader?.id));
+
+      expect(ownersSeen).toEqual(new Set([trader.user.id, stranger.user.id]));
+      expect(rows.some((row) => row.sender === 'Spam')).toBe(false);
+
+      const tbank = await e2e.dataSource
+        .getRepository(Bank)
+        .findOneOrFail({ where: { id: tbankId } });
+      const matched = rows.find((row) => row.matchStatus === 'matched');
+
+      expect(matched).toEqual(
+        expect.objectContaining({
+          senderName: tbank.name,
+          currency: 'RUB',
+          device: { id: deviceId, name: 'Pixel 7' },
+          template: { id: expect.any(Number) },
+          transaction: expect.objectContaining({
+            status: 'success',
+            amountFiat: matched?.parsedAmount,
+          }),
+        }),
+      );
+      expect(rows.find((row) => row.trader?.id === stranger.user.id)).toEqual(
+        expect.objectContaining({
+          device: expect.objectContaining({ name: 'Galaxy' }),
+          transaction: null,
+        }),
+      );
+
+      const strangersOnly = await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(admin))
+        .query({ period: 'all_time', traderUserId: stranger.user.id })
+        .expect(200);
+      const byDeviceName = await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(admin))
+        .query({ period: 'all_time', deviceName: 'gala' })
+        .expect(200);
+      const strangerRows = rows.filter(
+        (row) => row.trader?.id === stranger.user.id,
+      ).length;
+
+      expect(strangersOnly.body.meta.total).toBe(strangerRows);
+      expect(byDeviceName.body.meta.total).toBe(strangerRows);
+
+      const bySender = await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(admin))
+        .query({
+          period: 'all_time',
+          unknownSenders: 'show',
+          sortBy: 'sender',
+          sortOrder: 'asc',
+          limit: 100,
+        })
+        .expect(200);
+      const senders = (bySender.body.data as AdminRow[]).map(
+        (row) => row.sender,
+      );
+
+      expect(senders).toEqual(
+        [...senders].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+      );
+
+      const counters = await e2e.http
+        .get('/admin/device-messages/counters')
+        .set(bearer(admin))
+        .query({ period: 'all_time', unknownSenders: 'show' })
+        .expect(200);
+      expect(counters.body.data.all).toBe(bySender.body.meta.total);
+
+      const strangersOwn = await e2e.http
+        .get('/trader/messages')
+        .set(bearer(stranger))
+        .query({ period: 'all_time' })
+        .expect(200);
+      expect(
+        (strangersOwn.body.data as { id: number }[]).every((row) =>
+          rows.some(
+            (adminRow) =>
+              adminRow.id === row.id &&
+              adminRow.trader?.id === stranger.user.id,
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it('refuses a period with dates, and a trader', async () => {
+      await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(admin))
+        .query({ period: 'today', createdFrom: '2026-11-01' })
+        .expect(400);
+      await e2e.http
+        .get('/admin/device-messages')
+        .set(bearer(trader))
+        .expect(403);
+      await e2e.http.get('/admin/device-messages/counters').expect(401);
+    });
   });
 });

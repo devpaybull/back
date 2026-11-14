@@ -32,11 +32,20 @@ jest.mock('../utils/find-transaction-method', () => {
             rateKind: 'by_bank',
             directions: ['pay_in', 'pay_out'],
           }
-        : actual.findTransactionMethod(code),
+        : code.startsWith('kzt_')
+          ? {
+              code,
+              currency: 'KZT',
+              rateKind: 'by_amount',
+              directions: ['pay_in', 'pay_out'],
+            }
+          : actual.findTransactionMethod(code),
   };
 });
 
 const BY_BANK = 'mono_bank' as TransactionMethod;
+
+const KZT_METHOD = 'kzt_sbp' as TransactionMethod;
 
 describe('RateService.getEffectiveGeneralRates', () => {
   const repository = { find: jest.fn() };
@@ -1285,5 +1294,258 @@ describe('RateService — the merchant cabinet', () => {
       toRate('80.8'),
     ]);
     expect(rapira.getFiatPerUsdt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RateService rate summaries', () => {
+  const repository = { find: jest.fn() };
+  const leadRepository = { find: jest.fn() };
+
+  const row = (
+    method: TransactionMethod,
+    payInPercent: number,
+    payOutPercent: number,
+    shape: Partial<MethodRate> = {},
+  ): MethodRate =>
+    ({
+      method,
+      payInPercent,
+      payOutPercent,
+      subjectUserId: null,
+      fromAmount: null,
+      toAmount: null,
+      bankId: null,
+      ...shape,
+    }) as MethodRate;
+
+  const own = (
+    method: TransactionMethod,
+    payInPercent: number,
+    payOutPercent: number,
+    shape: Partial<MethodRate> = {},
+  ) =>
+    row(method, payInPercent, payOutPercent, {
+      subjectUserId: uuidOf(1),
+      ...shape,
+    });
+
+  const band = {
+    fromAmount: toFiat('1000') as Fiat,
+    toAmount: toFiat('5000') as Fiat,
+  };
+
+  const baseRows = [
+    row('sbp', 10, 2),
+    row('card', 12, 3),
+    row('mobile_commerce', 6, 0),
+  ];
+
+  const resolveWith = (base: MethodRate[], individual: MethodRate[] = []) =>
+    repository.find.mockImplementation(
+      async ({ where }: { where: { subjectUserId: unknown } }) =>
+        where.subjectUserId instanceof FindOperator &&
+        where.subjectUserId.type === 'in'
+          ? individual
+          : base,
+    );
+
+  let service: RateService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module = await Test.createTestingModule({
+      providers: [
+        RateService,
+        { provide: getRepositoryToken(MethodRate), useValue: repository },
+        { provide: getRepositoryToken(LeadRate), useValue: leadRepository },
+        { provide: getDataSourceToken(), useValue: {} },
+        { provide: RapiraRateProvider, useValue: {} },
+        { provide: ConfigService, useValue: {} },
+        { provide: AuditService, useValue: {} },
+        { provide: BanksService, useValue: {} },
+      ],
+    }).compile();
+
+    service = module.get(RateService);
+  });
+
+  describe('traderRateSummaries', () => {
+    it('answers nothing for no trader, without querying', async () => {
+      await expect(service.traderRateSummaries([])).resolves.toEqual(new Map());
+      expect(repository.find).not.toHaveBeenCalled();
+    });
+
+    it('summarises the base rates when individual rates are off, ignoring the stored ones', async () => {
+      resolveWith(baseRows, [own('sbp', 40, 9)]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: false },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([
+        {
+          currency: 'RUB',
+          payIn: { min: 6, max: 12 },
+          payOut: { min: 0, max: 3 },
+        },
+      ]);
+      expect(repository.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaces the base general rate of a method with an individual one, and keeps the base for the others', async () => {
+      resolveWith(baseRows, [own('card', 4, 1)]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: true },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([
+        {
+          currency: 'RUB',
+          payIn: { min: 4, max: 10 },
+          payOut: { min: 0, max: 2 },
+        },
+      ]);
+    });
+
+    it('counts amount bands and bank rows, and the base general rate of a method that has only bands', async () => {
+      resolveWith(baseRows, [
+        own('sbp', 15, 2.5, band),
+        own(BY_BANK, 1, 0.5, { bankId: 7 }),
+      ]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: true },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([
+        {
+          currency: 'RUB',
+          payIn: { min: 1, max: 15 },
+          payOut: { min: 0, max: 3 },
+        },
+      ]);
+    });
+
+    it('groups by the currency of each method', async () => {
+      resolveWith([...baseRows, row(KZT_METHOD, 5, 1)]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: false },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([
+        {
+          currency: 'KZT',
+          payIn: { min: 5, max: 5 },
+          payOut: { min: 1, max: 1 },
+        },
+        {
+          currency: 'RUB',
+          payIn: { min: 6, max: 12 },
+          payOut: { min: 0, max: 3 },
+        },
+      ]);
+    });
+
+    it('skips a method the registry no longer knows', async () => {
+      resolveWith([
+        row('sbp', 10, 2),
+        row('gone' as TransactionMethod, 99, 99),
+      ]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: false },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([
+        {
+          currency: 'RUB',
+          payIn: { min: 10, max: 10 },
+          payOut: { min: 2, max: 2 },
+        },
+      ]);
+    });
+
+    it('answers an empty summary when no rate exists', async () => {
+      resolveWith([]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: true },
+      ]);
+
+      expect(summaries.get(uuidOf(1))).toEqual([]);
+    });
+
+    it('keeps one trader’s individual rows away from another', async () => {
+      resolveWith(baseRows, [own('sbp', 30, 2)]);
+
+      const summaries = await service.traderRateSummaries([
+        { userId: uuidOf(1), individualEnabled: true },
+        { userId: uuidOf(2), individualEnabled: true },
+      ]);
+
+      expect(summaries.get(uuidOf(1))?.[0].payIn.max).toBe(30);
+      expect(summaries.get(uuidOf(2))?.[0].payIn.max).toBe(12);
+      expect(repository.find).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('leadRateSummaries', () => {
+    const link = (
+      id: number,
+      leadUserId: string,
+      isocode: string,
+      payInPercent: number,
+      payOutPercent: number,
+    ): TraderLead =>
+      ({
+        id,
+        leadUserId,
+        currency: { isocode },
+        payInPercent,
+        payOutPercent,
+      }) as TraderLead;
+
+    it('answers nothing for no assignment, without querying', async () => {
+      await expect(service.leadRateSummaries([])).resolves.toEqual(new Map());
+      expect(leadRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('spans every assignment and detail row of a lead, per currency, in one query', async () => {
+      leadRepository.find.mockResolvedValue([
+        { traderLeadId: 1, payInPercent: 3, payOutPercent: 0.2 },
+        { traderLeadId: 3, payInPercent: 0.5, payOutPercent: 0.1 },
+      ]);
+
+      const summaries = await service.leadRateSummaries([
+        link(1, uuidOf(7), 'RUB', 1, 0.5),
+        link(2, uuidOf(7), 'RUB', 2, 1),
+        link(3, uuidOf(7), 'KZT', 1.5, 0.4),
+        link(4, uuidOf(8), 'RUB', 0.7, 0.3),
+      ]);
+
+      expect(leadRepository.find).toHaveBeenCalledTimes(1);
+      expect(summaries.get(uuidOf(7))).toEqual([
+        {
+          currency: 'KZT',
+          payIn: { min: 0.5, max: 1.5 },
+          payOut: { min: 0.1, max: 0.4 },
+        },
+        {
+          currency: 'RUB',
+          payIn: { min: 1, max: 3 },
+          payOut: { min: 0.2, max: 1 },
+        },
+      ]);
+      expect(summaries.get(uuidOf(8))).toEqual([
+        {
+          currency: 'RUB',
+          payIn: { min: 0.7, max: 0.7 },
+          payOut: { min: 0.3, max: 0.3 },
+        },
+      ]);
+    });
   });
 });

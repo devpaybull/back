@@ -33,6 +33,7 @@ const CATALOG: [HttpStatus, MerchantApiErrorCode][] = [
   [HttpStatus.NOT_FOUND, MerchantApiErrorCode.DealNotFound],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.DuplicateMerchantTransactionId],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.InsufficientBalance],
+  [HttpStatus.CONFLICT, MerchantApiErrorCode.MerchantBalanceNegative],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.DealNotCancelable],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.TimerNotExtendable],
   [HttpStatus.CONFLICT, MerchantApiErrorCode.DisputeNotAllowed],

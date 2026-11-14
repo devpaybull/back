@@ -44,6 +44,7 @@ import { PayInOutcome } from './types/pay-in-outcome';
 import { PayInRequest } from './types/pay-in-request';
 import { PayOutOutcome } from './types/pay-out-outcome';
 import { PayOutRequest } from './types/pay-out-request';
+import { isMerchantBalanceNegative } from '../transactions/utils/is-merchant-balance-negative';
 
 const FAILED_DEALS_WINDOW_MS = 60 * 60_000;
 
@@ -386,6 +387,15 @@ export class MerchantApiService {
       );
 
       if (raced) return this.replayPayOut(raced, request, bank, log);
+      if (
+        error instanceof ConflictException &&
+        isMerchantBalanceNegative(error)
+      ) {
+        throw new ConflictException({
+          code: MerchantApiErrorCode.MerchantBalanceNegative,
+          message: 'The merchant balance is below zero',
+        });
+      }
       if (error instanceof ConflictException) {
         throw new ConflictException({
           code: MerchantApiErrorCode.InsufficientBalance,

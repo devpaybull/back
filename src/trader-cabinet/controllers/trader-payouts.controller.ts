@@ -62,7 +62,7 @@ import {
 } from '../dto/trader-payout.dto';
 import { TraderPayoutSortField } from '../types/trader-payout-sort-field.enum';
 import { traderActorOf } from '../utils/trader-actor-of';
-import { traderCreatedRange } from '../utils/trader-created-range';
+import { createdRange } from '../../common/utils/created-range';
 import { traderPayoutsCsv } from '../utils/trader-payouts-csv';
 
 const SORT_FIELDS: Record<TraderPayoutSortField, TransactionSortField> = {
@@ -329,7 +329,7 @@ export class TraderPayoutsController {
     query: TraderPayoutFilterDto,
   ): Promise<TraderPayoutFilter> {
     return {
-      ...traderCreatedRange(
+      ...createdRange(
         query,
         this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),

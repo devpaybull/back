@@ -16,9 +16,11 @@ import { LeadPercentQuery } from '../types/lead-percent-query';
 import { MethodPercent } from '../types/method-percent';
 import { MethodPercentQuery } from '../types/method-percent-query';
 import { PercentSubject } from '../types/percent-subject';
+import { CurrencyPercent } from '../types/currency-percent';
 import { RateCandidate } from '../types/rate-candidate';
 import { RateKind } from '../types/rate-kind.enum';
 import { RateSubject } from '../types/rate-subject';
+import { RateSummary } from '../types/rate-summary';
 import { RateScope } from '../types/rate-scope.enum';
 import { SubjectPercentQuery } from '../types/subject-percent-query';
 import {
@@ -31,6 +33,7 @@ import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { bandsAreValid } from '../utils/bands-valid';
 import { findTransactionMethod } from '../utils/find-transaction-method';
+import { rateSummariesOf } from '../utils/rate-summaries-of';
 import { NoBaseRateError, resolveRate } from '../utils/resolve-rate';
 import { TRANSACTION_METHOD_CODES } from '../utils/transaction-methods';
 import { RapiraRateProvider } from './rapira-rate.provider';
@@ -94,6 +97,11 @@ const declarationRank = (code: string): number => {
 
   return index === -1 ? TRANSACTION_METHOD_CODES.length : index;
 };
+
+const isGeneralRow = (row: MethodRate): boolean =>
+  (row.bankId ?? null) === null &&
+  (row.fromAmount ?? null) === null &&
+  (row.toAmount ?? null) === null;
 
 @Injectable()
 export class RateService {
@@ -193,6 +201,90 @@ export class RateService {
     }
 
     return { base, bySubject };
+  }
+
+  async traderRateSummaries(
+    subjects: RateSubject[],
+  ): Promise<Map<string, RateSummary[]>> {
+    if (subjects.length === 0) return new Map();
+
+    const enabledIds = subjects
+      .filter((subject) => subject.individualEnabled)
+      .map((subject) => subject.userId);
+    const [base, individualRows] = await Promise.all([
+      this.getBaseSet(RateScope.Trader),
+      enabledIds.length
+        ? this.rates.find({
+            where: { scope: RateScope.Trader, subjectUserId: In(enabledIds) },
+          })
+        : Promise.resolve([]),
+    ]);
+    const summaries = new Map<string, RateSummary[]>();
+
+    for (const subject of subjects) {
+      const own = subject.individualEnabled
+        ? individualRows.filter((row) => row.subjectUserId === subject.userId)
+        : [];
+      const ownGeneralMethods = new Set(
+        own.filter(isGeneralRow).map((row) => row.method),
+      );
+      const applied = [
+        ...own,
+        ...base.filter((row) => !ownGeneralMethods.has(row.method)),
+      ];
+
+      summaries.set(
+        subject.userId,
+        rateSummariesOf(
+          applied.flatMap((row): CurrencyPercent[] => {
+            const method = findTransactionMethod(row.method);
+
+            return method
+              ? [
+                  {
+                    currency: method.currency,
+                    payInPercent: row.payInPercent,
+                    payOutPercent: row.payOutPercent,
+                  },
+                ]
+              : [];
+          }),
+        ),
+      );
+    }
+
+    return summaries;
+  }
+
+  async leadRateSummaries(
+    links: TraderLead[],
+  ): Promise<Map<string, RateSummary[]>> {
+    const detail = await this.getLeadSet(links.map((link) => link.id));
+    const percentsByLead = new Map<string, CurrencyPercent[]>();
+
+    for (const link of links) {
+      const currency = link.currency.isocode;
+      const percents = percentsByLead.get(link.leadUserId) ?? [];
+
+      for (const row of [
+        link,
+        ...detail.filter((rate) => rate.traderLeadId === link.id),
+      ]) {
+        percents.push({
+          currency,
+          payInPercent: row.payInPercent,
+          payOutPercent: row.payOutPercent,
+        });
+      }
+      percentsByLead.set(link.leadUserId, percents);
+    }
+
+    return new Map(
+      [...percentsByLead].map(([leadUserId, percents]) => [
+        leadUserId,
+        rateSummariesOf(percents),
+      ]),
+    );
   }
 
   async replaceBaseSet(

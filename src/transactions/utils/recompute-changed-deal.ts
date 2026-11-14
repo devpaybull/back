@@ -4,21 +4,20 @@ import { toDecimal } from '../../common/utils/to-decimal';
 import { TransactionLeadShare } from '../entities/transaction-lead-share.entity';
 import { Transaction } from '../entities/transaction.entity';
 import { ChangedDealFigures } from '../types/changed-deal-figures';
-import { TransactionKind } from '../types/transaction-kind.enum';
 import { computeDeal } from './compute-deal';
 
 const NO_PLATFORM_MINIMUM = 0;
 
-export function recomputeChangedPayIn(
+export function recomputeChangedDeal(
   deal: Pick<
     Transaction,
-    'rate' | 'merchantPercent' | 'traderEffectivePercent'
+    'kind' | 'rate' | 'merchantPercent' | 'traderEffectivePercent'
   >,
   shares: readonly Pick<TransactionLeadShare, 'id' | 'percent'>[],
   amountFiat: Fiat,
 ): ChangedDealFigures {
   const figures = computeDeal({
-    kind: TransactionKind.PayIn,
+    kind: deal.kind,
     amountFiat,
     rate: deal.rate,
     merchantPercent: deal.merchantPercent,

@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import {
   EntityManager,
   FindOptionsRelations,
+  ILike,
   In,
   IsNull,
   MoreThan,
@@ -19,6 +20,7 @@ import {
 import { AuditService } from '../audit/services/audit.service';
 import { ActivityAction } from '../audit/types/activity-action.enum';
 import { Page, toPage } from '../common/types/page';
+import { escapeLikePattern } from '../common/utils/escape-like-pattern';
 import { sha256Hex } from '../common/utils/sha256-hex';
 import { DeviceCredential } from './entities/device-credential.entity';
 import { DevicePairing } from './entities/device-pairing.entity';
@@ -147,6 +149,22 @@ export class DevicesService {
 
   async findById(id: number): Promise<Device> {
     return this.devices.findOne({ where: { id }, relations: RELATIONS });
+  }
+
+  async findByIdsWithDeleted(ids: number[]): Promise<Device[]> {
+    if (ids.length === 0) return [];
+
+    return this.devices.find({ where: { id: In(ids) }, withDeleted: true });
+  }
+
+  async idsWithNameContaining(fragment: string): Promise<number[]> {
+    const rows = await this.devices.find({
+      select: { id: true },
+      where: { name: ILike(`%${escapeLikePattern(fragment)}%`) },
+      withDeleted: true,
+    });
+
+    return rows.map((row) => row.id);
   }
 
   async findOwn(id: number, userId: string): Promise<Device> {

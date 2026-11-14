@@ -44,6 +44,7 @@ import { StatusChange } from '../types/status-change';
 import { StatusEventSource } from '../types/status-event-source.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionListQuery } from '../types/transaction-list-query';
+import { TransactionTextMatch } from '../types/transaction-text-match';
 import { TransactionMethodDefinition } from '../types/transaction-method-definition';
 import { TransactionSortField } from '../types/transaction-sort-field.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
@@ -64,7 +65,7 @@ import {
   startStatus,
 } from '../utils/status-transitions';
 import { transactionListOrder } from '../utils/transaction-list-order';
-import { transactionListWhere } from '../utils/transaction-list-where';
+import { transactionListWhereAny } from '../utils/transaction-list-where-any';
 import { RateService } from './rate.service';
 import { DealCallbacksService } from './deal-callbacks.service';
 import { MerchantBalanceService } from './merchant-balance.service';
@@ -112,6 +113,12 @@ export class TransactionService {
 
   findById(id: string): Promise<Transaction | null> {
     return this.transactions.findOne({ where: { id } });
+  }
+
+  async findByIds(ids: string[]): Promise<Transaction[]> {
+    if (!ids.length) return [];
+
+    return this.transactions.find({ where: { id: In(ids) } });
   }
 
   findTraderWindow(userId: string, since: Date): Promise<Transaction[]> {
@@ -162,10 +169,12 @@ export class TransactionService {
     });
   }
 
-  async list(query: TransactionListQuery): Promise<Page<Transaction>> {
+  async list(
+    query: TransactionListQuery & TransactionTextMatch,
+  ): Promise<Page<Transaction>> {
     if (query.bankDetailsIds?.length === 0) return toPage([[], 0], query);
 
-    const where = transactionListWhere(query);
+    const where = transactionListWhereAny(query);
     const skip = (query.page - 1) * query.limit;
     const take = query.limit;
 
@@ -187,9 +196,56 @@ export class TransactionService {
     );
   }
 
+  async countsByMethod(
+    query: Omit<
+      TransactionListQuery,
+      'page' | 'limit' | 'sortBy' | 'sortOrder'
+    > &
+      TransactionTextMatch,
+  ): Promise<Map<string, number>> {
+    if (query.bankDetailsIds?.length === 0) return new Map();
+
+    const rows = await this.transactions
+      .createQueryBuilder('transaction')
+      .select('transaction.method', 'method')
+      .addSelect('COUNT(*)', 'count')
+      .setFindOptions({
+        where: transactionListWhereAny(query as TransactionListQuery),
+      })
+      .groupBy('transaction.method')
+      .getRawMany<{ method: string; count: string }>();
+
+    return new Map(rows.map((row) => [row.method, Number(row.count)]));
+  }
+
+  async listForExport(
+    query: Omit<
+      TransactionListQuery,
+      'page' | 'limit' | 'sortBy' | 'sortOrder'
+    > &
+      TransactionTextMatch,
+    maxRows: number,
+  ): Promise<Transaction[]> {
+    if (query.bankDetailsIds?.length === 0) return [];
+
+    const rows = await this.transactions.find({
+      where: transactionListWhereAny(query as TransactionListQuery),
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: maxRows + 1,
+    });
+
+    if (rows.length > maxRows) {
+      throw new BadRequestException(
+        `More than ${maxRows} deals match; narrow the period or the filters`,
+      );
+    }
+
+    return rows;
+  }
+
   private listByMerchantName(
     query: TransactionListQuery,
-    where: FindOptionsWhere<Transaction>,
+    where: FindOptionsWhere<Transaction>[],
     skip: number,
     take: number,
   ): Promise<[Transaction[], number]> {
@@ -959,6 +1015,15 @@ export class TransactionService {
         transaction.id,
       );
     }
+  }
+
+  recordEventWithin(
+    manager: EntityManager,
+    transactionId: string,
+    fromStatus: TransactionStatus | null,
+    change: StatusChange,
+  ): Promise<void> {
+    return this.writeEvent(manager, transactionId, fromStatus, change);
   }
 
   private async writeEvent(

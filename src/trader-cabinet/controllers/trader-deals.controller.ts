@@ -56,7 +56,7 @@ import { TraderDealFilterDto } from '../dto/trader-deal-filter.dto';
 import { TraderDealDetailDto, TraderDealDto } from '../dto/trader-deal.dto';
 import { TraderDealSortField } from '../types/trader-deal-sort-field.enum';
 import { traderActorOf } from '../utils/trader-actor-of';
-import { traderCreatedRange } from '../utils/trader-created-range';
+import { createdRange } from '../../common/utils/created-range';
 import { traderDealsCsv } from '../utils/trader-deals-csv';
 
 const SORT_FIELDS: Record<TraderDealSortField, TransactionSortField> = {
@@ -299,7 +299,7 @@ export class TraderDealsController {
     ]);
 
     return {
-      ...traderCreatedRange(query, timeZone),
+      ...createdRange(query, timeZone),
       statuses: query.status,
       method: query.method,
       amountFrom:

@@ -1,5 +1,6 @@
 import { DealBankDetailsDto } from '../dto/deal-bank-details.dto';
 import { DealCounterpartyDto } from '../dto/deal-counterparty.dto';
+import { DealPayoutRecipientDto } from '../dto/deal-payout-recipient.dto';
 import { DealTraderDto } from '../dto/deal-trader.dto';
 import { UserMerchantDto } from '../dto/user-merchant.dto';
 
@@ -8,4 +9,5 @@ export interface TransactionRowDetails {
   merchant: UserMerchantDto | null;
   bankDetails: DealBankDetailsDto | null;
   counterparty: DealCounterpartyDto | null;
+  recipient: DealPayoutRecipientDto | null;
 }

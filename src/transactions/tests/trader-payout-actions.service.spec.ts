@@ -16,6 +16,9 @@ import { TraderPayoutActionsService } from '../services/trader-payout-actions.se
 import { PayoutDeclineReason } from '../types/payout-decline-reason.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
+import { Role } from '../../common/enums/role.enum';
+import { UserStatus } from '../../users/types/user-status.enum';
+import { StatusEventSource } from '../types/status-event-source.enum';
 
 const TRADER = uuidOf(1);
 const DEAL = uuidOf(2);
@@ -61,6 +64,9 @@ interface Setup {
   priced?: object | null;
   night?: boolean;
   nightStartHour?: number;
+  user?: object | null;
+  merchantBalance?: string;
+  liveDispute?: boolean;
 }
 
 const build = (setup: Setup = {}) => {
@@ -77,6 +83,7 @@ const build = (setup: Setup = {}) => {
     save: jest.fn(async (value: unknown) => value),
     create: jest.fn((_entity: unknown, value: unknown) => value),
     delete: jest.fn(async () => undefined),
+    exists: jest.fn(async () => setup.liveDispute ?? false),
     getRepository: jest.fn(() => ({
       createQueryBuilder: () => queryBuilder,
     })),
@@ -90,7 +97,32 @@ const build = (setup: Setup = {}) => {
       async (_m: unknown, row: object, change: { toStatus: string }) =>
         Object.assign(row, { status: change.toStatus }),
     ),
+    recordEventWithin: jest.fn(async () => undefined),
   };
+  const users = {
+    findByIds: jest.fn(async () =>
+      setup.user === null
+        ? []
+        : [
+            {
+              id: TRADER,
+              role: Role.Trader,
+              status: UserStatus.Active,
+              ...setup.user,
+            },
+          ],
+    ),
+  };
+  const merchantBalances = {
+    lockBalanceWithin: jest.fn(async () => ({
+      balance: toCrypto(setup.merchantBalance ?? '1000'),
+    })),
+    reholdPayOutWithin: jest.fn(async () => ({})),
+  };
+  const merchantSettings = {
+    payInWindowMinutesOf: jest.fn(async () => 30),
+  };
+  const dealCallbacks = { recordWithin: jest.fn(async () => undefined) };
   const wallets = {
     lockWalletsWithin: jest.fn(async () => [
       { insurancePayOutBalance: toCrypto(setup.insurance ?? '1000') },
@@ -167,6 +199,10 @@ const build = (setup: Setup = {}) => {
     files as never,
     config as never,
     payouts as never,
+    users as never,
+    merchantBalances as never,
+    merchantSettings as never,
+    dealCallbacks as never,
   );
 
   return {
@@ -180,6 +216,9 @@ const build = (setup: Setup = {}) => {
     wallets,
     payouts,
     attachments,
+    audit,
+    merchantBalances,
+    dealCallbacks,
   };
 };
 
@@ -520,6 +559,154 @@ describe('TraderPayoutActionsService', () => {
           reasonCode: PayoutDeclineReason.Technical,
         }),
       );
+    });
+  });
+
+  describe('assignment by an admin', () => {
+    const ADMIN = { userId: uuidOf(9) };
+    const assign = { traderUserId: TRADER, confirmOverdraft: false };
+
+    it('takes a pool pay-out for the trader, marked as the admin’s', async () => {
+      const { service, deal, transactions, audit } = build();
+
+      await service.assignByAdmin(ADMIN, DEAL, assign, NOW);
+
+      expect(deal).toMatchObject({
+        traderUserId: TRADER,
+        payoutAssignedBy: 'admin',
+        status: TransactionStatus.Active,
+      });
+      expect(transactions.transitionLocked).toHaveBeenCalledWith(
+        expect.anything(),
+        deal,
+        {
+          toStatus: TransactionStatus.Active,
+          source: StatusEventSource.Admin,
+          actorUserId: ADMIN.userId,
+        },
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: ADMIN.userId,
+          targetUserId: TRADER,
+          action: 'admin.payout_assigned',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('refuses anybody who is not an active trader', async () => {
+      for (const user of [
+        null,
+        { role: Role.LeadTrader },
+        { status: UserStatus.Blocked },
+      ]) {
+        await expect(
+          build({ user }).service.assignByAdmin(ADMIN, DEAL, assign, NOW),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+    });
+
+    it('keeps the take’s checks: the switch, the admission, the insurance', async () => {
+      await expect(
+        build({ settings: { tradingEnabled: false } }).service.assignByAdmin(
+          ADMIN,
+          DEAL,
+          assign,
+          NOW,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      const notAdmitted = await build({ admission: { exclusiveTopUp: true } })
+        .service.assignByAdmin(ADMIN, DEAL, assign, NOW)
+        .catch((error: unknown) => error);
+      expect(codeOf(notAdmitted)).toBe('TRADER_NOT_ADMITTED');
+
+      const poor = await build({ insurance: '10' })
+        .service.assignByAdmin(ADMIN, DEAL, assign, NOW)
+        .catch((error: unknown) => error);
+      expect(codeOf(poor)).toBe('INSURANCE_BELOW_MINIMUM');
+    });
+
+    it('revives a canceled pay-out: holds the merchant again and opens a new window', async () => {
+      const canceled = pending({
+        status: TransactionStatus.Canceled,
+        merchantAmount: toCrypto('102'),
+        resolvedAt: NOW,
+      });
+      const { service, deal, merchantBalances, manager, dealCallbacks } = build(
+        { deal: canceled },
+      );
+
+      await service.assignByAdmin(ADMIN, DEAL, assign, NOW);
+
+      expect(manager.delete).toHaveBeenCalled();
+      expect(merchantBalances.reholdPayOutWithin).toHaveBeenCalledWith(
+        manager,
+        MERCHANT,
+        toCrypto('102'),
+        DEAL,
+        ADMIN.userId,
+      );
+      expect(deal).toMatchObject({
+        status: TransactionStatus.Active,
+        resolvedAt: null,
+        traderUserId: TRADER,
+        expiresAt: new Date(NOW.getTime() + 30 * MINUTE),
+      });
+      expect(dealCallbacks.recordWithin).toHaveBeenCalled();
+    });
+
+    it('a revival the merchant cannot cover needs the overdraft confirmed', async () => {
+      const canceled = () =>
+        pending({
+          status: TransactionStatus.Canceled,
+          merchantAmount: toCrypto('102'),
+        });
+      const short = build({ deal: canceled(), merchantBalance: '50' });
+      const refused = await short.service
+        .assignByAdmin(ADMIN, DEAL, assign, NOW)
+        .catch((error: unknown) => error);
+
+      expect(codeOf(refused)).toBe('OVERDRAFT_NOT_CONFIRMED');
+      expect(short.merchantBalances.reholdPayOutWithin).not.toHaveBeenCalled();
+
+      const confirmed = build({ deal: canceled(), merchantBalance: '50' });
+      await confirmed.service.assignByAdmin(
+        ADMIN,
+        DEAL,
+        { ...assign, confirmOverdraft: true },
+        NOW,
+      );
+      expect(confirmed.merchantBalances.reholdPayOutWithin).toHaveBeenCalled();
+    });
+
+    it('a live dispute blocks a revival; a trader never takes a canceled one', async () => {
+      const canceled = pending({ status: TransactionStatus.Canceled });
+      const disputed = await build({ deal: canceled, liveDispute: true })
+        .service.assignByAdmin(ADMIN, DEAL, assign, NOW)
+        .catch((error: unknown) => error);
+      expect(codeOf(disputed)).toBe('DEAL_UNDER_DISPUTE');
+
+      const taken = await build({
+        deal: pending({ status: TransactionStatus.Canceled }),
+      })
+        .service.take(actor, DEAL, NOW)
+        .catch((error: unknown) => error);
+      expect(codeOf(taken)).toBe('ALREADY_TAKEN');
+    });
+
+    it('a pay-out another trader holds is not reassigned', async () => {
+      const held = await build({
+        deal: pending({
+          status: TransactionStatus.Active,
+          traderUserId: uuidOf(7),
+        }),
+      })
+        .service.assignByAdmin(ADMIN, DEAL, assign, NOW)
+        .catch((error: unknown) => error);
+
+      expect(codeOf(held)).toBe('ALREADY_TAKEN');
     });
   });
 });

@@ -22,7 +22,7 @@ import { StatusEventSource } from '../types/status-event-source.enum';
 import { TraderDealActor } from '../types/trader-deal-actor';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
-import { recomputeChangedPayIn } from '../utils/recompute-changed-pay-in';
+import { recomputeChangedDeal } from '../utils/recompute-changed-deal';
 import { TransactionService } from './transaction.service';
 import { WalletService } from './wallet.service';
 
@@ -163,7 +163,7 @@ export class TraderDealActionsService {
         where: { transactionId: id },
         order: { id: 'ASC' },
       });
-      const figures = recomputeChangedPayIn(deal, shares, amountFiat);
+      const figures = recomputeChangedDeal(deal, shares, amountFiat);
       const amountByShare = new Map(
         figures.leadShares.map((share) => [share.shareId, share.amount]),
       );

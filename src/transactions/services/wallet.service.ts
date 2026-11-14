@@ -307,6 +307,28 @@ export class WalletService {
     );
   }
 
+  async adjustMainWithin(
+    manager: EntityManager,
+    userId: string,
+    delta: Crypto,
+    transactionId: string,
+  ): Promise<void> {
+    if (delta.isZero()) return;
+
+    const wallet = await this.lock(manager, userId);
+    const operation = this.journalMove(
+      manager,
+      wallet,
+      BalanceKind.Main,
+      delta,
+      BalanceOperationType.Transaction,
+      transactionId,
+    );
+
+    await manager.save(wallet);
+    await manager.save(operation);
+  }
+
   async releaseEscrowWithin(
     manager: EntityManager,
     userId: string,

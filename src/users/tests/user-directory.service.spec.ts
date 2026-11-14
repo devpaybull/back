@@ -738,6 +738,67 @@ describe('UserDirectoryService', () => {
 
         expect(page.meta.total).toBe(2);
       });
+
+      it('matches a merchant-side account through the merchants the search named', async () => {
+        await expect(
+          listedIds({
+            search: 'ohla',
+            matchingMerchantIds: [uuidOf(40)],
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([6].map(uuidOf));
+      });
+
+      it('never matches an account of another role through its merchant', async () => {
+        stored.push({
+          id: uuidOf(7),
+          email: 'trader7@example.com',
+          role: Role.Trader,
+          status: UserStatus.Active,
+          merchantId: uuidOf(40),
+          createdAt: dayOf(7),
+        });
+
+        await expect(
+          listedIds({
+            search: 'ohla',
+            matchingMerchantIds: [uuidOf(40)],
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([6].map(uuidOf));
+      });
+
+      it('keeps the role filter on a merchant match', async () => {
+        await expect(
+          listedIds({
+            search: 'ohla',
+            matchingMerchantIds: [uuidOf(40)],
+            role: [Role.MerchantSupport],
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([]);
+      });
+
+      it('keeps the merchant filter on a merchant match', async () => {
+        await expect(
+          listedIds({
+            search: 'ohla',
+            matchingMerchantIds: [uuidOf(40)],
+            merchantId: uuidOf(41),
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([]);
+      });
+
+      it('still matches the email beside the merchant names', async () => {
+        await expect(
+          listedIds({
+            search: 'boris',
+            matchingMerchantIds: [uuidOf(41)],
+            sortBy: UserSortField.Id,
+          }),
+        ).resolves.toEqual([3].map(uuidOf));
+      });
     });
 
     describe('sorting', () => {
@@ -778,6 +839,30 @@ describe('UserDirectoryService', () => {
           listedIds({ sortBy: UserSortField.Id, sortOrder: SortOrder.Asc }),
         ).resolves.toEqual([1, 2, 3, 4, 5, 6].map(uuidOf));
       });
+
+      it.each([
+        UserSortField.Balance,
+        UserSortField.InsuranceMin,
+        UserSortField.Rate,
+      ])('refuses to order by %s without a role filter', async (sortBy) => {
+        await expect(service.list(query({ sortBy }))).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(users.findAndCount).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        [[Role.Trader, Role.Admin]],
+        [[Role.Merchant]],
+        [[Role.LeadTrader, Role.Cascade]],
+      ])(
+        'refuses to order by a trading value for the roles %j',
+        async (role) => {
+          await expect(
+            service.list(query({ sortBy: UserSortField.Rate, role })),
+          ).rejects.toThrow(BadRequestException);
+        },
+      );
 
       it('orders by a column other than the identifier', async () => {
         await expect(
@@ -846,5 +931,71 @@ describe('UserDirectoryService.findIdsMatching', () => {
     await expect(service.findIdsMatching('a')).rejects.toThrow(
       BadRequestException,
     );
+  });
+});
+
+describe('UserDirectoryService.countByRole', () => {
+  const build = (rows: { role: Role; count: string }[]) => {
+    const builder = {
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn(async () => rows),
+    };
+    const users = { createQueryBuilder: jest.fn(() => builder) };
+
+    return {
+      builder,
+      service: new UserDirectoryService(users as never),
+    };
+  };
+
+  it('answers every role, a role nobody holds as zero', async () => {
+    const { service } = build([
+      { role: Role.Trader, count: '3' },
+      { role: Role.Admin, count: '1' },
+    ]);
+
+    await expect(service.countByRole({})).resolves.toEqual({
+      [Role.Trader]: 3,
+      [Role.LeadTrader]: 0,
+      [Role.Merchant]: 0,
+      [Role.MerchantSupport]: 0,
+      [Role.MerchantAgent]: 0,
+      [Role.Cascade]: 0,
+      [Role.Admin]: 1,
+      [Role.Superadmin]: 0,
+    });
+  });
+
+  it('adds no condition when nothing narrows the count', async () => {
+    const { builder, service } = build([]);
+
+    await service.countByRole({});
+
+    expect(builder.where).not.toHaveBeenCalled();
+  });
+
+  it('narrows with the list’s own conditions, search included', async () => {
+    const { builder, service } = build([]);
+
+    await service.countByRole({
+      search: 'ohla',
+      status: UserStatus.Active,
+      matchingMerchantIds: [uuidOf(40)],
+    });
+
+    const searched = ILike('%ohla%');
+
+    expect(builder.where).toHaveBeenCalledWith([
+      { status: UserStatus.Active, email: searched },
+      { status: UserStatus.Active, telegramUsername: searched },
+      {
+        status: UserStatus.Active,
+        role: In([Role.Merchant, Role.MerchantSupport, Role.MerchantAgent]),
+        merchantId: In([uuidOf(40)]),
+      },
+    ]);
   });
 });

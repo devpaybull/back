@@ -217,11 +217,15 @@ export class BankDetailsService {
     );
   }
 
-  async findIdsMatching(search: string): Promise<string[]> {
+  async findIdsMatching(
+    search: string,
+    withDeleted = false,
+  ): Promise<string[]> {
     const searched = ILike(`%${escapeLikePattern(search)}%`);
     const rows = await this.bankDetails.find({
       select: { id: true },
       take: MAX_SEARCH_MATCHED_REQUISITES + 1,
+      withDeleted,
       where: [
         { card: searched },
         { phone: searched },

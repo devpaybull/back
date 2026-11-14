@@ -22,6 +22,7 @@ import { TransactionDispute } from '../entities/transaction-dispute.entity';
 import { TransactionFile } from '../entities/transaction-file.entity';
 import { TransactionStatusEvent } from '../entities/transaction-status-event.entity';
 import { Transaction } from '../entities/transaction.entity';
+import { AdminDealActor } from '../types/admin-deal-actor';
 import { DisputeListQuery } from '../types/dispute-list-query';
 import { DisputeSource } from '../types/dispute-source';
 import { DisputeStatus } from '../types/dispute-status.enum';
@@ -55,6 +56,24 @@ const OPENABLE: Record<TransactionKind, readonly TransactionStatus[]> = {
     ...SETTLED,
   ],
   [TransactionKind.PayOut]: [TransactionStatus.Checking, ...SETTLED],
+};
+const PAY_IN_RUNNING: readonly TransactionStatus[] = [
+  TransactionStatus.Active,
+  TransactionStatus.Checking,
+  TransactionStatus.CheckingManually,
+];
+const ADMIN_NOT_OPENABLE: Record<
+  TransactionKind,
+  readonly TransactionStatus[]
+> = {
+  [TransactionKind.PayIn]: [
+    TransactionStatus.Dispute,
+    TransactionStatus.ManualReview,
+  ],
+  [TransactionKind.PayOut]: [
+    TransactionStatus.Dispute,
+    TransactionStatus.ManualReview,
+  ],
 };
 const NOT_ALLOWED = (message: string) =>
   new ConflictException({
@@ -181,6 +200,120 @@ export class DisputesService {
 
       return deal;
     });
+  }
+
+  async openByAdmin(
+    admin: AdminDealActor,
+    transactionId: string,
+    upload: TransactionUpload,
+    amountFiat: Fiat | null,
+    now: Date = new Date(),
+  ): Promise<Transaction> {
+    if (
+      !(await this.dataSource.manager.exists(Transaction, {
+        where: { id: transactionId },
+      }))
+    ) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    const stored = await this.files.store(transactionId, upload);
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const deal = await manager.findOneOrFail(Transaction, {
+          where: { id: transactionId },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!deal.traderUserId) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'NO_TRADER_TO_DISPUTE',
+            message: 'Nobody holds this deal, so nobody can answer a dispute',
+          });
+        }
+
+        await this.wallets.lockWalletsWithin(
+          manager,
+          [deal.traderUserId],
+          [deal.traderUserId],
+        );
+
+        if (ADMIN_NOT_OPENABLE[deal.kind].includes(deal.status)) {
+          throw NOT_ALLOWED(`A deal in ${deal.status} cannot be disputed`);
+        }
+
+        if (
+          await manager.exists(TransactionDispute, {
+            where: {
+              transactionId,
+              status: In([
+                DisputeStatus.Deferred,
+                DisputeStatus.Open,
+                DisputeStatus.Reviewing,
+              ]),
+            },
+          })
+        ) {
+          throw NOT_ALLOWED('This deal already has a dispute');
+        }
+
+        const payIn = deal.kind === TransactionKind.PayIn;
+
+        if (payIn) this.assertOpeningAmount(deal, amountFiat);
+
+        const deferred = payIn && PAY_IN_RUNNING.includes(deal.status);
+        const dispute = await manager.save(
+          manager.create(TransactionDispute, {
+            transactionId,
+            status: deferred ? DisputeStatus.Deferred : DisputeStatus.Open,
+            statusBefore: deal.status,
+            amountFiat: payIn ? amountFiat : null,
+            openedAt: now,
+            traderDeadlineAt: deferred ? null : this.traderDeadline(deal, now),
+          }),
+        );
+
+        await this.files.recordWithin(
+          manager,
+          transactionId,
+          TransactionFileKind.DisputeReceipt,
+          stored,
+          admin.userId,
+          dispute.id,
+        );
+
+        if (!deferred) {
+          await this.transactions.moveForDisputeLocked(manager, deal, {
+            toStatus: TransactionStatus.Dispute,
+            source: StatusEventSource.Admin,
+            actorUserId: admin.userId,
+          });
+        }
+
+        await this.audit.record(
+          {
+            actorUserId: admin.userId,
+            targetUserId: deal.traderUserId,
+            action: 'admin.dispute_opened',
+            metadata: {
+              transactionId,
+              disputeId: dispute.id,
+              statusBefore: dispute.statusBefore,
+              amountFiat: payIn && amountFiat ? formatFiat(amountFiat) : null,
+            },
+          },
+          manager,
+        );
+        await this.announce(manager, deal);
+
+        return deal;
+      });
+    } catch (error) {
+      await this.files.discard(stored);
+      throw error;
+    }
   }
 
   cancelByMerchant(
@@ -358,6 +491,7 @@ export class DisputesService {
     disputeId: number,
     amountFiat: Fiat | null,
     now: Date = new Date(),
+    confirmOverdraft = false,
   ): Promise<TransactionDispute> {
     return this.dataSource.transaction(async (manager) => {
       const { deal, dispute } = await this.lockForAdmin(manager, disputeId);
@@ -374,6 +508,7 @@ export class DisputesService {
         amountFiat ?? dispute.amountFiat,
         { source: StatusEventSource.Admin, actorUserId: adminUserId },
         now,
+        confirmOverdraft,
       );
       await this.audit.record(
         {
@@ -384,6 +519,7 @@ export class DisputesService {
             transactionId: deal.id,
             disputeId,
             amountFiat: amountFiat ? formatFiat(amountFiat) : null,
+            confirmOverdraft,
           },
         },
         manager,
@@ -526,6 +662,7 @@ export class DisputesService {
     amountFiat: Fiat | null,
     source: DisputeSource,
     now: Date,
+    confirmOverdraft = false,
   ): Promise<void> {
     const toStatus = await this.money.acceptWithin(
       manager,
@@ -533,6 +670,7 @@ export class DisputesService {
       dispute.statusBefore,
       amountFiat,
       now,
+      confirmOverdraft,
     );
 
     dispute.status = DisputeStatus.Accepted;
@@ -547,8 +685,11 @@ export class DisputesService {
     });
   }
 
-  private announce(manager: EntityManager, deal: Transaction): Promise<void> {
-    return this.dealCallbacks.recordWithin(
+  private async announce(
+    manager: EntityManager,
+    deal: Transaction,
+  ): Promise<void> {
+    await this.dealCallbacks.recordWithin(
       manager,
       deal,
       MerchantCallbackEvent.DisputeChanged,

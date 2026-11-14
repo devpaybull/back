@@ -19,7 +19,7 @@ import { Transaction } from './transaction.entity';
 @Entity('merchant_balance_operations')
 @Index(['transactionId', 'type'], {
   unique: true,
-  where: `"type" <> 'deal_dispute'`,
+  where: `"type" = 'deal_pay_in'`,
 })
 @Index(['accountTransactionId', 'type'], { unique: true })
 export class MerchantBalanceOperation {

@@ -211,11 +211,6 @@ export class EnvironmentVariables {
 
   @Type(() => Number)
   @IsInt()
-  @Min(1)
-  DEVICE_MESSAGE_RETENTION_DAYS: number = 90;
-
-  @Type(() => Number)
-  @IsInt()
   @Min(0)
   DEVICE_MESSAGE_CLOCK_TOLERANCE_SECONDS: number = 120;
 
@@ -257,6 +252,11 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   TRADER_EXPORT_MAX_ROWS: number = 100000;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  ADMIN_EXPORT_MAX_ROWS: number = 100000;
 
   @Type(() => Number)
   @IsInt()

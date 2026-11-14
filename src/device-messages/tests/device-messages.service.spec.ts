@@ -1,4 +1,4 @@
-import { ILike, LessThanOrEqual, MoreThanOrEqual, And } from 'typeorm';
+import { And, ILike, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { uuidOf } from '../../common/tests/uuid-of.spec';
 import { SortOrder } from '../../common/enums/sort-order.enum';
 import { toFiat } from '../../common/utils/to-fiat';
@@ -43,6 +43,7 @@ const build = ({
     outcome: DeviceMatchOutcome.Matched,
     transactionId: DEAL as string | null,
   },
+  namedDeviceIds = [7, 8] as number[],
 } = {}) => {
   const insert = {
     insert: jest.fn().mockReturnThis(),
@@ -74,6 +75,11 @@ const build = ({
   };
   const templates = { recognise: jest.fn(async () => recognised) };
   const users = { statusWithin: jest.fn(async () => ownerStatus) };
+  const devices = {
+    idsWithNameContaining: jest.fn<Promise<number[]>, [string]>(
+      async () => namedDeviceIds,
+    ),
+  };
   const config = { getOrThrow: jest.fn(() => 120) };
   const requisites = {
     requisitesOfDeviceWithin: jest.fn(async () => [
@@ -90,6 +96,7 @@ const build = ({
     messages as never,
     templates as never,
     users as never,
+    devices as never,
     requisites as never,
     dealActions as never,
     config as never,
@@ -101,6 +108,7 @@ const build = ({
     manager,
     savepoint,
     users,
+    devices,
     config,
     messages,
     templates,
@@ -320,7 +328,7 @@ describe('DeviceMessagesService', () => {
     it('scopes to the owner and hides unknown senders by default', async () => {
       const { service, messages } = build();
 
-      await service.list(OWNER, query);
+      await service.list({ ...query, userId: OWNER });
 
       expect(messages.findAndCount).toHaveBeenCalledWith({
         where: [{ userId: OWNER, senderKnown: true }],
@@ -335,8 +343,9 @@ describe('DeviceMessagesService', () => {
       const from = new Date('2026-11-01T00:00:00Z');
       const to = new Date('2026-11-02T00:00:00Z');
 
-      await service.list(OWNER, {
+      await service.list({
         ...query,
+        userId: OWNER,
         kind: DeviceMessageKind.Push,
         messageType: DeviceMessageType.Credit,
         createdFrom: from,
@@ -367,9 +376,9 @@ describe('DeviceMessagesService', () => {
     it('searches a number as the id or in the text, anything else in the text, escaped', async () => {
       const { service, messages } = build();
 
-      await service.list(OWNER, { ...query, search: '42' });
-      await service.list(OWNER, { ...query, search: '50%' });
-      await service.list(OWNER, { ...query, search: '99999999999' });
+      await service.list({ ...query, userId: OWNER, search: '42' });
+      await service.list({ ...query, userId: OWNER, search: '50%' });
+      await service.list({ ...query, userId: OWNER, search: '99999999999' });
 
       const base = { userId: OWNER, senderKnown: true };
 
@@ -384,12 +393,68 @@ describe('DeviceMessagesService', () => {
         [{ ...base, text: ILike('%99999999999%') }],
       ]);
     });
+
+    it('reads every trader’s messages when no owner is given, and sorts by the raw sender with the id as the tie', async () => {
+      const { service, messages } = build();
+
+      await service.list({
+        ...query,
+        sortBy: DeviceMessageSortField.Sender,
+        sortOrder: SortOrder.Asc,
+      });
+
+      expect(messages.findAndCount).toHaveBeenCalledWith({
+        where: [{ senderKnown: true }],
+        order: { sender: 'ASC', id: 'ASC' },
+        skip: 10,
+        take: 10,
+      });
+    });
+
+    it('turns a piece of the device name into the ids the devices owner answers, deleted devices included', async () => {
+      const { service, messages, devices } = build();
+
+      await service.list({ ...query, deviceName: 'pixel' });
+
+      expect(devices.idsWithNameContaining).toHaveBeenCalledWith('pixel');
+      expect(messages.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [{ deviceId: In([7, 8]), senderKnown: true }],
+        }),
+      );
+
+      await service.list({ ...query, deviceName: 'pixel', deviceId: 8 });
+
+      expect(messages.findAndCount).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: [{ deviceId: 8, senderKnown: true }],
+        }),
+      );
+    });
+
+    it('answers an empty page without a query when no device name matches, or the device id is not among them', async () => {
+      const { service, messages } = build({ namedDeviceIds: [] });
+
+      const page = await service.list({ ...query, deviceName: 'nothing' });
+
+      expect(page.items).toEqual([]);
+      expect(page.meta.total).toBe(0);
+      expect(messages.findAndCount).not.toHaveBeenCalled();
+
+      const other = build();
+
+      await expect(
+        other.service.countsOf({ deviceName: 'pixel', deviceId: 99 }),
+      ).resolves.toEqual({ all: 0, push: 0, sms: 0, credit: 0, statement: 0 });
+      expect(other.messages.count).not.toHaveBeenCalled();
+    });
   });
 
   it('counts the tabs under the filters, kind and type set by each tab alone', async () => {
     const { service, messages } = build();
 
-    const counts = await service.countsOf(OWNER, {
+    const counts = await service.countsOf({
+      userId: OWNER,
       kind: DeviceMessageKind.Sms,
       deviceId: 7,
     });

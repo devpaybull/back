@@ -75,6 +75,9 @@ describe('ListUsersQueryDto', () => {
       UserSortField.Role,
       UserSortField.Status,
       UserSortField.Email,
+      UserSortField.Balance,
+      UserSortField.InsuranceMin,
+      UserSortField.Rate,
     ])('sorts by %s', (sortBy) => {
       expect(failedProperties({ sortBy })).toEqual([]);
       expect(parse({ sortBy }).sortBy).toBe(sortBy);

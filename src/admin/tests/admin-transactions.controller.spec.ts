@@ -69,6 +69,10 @@ describe('AdminTransactionsController', () => {
   let merchants: { findByIds: jest.Mock; rankByName: jest.Mock };
   let counterparties: { findByIds: jest.Mock };
   let controller: AdminTransactionsController;
+  let cards: { cardOf: jest.Mock };
+  let dealActions: Record<string, jest.Mock>;
+  let payoutActions: { assignByAdmin: jest.Mock };
+  let disputes: { openByAdmin: jest.Mock };
 
   beforeEach(() => {
     transactions = {
@@ -86,6 +90,17 @@ describe('AdminTransactionsController', () => {
       rankByName: jest.fn(async () => new Map()),
     };
     counterparties = { findByIds: jest.fn(async () => []) };
+    cards = { cardOf: jest.fn() };
+    dealActions = {
+      close: jest.fn(async () => transaction()),
+      changeAmount: jest.fn(async () => transaction()),
+      cancelSettled: jest.fn(async () => transaction()),
+      restore: jest.fn(async () => transaction()),
+      cancelPayout: jest.fn(async () => transaction()),
+      sendCallback: jest.fn(),
+    };
+    payoutActions = { assignByAdmin: jest.fn(async () => transaction()) };
+    disputes = { openByAdmin: jest.fn(async () => transaction()) };
     controller = new AdminTransactionsController(
       transactions as never,
       directory as never,
@@ -94,6 +109,11 @@ describe('AdminTransactionsController', () => {
       counterparties as never,
       { getOrThrow: () => 'Europe/Moscow' } as never,
       { listOf: jest.fn(async () => []) } as never,
+      { findByIds: jest.fn(async () => []) } as never,
+      cards as never,
+      dealActions as never,
+      payoutActions as never,
+      disputes as never,
     );
   });
 
@@ -147,7 +167,6 @@ describe('AdminTransactionsController', () => {
       expect(bankDetails.findIdsOfBank).toHaveBeenCalledWith(7);
       expect(transactions.list).toHaveBeenCalledWith(
         expect.objectContaining({
-          bankId: 7,
           bankDetailsIds: [uuidOf(40), uuidOf(41)],
         }),
       );
@@ -318,6 +337,7 @@ describe('AdminTransactionsController', () => {
           trader: {
             id: uuidOf(1),
             login: 'mark',
+            telegramUsername: 'mark',
             telegramGroups: 'Mark / trade_paybull',
           },
           merchant: { id: uuidOf(3), name: 'Acme' },
@@ -338,6 +358,7 @@ describe('AdminTransactionsController', () => {
           trader: {
             id: uuidOf(2),
             login: 'two@example.com',
+            telegramUsername: null,
             telegramGroups: null,
           },
           counterparty: null,
@@ -407,11 +428,11 @@ describe('AdminTransactionsController', () => {
 
   describe('findOne', () => {
     it('404 when the transaction is unknown', async () => {
-      transactions.findById.mockResolvedValue(null);
+      cards.cardOf.mockRejectedValue(new NotFoundException());
 
-      await expect(controller.findOne(uuidOf(100))).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        controller.findOne(uuidOf(100), { role: Role.Admin } as never),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -492,6 +513,253 @@ describe('AdminTransactionsController', () => {
         reason: 'confirmed',
       });
       expect(result.status).toBe(TransactionStatus.Success);
+    });
+  });
+
+  describe('the admin pages: filters, counters, export, card and actions', () => {
+    const query = (overrides: Record<string, unknown> = {}) =>
+      ({
+        page: 1,
+        limit: 20,
+        sortBy: TransactionSortField.CreatedAt,
+        sortOrder: SortOrder.Desc,
+        ...overrides,
+      }) as never;
+    const admin = { id: uuidOf(9), role: Role.Admin } as AuthenticatedUser;
+    const extra = () => {
+      const more = {
+        findIdsOfGroup: jest.fn(async () => [uuidOf(3), uuidOf(4)]),
+        findIdsByReference: jest.fn(async () => [5]),
+        findIdsMatching: jest.fn(async () => [uuidOf(40)]),
+        countsByMethod: jest.fn(async () => new Map([['sbp', 3]])),
+        listForExport: jest.fn(async () => [transaction()]),
+      };
+      Object.assign(merchants, { findIdsOfGroup: more.findIdsOfGroup });
+      Object.assign(counterparties, {
+        findIdsByReference: more.findIdsByReference,
+      });
+      Object.assign(bankDetails, { findIdsMatching: more.findIdsMatching });
+      Object.assign(transactions, {
+        countsByMethod: more.countsByMethod,
+        listForExport: more.listForExport,
+      });
+      transactions.list.mockResolvedValue(
+        new Page([], { total: 0, page: 1, limit: 20, pages: 0 }),
+      );
+
+      return more;
+    };
+
+    it('turns every filter into the owners’ ids, and no period into all time', async () => {
+      const more = extra();
+
+      await controller.list(
+        query({
+          status: [TransactionStatus.Active, TransactionStatus.ManualReview],
+          merchantGroupId: 2,
+          merchantId: uuidOf(4),
+          counterparty: 'payer-1',
+          requisite: '4455',
+          search: 'order-77',
+        }),
+      );
+
+      expect(more.findIdsMatching).toHaveBeenCalledWith('4455', true);
+      expect(transactions.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statuses: [TransactionStatus.Active, TransactionStatus.ManualReview],
+          merchantIds: [uuidOf(4)],
+          counterpartyIds: [5],
+          search: 'order-77',
+          requisite: { bankDetailsIds: [uuidOf(40)], text: '4455' },
+        }),
+      );
+      expect(transactions.list.mock.calls[0][0].createdFrom).toBeUndefined();
+      expect(transactions.list.mock.calls[0][0].createdTo).toBeUndefined();
+    });
+
+    it('a period becomes a range in the business time zone', async () => {
+      extra();
+
+      await controller.list(query({ period: 'today' }));
+
+      const { createdFrom, createdTo } = transactions.list.mock.calls[0][0];
+      expect(createdFrom).toBeInstanceOf(Date);
+      expect(createdTo.getTime()).toBeGreaterThan(createdFrom.getTime());
+    });
+
+    it('counts every method the kind works in, zeros included, without the method filter', async () => {
+      const more = extra();
+
+      const counters = await controller.counters({
+        kind: TransactionKind.PayOut,
+        method: 'card',
+      } as never);
+
+      expect(
+        (
+          more.countsByMethod.mock.calls as unknown as [{ method?: string }][]
+        )[0][0].method,
+      ).toBeUndefined();
+      expect(counters).toEqual({ all: 3, byMethod: { sbp: 3, card: 0 } });
+    });
+
+    it('exports the filtered rows as CSV', async () => {
+      extra();
+
+      const file = await controller.export({} as never);
+      const text = await new Promise<string>((resolve) => {
+        const chunks: Buffer[] = [];
+        file
+          .getStream()
+          .on('data', (chunk: Buffer) => chunks.push(chunk))
+          .on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+      });
+
+      expect(text.split('\r\n')[0]).toMatch(/^id,merchantTransactionId,kind/);
+      expect(text).toContain(uuidOf(100));
+    });
+
+    it('marks every action a write, and the money ones superadmin only', () => {
+      for (const handler of [
+        controller.close,
+        controller.changeAmount,
+        controller.cancelSettled,
+        controller.restore,
+        controller.cancelPayout,
+        controller.assign,
+        controller.openDispute,
+        controller.sendCallback,
+      ]) {
+        expect(Reflect.getMetadata(WRITE_ACCESS_METADATA_KEY, handler)).toBe(
+          true,
+        );
+      }
+      for (const handler of [
+        controller.changeAmount,
+        controller.cancelSettled,
+        controller.restore,
+      ]) {
+        expect(Reflect.getMetadata(ROLES_METADATA_KEY, handler)).toEqual([
+          Role.Superadmin,
+        ]);
+      }
+      expect(
+        Reflect.getMetadata(ROLES_METADATA_KEY, controller.close),
+      ).toBeUndefined();
+    });
+
+    it('an admin may not act on their own deal, nor on an admin’s', async () => {
+      transactions.findById.mockResolvedValue(
+        transaction({ traderUserId: admin.id }),
+      );
+      await expect(controller.close(uuidOf(100), admin)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+
+      transactions.findById.mockResolvedValue(transaction());
+      directory.findById.mockResolvedValue({ role: Role.Admin });
+      await expect(controller.close(uuidOf(100), admin)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(dealActions.close).not.toHaveBeenCalled();
+    });
+
+    it('passes the amount and the overdraft flag through', async () => {
+      transactions.findById.mockResolvedValue(transaction());
+      directory.findById.mockResolvedValue({ role: Role.Trader });
+
+      await controller.changeAmount(
+        uuidOf(100),
+        { amountFiat: '1500.00', reason: 'чек' },
+        admin,
+      );
+
+      expect(dealActions.changeAmount).toHaveBeenCalledWith(
+        { userId: admin.id },
+        uuidOf(100),
+        {
+          amountFiat: toFiat('1500.00'),
+          reason: 'чек',
+          confirmOverdraft: false,
+        },
+      );
+    });
+
+    it('a dispute needs its receipt; an admin is not assigned their own pay-out', async () => {
+      await expect(
+        controller.openDispute(uuidOf(100), {}, admin, undefined),
+      ).rejects.toThrow('The receipt file is required');
+      await expect(
+        controller.assign(uuidOf(100), { traderUserId: admin.id }, admin),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('the card merges the status events and the disputes, newest first', async () => {
+      const at = (minute: number) =>
+        new Date(`2026-11-14T10:${String(minute).padStart(2, '0')}:00Z`);
+      cards.cardOf.mockResolvedValue({
+        deal: transaction(),
+        events: [
+          {
+            createdAt: at(1),
+            fromStatus: null,
+            toStatus: TransactionStatus.Active,
+            source: StatusEventSource.System,
+            actorUserId: null,
+            reason: null,
+          },
+          {
+            createdAt: at(9),
+            fromStatus: TransactionStatus.Active,
+            toStatus: TransactionStatus.Success,
+            source: StatusEventSource.Admin,
+            actorUserId: uuidOf(9),
+            reason: null,
+          },
+        ],
+        disputes: [
+          {
+            id: 4,
+            status: 'rejected',
+            statusBefore: TransactionStatus.Success,
+            openedAt: at(5),
+            resolvedAt: null,
+          },
+        ],
+        leadShares: [
+          { leadUserId: uuidOf(7), percent: 1, amount: toCrypto('0.2') },
+        ],
+        files: [],
+        actions: ['send_callback'],
+      });
+      directory.findByIds.mockResolvedValue([
+        { id: uuidOf(9), telegramUsername: 'boss', role: Role.Admin },
+        { id: uuidOf(7), telegramUsername: 'lead', role: Role.LeadTrader },
+      ]);
+
+      const card = await controller.findOne(uuidOf(100), admin);
+
+      expect(card.history.map((entry) => entry.kind)).toEqual([
+        'status',
+        'dispute_opened',
+        'status',
+      ]);
+      expect(card.history[0].actor).toEqual({
+        id: uuidOf(9),
+        login: 'boss',
+        role: Role.Admin,
+      });
+      expect(card.leadShares).toEqual([
+        {
+          leadUserId: uuidOf(7),
+          login: 'lead',
+          percent: 1,
+          amount: '0.200000',
+        },
+      ]);
+      expect(card.actions).toEqual(['send_callback']);
+      expect(cards.cardOf).toHaveBeenCalledWith(uuidOf(100), false);
     });
   });
 });

@@ -46,6 +46,7 @@ describe('AdminUsersController', () => {
   const userDirectory = {
     list: jest.fn(),
     findById: jest.fn(),
+    countByRole: jest.fn(),
   };
 
   const userAdministration = { update: jest.fn() };
@@ -63,6 +64,7 @@ describe('AdminUsersController', () => {
     removeLead: jest.fn(),
     leadsOf: jest.fn(),
     subordinatesOf: jest.fn(),
+    assignmentsLedByAny: jest.fn(),
   };
 
   const wallets = { findByUserIds: jest.fn() };
@@ -70,11 +72,16 @@ describe('AdminUsersController', () => {
   const traderSettings = {
     findByUserIds: jest.fn(),
     insurancePayInMinOf: jest.fn(),
+    insurancePayOutMinOf: jest.fn(),
   };
 
-  const rateService = { getEffectiveGeneralRates: jest.fn() };
+  const rateService = {
+    getEffectiveGeneralRates: jest.fn(),
+    traderRateSummaries: jest.fn(),
+    leadRateSummaries: jest.fn(),
+  };
 
-  const merchants = { findByIds: jest.fn() };
+  const merchants = { findByIds: jest.fn(), findIdsMatching: jest.fn() };
 
   const passwords = {
     issueGeneratedPassword: jest.fn(),
@@ -84,6 +91,8 @@ describe('AdminUsersController', () => {
   const loginLinks = { issue: jest.fn(), invalidateIssuedBy: jest.fn() };
 
   const GLOBAL_MIN = 500;
+
+  const GLOBAL_PAY_OUT_MIN = 300;
 
   const traderBase = [{ method: 'sbp', payInPercent: 8.5, payOutPercent: 1.5 }];
 
@@ -125,12 +134,20 @@ describe('AdminUsersController', () => {
     jest.clearAllMocks();
     team.leadsOf.mockResolvedValue(new Map());
     team.subordinatesOf.mockResolvedValue(new Map());
+    team.assignmentsLedByAny.mockResolvedValue([]);
     wallets.findByUserIds.mockResolvedValue([]);
     traderSettings.findByUserIds.mockResolvedValue([]);
     traderSettings.insurancePayInMinOf.mockImplementation(
       (settings?: TraderSettings | null) =>
         settings?.insurancePayInMin ?? toCrypto(GLOBAL_MIN),
     );
+    traderSettings.insurancePayOutMinOf.mockImplementation(
+      (settings?: TraderSettings | null) =>
+        settings?.insurancePayOutMin ?? toCrypto(GLOBAL_PAY_OUT_MIN),
+    );
+    rateService.traderRateSummaries.mockResolvedValue(new Map());
+    rateService.leadRateSummaries.mockResolvedValue(new Map());
+    merchants.findIdsMatching.mockResolvedValue([]);
     rateService.getEffectiveGeneralRates.mockImplementation(
       async (_scope: RateScope, subjects: RateSubject[]) => ({
         base: traderBase,
@@ -281,7 +298,34 @@ describe('AdminUsersController', () => {
 
       await controller.list(asked);
 
-      expect(userDirectory.list).toHaveBeenCalledWith(asked);
+      expect(userDirectory.list).toHaveBeenCalledWith({
+        ...asked,
+        matchingMerchantIds: [],
+        insurancePayInMinDefault: toCrypto(GLOBAL_MIN),
+      });
+    });
+
+    it('asks the merchants module which merchants the search names, and hands their ids over', async () => {
+      userDirectory.list.mockResolvedValue(pageOf([]));
+      merchants.findIdsMatching.mockResolvedValue([uuidOf(50)]);
+
+      await controller.list(query({ search: 'ohla' }));
+
+      expect(merchants.findIdsMatching).toHaveBeenCalledWith('ohla');
+      expect(userDirectory.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          search: 'ohla',
+          matchingMerchantIds: [uuidOf(50)],
+        }),
+      );
+    });
+
+    it('asks no merchant ids without a search', async () => {
+      userDirectory.list.mockResolvedValue(pageOf([]));
+
+      await controller.list(query());
+
+      expect(merchants.findIdsMatching).not.toHaveBeenCalled();
     });
 
     it('keeps the counters beside the mapped rows', async () => {
@@ -322,9 +366,11 @@ describe('AdminUsersController', () => {
         'email',
         'id',
         'insurancePayInMin',
+        'insurancePayOutMin',
         'leads',
         'login',
         'merchant',
+        'rateSummary',
         'rates',
         'role',
         'status',
@@ -332,6 +378,7 @@ describe('AdminUsersController', () => {
         'telegramGroups',
         'telegramId',
         'telegramUsername',
+        'tradingStatus',
       ]);
     });
 
@@ -529,6 +576,130 @@ describe('AdminUsersController', () => {
         },
       );
 
+      it('gives a trader and a lead their effective pay-out minimum', async () => {
+        traderSettings.findByUserIds.mockResolvedValue([
+          settings({ insurancePayOutMin: toCrypto(750) }),
+        ]);
+
+        const [own, global] = await listed([
+          user(),
+          user({ id: uuidOf(8), role: Role.LeadTrader }),
+        ]);
+
+        expect(own.insurancePayOutMin).toBe('750.000000');
+        expect(global.insurancePayOutMin).toBe(
+          formatCrypto(toCrypto(GLOBAL_PAY_OUT_MIN)),
+        );
+      });
+
+      it.each([
+        [UserStatus.Active, true, 'enabled'],
+        [UserStatus.Active, false, 'disabled'],
+        [UserStatus.Blocked, true, 'blocked'],
+        [UserStatus.Suspended, true, 'blocked'],
+        [UserStatus.Suspended, false, 'blocked'],
+      ])(
+        'reports a %s account with trading %s as %s',
+        async (status, tradingEnabled, expected) => {
+          traderSettings.findByUserIds.mockResolvedValue([
+            settings({ tradingEnabled }),
+          ]);
+
+          const [row] = await listed([user({ status })]);
+
+          expect(row.tradingStatus).toBe(expected);
+        },
+      );
+
+      it('reports trading as disabled when the account has no settings row', async () => {
+        const [trader, lead] = await listed([
+          user(),
+          user({ id: uuidOf(8), role: Role.LeadTrader }),
+        ]);
+
+        expect(trader.tradingStatus).toBe('disabled');
+        expect(lead.tradingStatus).toBe('disabled');
+      });
+
+      it('gives a trader the summary of the rates that apply to it', async () => {
+        traderSettings.findByUserIds.mockResolvedValue([
+          settings({ individualRatesEnabled: true }),
+        ]);
+        const summary = [
+          {
+            currency: 'RUB',
+            payIn: { min: 0, max: 14 },
+            payOut: { min: 0, max: 2.5 },
+          },
+        ];
+        rateService.traderRateSummaries.mockResolvedValue(
+          new Map([[uuidOf(7), summary]]),
+        );
+
+        const [row, bare] = await listed([user(), user({ id: uuidOf(8) })]);
+
+        expect(rateService.traderRateSummaries).toHaveBeenCalledWith([
+          { userId: uuidOf(7), individualEnabled: true },
+          { userId: uuidOf(8), individualEnabled: false },
+        ]);
+        expect(row.rateSummary).toEqual(summary);
+        expect(bare.rateSummary).toEqual([]);
+      });
+
+      it('gives a lead the summary of its shares, over every assignment it leads', async () => {
+        const links = [{ id: 1, leadUserId: uuidOf(7) }];
+        const summary = [
+          {
+            currency: 'RUB',
+            payIn: { min: 1, max: 2 },
+            payOut: { min: 0.5, max: 0.5 },
+          },
+        ];
+        team.assignmentsLedByAny.mockResolvedValue(links);
+        rateService.leadRateSummaries.mockResolvedValue(
+          new Map([[uuidOf(7), summary]]),
+        );
+
+        const [row] = await listed([user({ role: Role.LeadTrader })]);
+
+        expect(team.assignmentsLedByAny).toHaveBeenCalledWith([uuidOf(7)]);
+        expect(rateService.leadRateSummaries).toHaveBeenCalledWith(links);
+        expect(rateService.traderRateSummaries).not.toHaveBeenCalled();
+        expect(row.rateSummary).toEqual(summary);
+      });
+
+      it.each([
+        Role.Merchant,
+        Role.MerchantSupport,
+        Role.MerchantAgent,
+        Role.Cascade,
+        Role.Admin,
+        Role.Superadmin,
+      ])('gives a %s no trading fields', async (role) => {
+        const [row] = await listed([user({ role })]);
+
+        expect(row.insurancePayOutMin).toBeNull();
+        expect(row.tradingStatus).toBeNull();
+        expect(row.rateSummary).toBeNull();
+      });
+
+      it('asks for every summary once per page', async () => {
+        await listed([
+          user({ id: uuidOf(1) }),
+          user({ id: uuidOf(2) }),
+          user({ id: uuidOf(3), role: Role.LeadTrader }),
+          user({ id: uuidOf(4), role: Role.LeadTrader }),
+        ]);
+
+        expect(team.assignmentsLedByAny).toHaveBeenCalledTimes(1);
+        expect(team.assignmentsLedByAny).toHaveBeenCalledWith([
+          uuidOf(3),
+          uuidOf(4),
+        ]);
+        expect(rateService.traderRateSummaries).toHaveBeenCalledTimes(1);
+        expect(rateService.leadRateSummaries).toHaveBeenCalledTimes(1);
+      });
+
       it('composes a whole page with one call per source, never one per row', async () => {
         const rows = [
           user({ id: uuidOf(1), role: Role.Trader }),
@@ -605,6 +776,72 @@ describe('AdminUsersController', () => {
           [{ userId: uuidOf(7), individualEnabled: false }],
         );
       });
+    });
+  });
+
+  describe('counters', () => {
+    const counts = (overrides: Partial<Record<Role, number>> = {}) => ({
+      ...Object.fromEntries(Object.values(Role).map((role) => [role, 0])),
+      ...overrides,
+    });
+
+    it('is declared before the :id route, so "counters" is never read as an id', () => {
+      const handlers = Object.getOwnPropertyNames(
+        AdminUsersController.prototype,
+      );
+
+      expect(handlers.indexOf('counters')).toBeLessThan(
+        handlers.indexOf('findOne'),
+      );
+    });
+
+    it('leaves the counters unmarked as a write', () => {
+      expect(
+        Reflect.getMetadata(
+          WRITE_ACCESS_METADATA_KEY,
+          AdminUsersController.prototype.counters,
+        ),
+      ).toBeUndefined();
+    });
+
+    it('answers every role, zero included, and their sum', async () => {
+      userDirectory.countByRole.mockResolvedValue(
+        counts({ [Role.Trader]: 3, [Role.MerchantAgent]: 2 }),
+      );
+
+      await expect(controller.counters({})).resolves.toEqual({
+        all: 5,
+        byRole: counts({ [Role.Trader]: 3, [Role.MerchantAgent]: 2 }),
+      });
+    });
+
+    it('counts under the list’s filters with the merchants the search names', async () => {
+      userDirectory.countByRole.mockResolvedValue(counts());
+      merchants.findIdsMatching.mockResolvedValue([uuidOf(50)]);
+
+      await controller.counters({
+        search: 'ohla',
+        status: UserStatus.Active,
+        merchantId: uuidOf(50),
+      });
+
+      expect(userDirectory.countByRole).toHaveBeenCalledWith({
+        search: 'ohla',
+        status: UserStatus.Active,
+        merchantId: uuidOf(50),
+        matchingMerchantIds: [uuidOf(50)],
+      });
+    });
+
+    it('asks no merchant ids without a search', async () => {
+      userDirectory.countByRole.mockResolvedValue(counts());
+
+      await controller.counters({});
+
+      expect(merchants.findIdsMatching).not.toHaveBeenCalled();
+      expect(userDirectory.countByRole).toHaveBeenCalledWith(
+        expect.objectContaining({ matchingMerchantIds: [] }),
+      );
     });
   });
 

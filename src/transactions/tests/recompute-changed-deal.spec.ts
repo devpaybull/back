@@ -3,17 +3,18 @@ import { toFiat } from '../../common/utils/to-fiat';
 import { toRate } from '../../common/utils/to-rate';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { computeDeal } from '../utils/compute-deal';
-import { recomputeChangedPayIn } from '../utils/recompute-changed-pay-in';
+import { recomputeChangedDeal } from '../utils/recompute-changed-deal';
 
 const deal = {
+  kind: TransactionKind.PayIn,
   rate: toRate('100'),
   merchantPercent: 10,
   traderEffectivePercent: 7,
 };
 
-describe('recomputeChangedPayIn', () => {
+describe('recomputeChangedDeal', () => {
   it('prices the new amount at the deal’s rate and effective percent', () => {
-    const figures = recomputeChangedPayIn(deal, [], toFiat('1500'));
+    const figures = recomputeChangedDeal(deal, [], toFiat('1500'));
     const fresh = computeDeal({
       kind: TransactionKind.PayIn,
       amountFiat: toFiat('1500'),
@@ -33,7 +34,7 @@ describe('recomputeChangedPayIn', () => {
   });
 
   it('recomputes each lead share from its own percent and sums them', () => {
-    const figures = recomputeChangedPayIn(
+    const figures = recomputeChangedDeal(
       deal,
       [
         { id: 1, percent: 1 },
@@ -51,12 +52,13 @@ describe('recomputeChangedPayIn', () => {
 
   it('keeps the trader’s effective percent: the platform minimum is not applied a second time', () => {
     const lowMargin = {
+      kind: TransactionKind.PayIn,
       rate: toRate('100'),
       merchantPercent: 3,
       traderEffectivePercent: 3,
     };
 
-    const figures = recomputeChangedPayIn(
+    const figures = recomputeChangedDeal(
       lowMargin,
       [{ id: 1, percent: 2 }],
       toFiat('1000'),
@@ -72,5 +74,22 @@ describe('recomputeChangedPayIn', () => {
         platformMinPercent: 0,
       }).traderAmount,
     );
+  });
+
+  it('prices a pay-out with the commissions on top of the amount', () => {
+    const payOut = { ...deal, kind: TransactionKind.PayOut };
+    const figures = recomputeChangedDeal(payOut, [], toFiat('1500'));
+    const fresh = computeDeal({
+      kind: TransactionKind.PayOut,
+      amountFiat: toFiat('1500'),
+      rate: deal.rate,
+      merchantPercent: 10,
+      traderPercent: 7,
+      platformMinPercent: 0,
+    });
+
+    expect(figures.traderAmount).toEqual(fresh.traderAmount);
+    expect(figures.merchantAmount).toEqual(toCrypto('16.5'));
+    expect(figures.traderAmount.gt(figures.amountCrypto)).toBe(true);
   });
 });

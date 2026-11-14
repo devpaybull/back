@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { MerchantCallbacksService } from '../../merchant-callbacks/services/merchant-callbacks.service';
+import { MerchantCallback } from '../../merchant-callbacks/entities/merchant-callback.entity';
 import { MerchantCallbackEvent } from '../../merchant-callbacks/types/merchant-callback-event.enum';
 import { Transaction } from '../entities/transaction.entity';
 import { PaymentViewService } from './payment-view.service';
@@ -16,8 +17,8 @@ export class DealCallbacksService {
     manager: EntityManager,
     deal: Transaction,
     event: MerchantCallbackEvent,
-  ): Promise<void> {
-    if (!deal.merchantId || !deal.merchantTransactionId) return;
+  ): Promise<MerchantCallback | null> {
+    if (!deal.merchantId || !deal.merchantTransactionId) return null;
 
     const [payment] = await this.payments.paymentsOf(manager, [deal]);
     const eventSeq = (deal.callbackSeq ?? 0) + 1;
@@ -25,7 +26,7 @@ export class DealCallbacksService {
     deal.callbackSeq = eventSeq;
     await manager.update(Transaction, deal.id, { callbackSeq: eventSeq });
 
-    await this.callbacks.enqueueWithin(manager, {
+    return this.callbacks.enqueueWithin(manager, {
       merchantId: deal.merchantId,
       transactionId: deal.id,
       merchantTransactionId: deal.merchantTransactionId,

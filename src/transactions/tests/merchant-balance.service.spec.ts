@@ -58,13 +58,25 @@ describe('MerchantBalanceService', () => {
       find: jest.fn(
         async (
           _entity: unknown,
-          options: { where: { accountTransactionId: number; type: unknown } },
+          options: {
+            where: {
+              accountTransactionId?: number;
+              transactionId?: string;
+              type: unknown;
+            };
+          },
         ) =>
-          journal.filter(
-            (row) =>
-              row.accountTransactionId === options.where.accountTransactionId &&
-              typesOf(options.where.type).includes(row.type),
-          ),
+          options.where.transactionId !== undefined
+            ? matching({
+                transactionId: options.where.transactionId,
+                type: options.where.type,
+              })
+            : journal.filter(
+                (row) =>
+                  row.accountTransactionId ===
+                    options.where.accountTransactionId &&
+                  typesOf(options.where.type).includes(row.type),
+              ),
       ),
       save: jest.fn(async (row: object) => {
         if (row === stored) return row;
@@ -779,6 +791,80 @@ describe('MerchantBalanceService', () => {
       expect(operations.find).toHaveBeenCalledWith(
         expect.objectContaining({ take: 2 }),
       );
+    });
+  });
+
+  describe('a balance below zero and a pay-out held again', () => {
+    it('refuses a new hold with MERCHANT_BALANCE_NEGATIVE only without the overdraft', async () => {
+      const negative = build(balance(-5));
+      const answer = await negative.service
+        .holdPayOutWithin(
+          negative.manager as never,
+          MERCHANT,
+          toCrypto(1),
+          DEAL,
+          async () => false,
+        )
+        .catch((error: { getResponse: () => { code?: string } }) =>
+          error.getResponse(),
+        );
+
+      expect(answer).toEqual(
+        expect.objectContaining({ code: 'MERCHANT_BALANCE_NEGATIVE' }),
+      );
+
+      const overdraft = build(balance(-5));
+      await expect(
+        overdraft.service.holdPayOutWithin(
+          overdraft.manager as never,
+          MERCHANT,
+          toCrypto(1),
+          DEAL,
+          async () => true,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('a released pay-out held again settles the new hold, once', async () => {
+      const stored = balance(100);
+      const { manager, service } = build(stored);
+
+      await service.holdPayOutWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto(40),
+        DEAL,
+        async () => false,
+      );
+      await service.releasePayOutWithin(manager as never, MERCHANT, DEAL);
+      expect(stored.balance).toEqual(toCrypto(100));
+      expect(stored.escrow).toEqual(toCrypto(0));
+
+      await service.reholdPayOutWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto(40),
+        DEAL,
+        uuidOf(9),
+      );
+      expect(stored.escrow).toEqual(toCrypto(40));
+
+      await service.settlePayOutWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto(40),
+        DEAL,
+      );
+      await service.settlePayOutWithin(
+        manager as never,
+        MERCHANT,
+        toCrypto(40),
+        DEAL,
+      );
+      await service.releasePayOutWithin(manager as never, MERCHANT, DEAL);
+
+      expect(stored.balance).toEqual(toCrypto(60));
+      expect(stored.escrow).toEqual(toCrypto(0));
     });
   });
 });

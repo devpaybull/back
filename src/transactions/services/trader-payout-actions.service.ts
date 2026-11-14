@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import { AuditService } from '../../audit/services/audit.service';
 import { Crypto } from '../../common/types/crypto';
 import { Page, toPage } from '../../common/types/page';
@@ -34,6 +34,21 @@ import { TransactionFileKind } from '../types/transaction-file-kind.enum';
 import { TransactionKind } from '../types/transaction-kind.enum';
 import { TransactionStatus } from '../types/transaction-status.enum';
 import { TransactionUpload } from '../types/transaction-upload';
+import { Role } from '../../common/enums/role.enum';
+import { MerchantCallbackEvent } from '../../merchant-callbacks/types/merchant-callback-event.enum';
+import { MerchantSettingsService } from '../../merchants/services/merchant-settings.service';
+import { UserDirectoryService } from '../../users/services/user-directory.service';
+import { UserStatus } from '../../users/types/user-status.enum';
+import { TransactionDispute } from '../entities/transaction-dispute.entity';
+import { AdminDealActor } from '../types/admin-deal-actor';
+import { DisputeStatus } from '../types/dispute-status.enum';
+import { OverdraftParty } from '../types/overdraft-party.enum';
+import { PayoutAssignment } from '../types/payout-assignment';
+import { PayoutTaker } from '../types/payout-taker';
+import { StatusChange } from '../types/status-change';
+import { overdraftNotConfirmed } from '../utils/overdraft-not-confirmed';
+import { DealCallbacksService } from './deal-callbacks.service';
+import { MerchantBalanceService } from './merchant-balance.service';
 import { PayoutPricingService } from './payout-pricing.service';
 import { TransactionFilesService } from './transaction-files.service';
 import { TraderPayoutsService } from './trader-payouts.service';
@@ -43,6 +58,7 @@ import { WalletService } from './wallet.service';
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const ASSIGNED_MANUALLY = 'manual';
+const ASSIGNED_BY_ADMIN = 'admin';
 
 const refused = (
   Exception: typeof ConflictException | typeof ForbiddenException,
@@ -65,6 +81,10 @@ export class TraderPayoutActionsService {
     private readonly files: TransactionFilesService,
     private readonly config: ConfigService,
     private readonly payouts: TraderPayoutsService,
+    private readonly users: UserDirectoryService,
+    private readonly merchantBalances: MerchantBalanceService,
+    private readonly merchantSettings: MerchantSettingsService,
+    private readonly dealCallbacks: DealCallbacksService,
   ) {}
 
   assertPoolOpen(settings: TraderSettings): void {
@@ -111,14 +131,54 @@ export class TraderPayoutActionsService {
     );
   }
 
-  async take(
+  take(
     actor: TraderDealActor,
     id: string,
     now: Date = new Date(),
   ): Promise<Transaction> {
-    const traderSettings = await this.settings.findOrDefaults(
-      actor.traderUserId,
-    );
+    return this.takeFor(actor.traderUserId, id, now, {
+      source: StatusEventSource.Trader,
+      actorUserId: actor.traderUserId,
+      impersonatorUserId: actor.impersonatorUserId,
+      assignedBy: ASSIGNED_MANUALLY,
+      action: 'trader.payout_taken',
+      admin: null,
+    });
+  }
+
+  async assignByAdmin(
+    admin: AdminDealActor,
+    id: string,
+    assignment: PayoutAssignment,
+    now: Date = new Date(),
+  ): Promise<Transaction> {
+    const [trader] = await this.users.findByIds([assignment.traderUserId]);
+
+    if (
+      !trader ||
+      trader.role !== Role.Trader ||
+      trader.status !== UserStatus.Active
+    ) {
+      throw new BadRequestException('traderUserId must be an active trader');
+    }
+
+    return this.takeFor(assignment.traderUserId, id, now, {
+      source: StatusEventSource.Admin,
+      actorUserId: admin.userId,
+      impersonatorUserId: null,
+      assignedBy: ASSIGNED_BY_ADMIN,
+      action: 'admin.payout_assigned',
+      admin: { confirmOverdraft: assignment.confirmOverdraft },
+    });
+  }
+
+  private async takeFor(
+    traderUserId: string,
+    id: string,
+    now: Date,
+    by: PayoutTaker,
+  ): Promise<Transaction> {
+    const traderSettings = await this.settings.findOrDefaults(traderUserId);
 
     this.assertPoolOpen(traderSettings);
 
@@ -128,11 +188,21 @@ export class TraderPayoutActionsService {
 
     if (!offered) throw new NotFoundException('Pay-out not found');
 
-    await this.assertAdmitted(offered, actor.traderUserId);
+    await this.assertAdmitted(offered, traderUserId).catch((error) => {
+      if (by.admin && error instanceof NotFoundException) {
+        throw refused(
+          ConflictException,
+          409,
+          'TRADER_NOT_ADMITTED',
+          'This trader does not serve the merchant of this pay-out',
+        );
+      }
+      throw error;
+    });
 
     const price = await this.pricing.priceFor(
       offered,
-      actor.traderUserId,
+      traderUserId,
       traderSettings.individualRatesEnabled,
     );
 
@@ -150,33 +220,40 @@ export class TraderPayoutActionsService {
         where: { id, kind: TransactionKind.PayOut },
         lock: { mode: 'pessimistic_write' },
       });
+      const revived =
+        by.admin !== null && deal?.status === TransactionStatus.Canceled;
 
-      if (
-        !deal ||
-        deal.status !== TransactionStatus.Pending ||
-        deal.traderUserId !== null
-      ) {
-        throw refused(
-          ConflictException,
-          409,
-          'ALREADY_TAKEN',
-          'This pay-out is no longer available',
-        );
-      }
+      if (!deal) throw new NotFoundException('Pay-out not found');
 
-      if (!deal.expiresAt || deal.expiresAt.getTime() <= now.getTime()) {
-        throw refused(
-          ConflictException,
-          409,
-          'ALREADY_TAKEN',
-          'This pay-out has expired',
-        );
+      if (revived) {
+        await this.assertNoLiveDispute(manager, id);
+      } else {
+        if (
+          deal.status !== TransactionStatus.Pending ||
+          deal.traderUserId !== null
+        ) {
+          throw refused(
+            ConflictException,
+            409,
+            'ALREADY_TAKEN',
+            'This pay-out is no longer available',
+          );
+        }
+
+        if (!deal.expiresAt || deal.expiresAt.getTime() <= now.getTime()) {
+          throw refused(
+            ConflictException,
+            409,
+            'ALREADY_TAKEN',
+            'This pay-out has expired',
+          );
+        }
       }
 
       const [wallet] = await this.wallets.lockWalletsWithin(
         manager,
-        [actor.traderUserId],
-        [actor.traderUserId],
+        [traderUserId],
+        [traderUserId],
       );
 
       if (
@@ -194,18 +271,14 @@ export class TraderPayoutActionsService {
 
       await this.assertBelowActiveLimit(
         manager,
-        actor.traderUserId,
+        traderUserId,
         traderSettings.maxActivePayouts,
       );
 
       if (!traderSettings.trustedUser) {
         const room = roundCrypto(
           wallet.insurancePayOutBalance.minus(
-            await this.occupiedInsuranceWithin(
-              manager,
-              actor.traderUserId,
-              now,
-            ),
+            await this.occupiedInsuranceWithin(manager, traderUserId, now),
           ),
         );
 
@@ -219,14 +292,16 @@ export class TraderPayoutActionsService {
         }
       }
 
-      await this.wallets.stampAcceptedDealWithin(
-        manager,
-        actor.traderUserId,
-        now,
-      );
+      const fromStatus = deal.status;
+
+      if (revived) {
+        await this.reholdWithin(manager, deal, by);
+      }
+
+      await this.wallets.stampAcceptedDealWithin(manager, traderUserId, now);
 
       Object.assign(deal, {
-        traderUserId: actor.traderUserId,
+        traderUserId,
         traderPercent: price.traderPercent,
         traderEffectivePercent: price.traderEffectivePercent,
         leadPercent: price.leadPercent,
@@ -239,7 +314,7 @@ export class TraderPayoutActionsService {
             this.config.getOrThrow<number>('PAYOUT_PAYMENT_WINDOW_MINUTES') *
               MINUTE_MS,
         ),
-        payoutAssignedBy: ASSIGNED_MANUALLY,
+        payoutAssignedBy: by.assignedBy,
       });
 
       if (price.leadShares.length) {
@@ -255,19 +330,128 @@ export class TraderPayoutActionsService {
         );
       }
 
-      const taken = await this.transactions.transitionLocked(manager, deal, {
+      const change = {
         toStatus: TransactionStatus.Active,
-        source: StatusEventSource.Trader,
-        actorUserId: actor.traderUserId,
-      });
+        source: by.source,
+        actorUserId: by.actorUserId,
+      };
+      const taken = revived
+        ? await this.reviveLocked(manager, deal, fromStatus, change, now)
+        : await this.transactions.transitionLocked(manager, deal, change);
 
-      await this.record(manager, actor, 'trader.payout_taken', {
-        transactionId: id,
-        traderAmount: formatCrypto(price.traderAmount),
-      });
+      await this.audit.record(
+        {
+          actorUserId: by.actorUserId,
+          impersonatorUserId: by.impersonatorUserId,
+          targetUserId: traderUserId,
+          action: by.action,
+          metadata: {
+            transactionId: id,
+            traderAmount: formatCrypto(price.traderAmount),
+            ...(by.admin
+              ? {
+                  fromStatus,
+                  confirmOverdraft: by.admin.confirmOverdraft,
+                }
+              : {}),
+          },
+        },
+        manager,
+      );
 
       return taken;
     });
+  }
+
+  private async reholdWithin(
+    manager: EntityManager,
+    deal: Transaction,
+    by: PayoutTaker,
+  ): Promise<void> {
+    await manager.delete(TransactionLeadShare, { transactionId: deal.id });
+
+    if (!deal.merchantId) return;
+
+    const balance = await this.merchantBalances.lockBalanceWithin(
+      manager,
+      deal.merchantId,
+    );
+    const after = roundCrypto(balance.balance.minus(deal.merchantAmount));
+
+    if (after.lt(0) && !by.admin?.confirmOverdraft) {
+      throw overdraftNotConfirmed([
+        {
+          party: OverdraftParty.Merchant,
+          id: deal.merchantId,
+          shortfall: roundCrypto(after.neg()),
+        },
+      ]);
+    }
+
+    await this.merchantBalances.reholdPayOutWithin(
+      manager,
+      deal.merchantId,
+      deal.merchantAmount,
+      deal.id,
+      by.actorUserId,
+    );
+  }
+
+  private async reviveLocked(
+    manager: EntityManager,
+    deal: Transaction,
+    fromStatus: TransactionStatus,
+    change: StatusChange,
+    now: Date,
+  ): Promise<Transaction> {
+    const windowMinutes =
+      (deal.merchantId
+        ? await this.merchantSettings.payInWindowMinutesOf(deal.merchantId)
+        : null) ?? this.config.getOrThrow<number>('DEAL_TTL_MINUTES');
+
+    deal.status = TransactionStatus.Active;
+    deal.resolvedAt = null;
+    deal.payoutCompletedAt = null;
+    deal.expiresAt = new Date(now.getTime() + windowMinutes * MINUTE_MS);
+    await manager.save(deal);
+    await this.transactions.recordEventWithin(
+      manager,
+      deal.id,
+      fromStatus,
+      change,
+    );
+    await this.dealCallbacks.recordWithin(
+      manager,
+      deal,
+      MerchantCallbackEvent.StatusChanged,
+    );
+
+    return deal;
+  }
+
+  private async assertNoLiveDispute(
+    manager: EntityManager,
+    transactionId: string,
+  ): Promise<void> {
+    if (
+      await manager.exists(TransactionDispute, {
+        where: {
+          transactionId,
+          status: In([
+            DisputeStatus.Open,
+            DisputeStatus.Reviewing,
+            DisputeStatus.Deferred,
+          ]),
+        },
+      })
+    ) {
+      throw refused(
+        ConflictException,
+        409,
+        'DEAL_UNDER_DISPUTE',
+        'This pay-out has a live dispute',
+      );
+    }
   }
 
   async complete(

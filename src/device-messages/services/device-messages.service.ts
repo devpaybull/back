@@ -6,6 +6,7 @@ import {
   EntityManager,
   FindOptionsWhere,
   ILike,
+  In,
   LessThanOrEqual,
   MoreThanOrEqual,
   Repository,
@@ -17,6 +18,7 @@ import { Page, toPage } from '../../common/types/page';
 import { escapeLikePattern } from '../../common/utils/escape-like-pattern';
 import { INT4_MAX } from '../../common/utils/int4-max';
 import { sortDirection } from '../../common/utils/sort-direction';
+import { DevicesService } from '../../devices/devices.service';
 import { Device } from '../../devices/entities/device.entity';
 import { BankMessageType } from '../../message-templates/types/bank-message-type.enum';
 import { MessageTemplatesService } from '../../message-templates/message-templates.service';
@@ -47,6 +49,7 @@ export class DeviceMessagesService {
     private readonly messages: Repository<DeviceMessage>,
     private readonly templates: MessageTemplatesService,
     private readonly users: UserDirectoryService,
+    private readonly devices: DevicesService,
     private readonly requisites: BankDetailsService,
     private readonly dealActions: TraderDealActionsService,
     private readonly config: ConfigService,
@@ -172,15 +175,16 @@ export class DeviceMessagesService {
     }
   }
 
-  async list(
-    userId: string,
-    query: DeviceMessageListQuery,
-  ): Promise<Page<DeviceMessage>> {
+  async list(query: DeviceMessageListQuery): Promise<Page<DeviceMessage>> {
+    const deviceIds = await this.deviceIdsOf(query);
+
+    if (deviceIds?.length === 0) return toPage([[], 0], query);
+
     const direction = sortDirection(query.sortOrder);
 
     return toPage(
       await this.messages.findAndCount({
-        where: this.whereOf(userId, query),
+        where: this.whereOf(query, deviceIds),
         order:
           query.sortBy === DeviceMessageSortField.Id
             ? { id: direction }
@@ -192,14 +196,17 @@ export class DeviceMessagesService {
     );
   }
 
-  async countsOf(
-    userId: string,
-    filter: DeviceMessageFilter,
-  ): Promise<DeviceMessageCounts> {
+  async countsOf(filter: DeviceMessageFilter): Promise<DeviceMessageCounts> {
+    const deviceIds = await this.deviceIdsOf(filter);
+
+    if (deviceIds?.length === 0) {
+      return { all: 0, push: 0, sms: 0, credit: 0, statement: 0 };
+    }
+
     const base = { ...filter, kind: undefined, messageType: undefined };
     const count = (narrowing: DeviceMessageFilter) =>
       this.messages.count({
-        where: this.whereOf(userId, { ...base, ...narrowing }),
+        where: this.whereOf({ ...base, ...narrowing }, deviceIds),
       });
 
     return {
@@ -209,6 +216,20 @@ export class DeviceMessagesService {
       credit: await count({ messageType: DeviceMessageType.Credit }),
       statement: await count({ messageType: DeviceMessageType.Statement }),
     };
+  }
+
+  private async deviceIdsOf(
+    filter: DeviceMessageFilter,
+  ): Promise<number[] | undefined> {
+    if (filter.deviceName === undefined) {
+      return filter.deviceId === undefined ? undefined : [filter.deviceId];
+    }
+
+    const named = await this.devices.idsWithNameContaining(filter.deviceName);
+
+    return filter.deviceId === undefined
+      ? named
+      : named.filter((id) => id === filter.deviceId);
   }
 
   private initialMatchStatus(
@@ -223,8 +244,8 @@ export class DeviceMessagesService {
   }
 
   private whereOf(
-    userId: string,
     filter: DeviceMessageFilter,
+    deviceIds: number[] | undefined,
   ): FindOptionsWhere<DeviceMessage>[] {
     const createdAt =
       filter.createdFrom && filter.createdTo
@@ -238,13 +259,15 @@ export class DeviceMessagesService {
             ? LessThanOrEqual(filter.createdTo)
             : undefined;
     const base: FindOptionsWhere<DeviceMessage> = {
-      userId,
+      ...(filter.userId !== undefined ? { userId: filter.userId } : {}),
       ...(filter.kind !== undefined ? { kind: filter.kind } : {}),
       ...(filter.messageType !== undefined
         ? { messageType: filter.messageType }
         : {}),
       ...(createdAt ? { createdAt } : {}),
-      ...(filter.deviceId !== undefined ? { deviceId: filter.deviceId } : {}),
+      ...(deviceIds !== undefined
+        ? { deviceId: deviceIds.length === 1 ? deviceIds[0] : In(deviceIds) }
+        : {}),
       ...(filter.sender !== undefined
         ? { sender: ILike(escapeLikePattern(filter.sender)) }
         : {}),

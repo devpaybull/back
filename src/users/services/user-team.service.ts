@@ -207,6 +207,16 @@ export class UserTeamService {
     });
   }
 
+  async assignmentsLedByAny(leadUserIds: string[]): Promise<TraderLead[]> {
+    if (leadUserIds.length === 0) return [];
+
+    return this.links.find({
+      where: { leadUserId: In(leadUserIds) },
+      relations: { currency: true },
+      order: { id: 'ASC' },
+    });
+  }
+
   findPair(traderUserId: string, leadUserId: string): Promise<TraderLead[]> {
     return this.links.find({
       where: { traderUserId, leadUserId },

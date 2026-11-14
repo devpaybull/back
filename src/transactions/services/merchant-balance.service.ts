@@ -22,6 +22,7 @@ import { formatCrypto } from '../../common/utils/format-crypto';
 import { roundCrypto } from '../../common/utils/round-crypto';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { toCrypto } from '../../common/utils/to-crypto';
+import { toDecimal } from '../../common/utils/to-decimal';
 import { MerchantBalanceOperation } from '../entities/merchant-balance-operation.entity';
 import { MerchantBalance } from '../entities/merchant-balance.entity';
 import { MerchantBalanceAdjustment } from '../types/merchant-balance-adjustment';
@@ -29,6 +30,7 @@ import { MerchantBalanceOperationFilter } from '../types/merchant-balance-operat
 import { MerchantBalanceOperationListQuery } from '../types/merchant-balance-operation-list-query';
 import { MerchantBalanceOperationType } from '../types/merchant-balance-operation-type.enum';
 import { MerchantBalanceState } from '../types/merchant-balance-state';
+import { MERCHANT_BALANCE_NEGATIVE } from '../utils/merchant-balance-negative';
 import { uuidTextContains } from '../utils/uuid-text-contains';
 
 interface Movement {
@@ -50,6 +52,11 @@ const WITHDRAWAL_RESOLVING_TYPES = [
 const RESOLVING_TYPES = [
   MerchantBalanceOperationType.DealPayOut,
   MerchantBalanceOperationType.DealPayOutEscrowRelease,
+];
+
+const PAY_OUT_ESCROW_TYPES = [
+  MerchantBalanceOperationType.DealPayOutEscrow,
+  ...RESOLVING_TYPES,
 ];
 
 const ZERO = toCrypto(0);
@@ -78,6 +85,16 @@ const operationWhere = (
         }
       : {}),
   };
+};
+
+const assertBalanceNotNegative = (balance: MerchantBalance): void => {
+  if (balance.balance.lt(0)) {
+    throw new ConflictException({
+      statusCode: 409,
+      code: MERCHANT_BALANCE_NEGATIVE,
+      message: 'The merchant balance is below zero',
+    });
+  }
 };
 
 @Injectable()
@@ -160,6 +177,79 @@ export class MerchantBalanceService {
     });
   }
 
+  correctDealWithin(
+    manager: EntityManager,
+    merchantId: string,
+    delta: Crypto,
+    transactionId: string,
+    actorUserId: string,
+  ): Promise<MerchantBalanceOperation> {
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.DealCorrection,
+      balanceDelta: delta,
+      escrowDelta: ZERO,
+      transactionId,
+      actorUserId,
+    });
+  }
+
+  reholdPayOutWithin(
+    manager: EntityManager,
+    merchantId: string,
+    amount: Crypto,
+    transactionId: string,
+    actorUserId: string,
+  ): Promise<MerchantBalanceOperation> {
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.DealPayOutEscrow,
+      balanceDelta: amount.neg(),
+      escrowDelta: amount,
+      transactionId,
+      actorUserId,
+    });
+  }
+
+  chargePayOutWithin(
+    manager: EntityManager,
+    merchantId: string,
+    amount: Crypto,
+    transactionId: string,
+  ): Promise<MerchantBalanceOperation> {
+    return this.moveWithin(manager, merchantId, {
+      type: MerchantBalanceOperationType.DealPayOut,
+      balanceDelta: amount.neg(),
+      escrowDelta: ZERO,
+      transactionId,
+    });
+  }
+
+  async lockBalanceWithin(
+    manager: EntityManager,
+    merchantId: string,
+  ): Promise<MerchantBalance> {
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(MerchantBalance)
+      .values({ merchantId })
+      .orIgnore()
+      .execute();
+
+    return (await manager.findOne(MerchantBalance, {
+      where: { merchantId },
+      lock: { mode: 'pessimistic_write' },
+    })) as MerchantBalance;
+  }
+
+  hasDealCreditWithin(
+    manager: EntityManager,
+    transactionId: string,
+  ): Promise<boolean> {
+    return this.hasOperation(manager, transactionId, [
+      MerchantBalanceOperationType.DealPayIn,
+    ]);
+  }
+
   holdPayOutWithin(
     manager: EntityManager,
     merchantId: string,
@@ -180,6 +270,7 @@ export class MerchantBalanceService {
         if (balance.balance.gte(amount)) return;
 
         if (!(await allowsOverdraft())) {
+          assertBalanceNotNegative(balance);
           throw new ConflictException(
             'The merchant balance does not cover the pay-out',
           );
@@ -194,16 +285,27 @@ export class MerchantBalanceService {
     amount: Crypto,
     transactionId: string,
   ): Promise<MerchantBalanceOperation | null> {
-    if (await this.hasOperation(manager, transactionId, RESOLVING_TYPES)) {
-      return null;
+    const held = await this.heldAmount(manager, transactionId);
+
+    if (held === null) {
+      if (await this.hasOperation(manager, transactionId, RESOLVING_TYPES)) {
+        return null;
+      }
+
+      return this.moveWithin(manager, merchantId, {
+        type: MerchantBalanceOperationType.DealPayOut,
+        balanceDelta: amount.neg(),
+        escrowDelta: ZERO,
+        transactionId,
+      });
     }
 
-    const held = await this.heldAmount(manager, transactionId);
+    if (!held.gt(0)) return null;
 
     return this.moveWithin(manager, merchantId, {
       type: MerchantBalanceOperationType.DealPayOut,
-      balanceDelta: held ? ZERO : amount.neg(),
-      escrowDelta: held ? held.neg() : ZERO,
+      balanceDelta: ZERO,
+      escrowDelta: held.neg(),
       transactionId,
     });
   }
@@ -213,13 +315,9 @@ export class MerchantBalanceService {
     merchantId: string,
     transactionId: string,
   ): Promise<MerchantBalanceOperation | null> {
-    if (await this.hasOperation(manager, transactionId, RESOLVING_TYPES)) {
-      return null;
-    }
-
     const held = await this.heldAmount(manager, transactionId);
 
-    if (!held) return null;
+    if (!held?.gt(0)) return null;
 
     return this.moveWithin(manager, merchantId, {
       type: MerchantBalanceOperationType.DealPayOutEscrowRelease,
@@ -253,6 +351,7 @@ export class MerchantBalanceService {
         if (balance.balance.gte(amount)) return;
 
         if (!(await allowsOverdraft())) {
+          assertBalanceNotNegative(balance);
           throw new ConflictException(
             'The merchant balance does not cover the withdrawal and its fee',
           );
@@ -406,14 +505,26 @@ export class MerchantBalanceService {
     manager: EntityManager,
     transactionId: string,
   ): Promise<Crypto | null> {
-    const hold = await manager.findOne(MerchantBalanceOperation, {
-      where: {
-        transactionId,
-        type: MerchantBalanceOperationType.DealPayOutEscrow,
-      },
+    const operations = await manager.find(MerchantBalanceOperation, {
+      where: { transactionId, type: In(PAY_OUT_ESCROW_TYPES) },
     });
 
-    return hold ? toCrypto(hold.escrowAfter.minus(hold.escrowBefore)) : null;
+    if (
+      !operations.some(
+        (operation) =>
+          operation.type === MerchantBalanceOperationType.DealPayOutEscrow,
+      )
+    ) {
+      return null;
+    }
+
+    return roundCrypto(
+      operations.reduce(
+        (sum, operation) =>
+          sum.plus(operation.escrowAfter.minus(operation.escrowBefore)),
+        toDecimal(0),
+      ),
+    );
   }
 
   private async heldForWithdrawal(

@@ -1,11 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
-import { DayPeriod } from '../../common/enums/day-period.enum';
-import { dayPeriodRange } from '../../common/utils/day-period-range';
-import { toInstant } from '../../common/utils/to-instant';
+import { DayPeriod } from '../enums/day-period.enum';
+import { dayPeriodRange } from './day-period-range';
+import { toInstant } from './to-instant';
 
 const LAST_INSTANT_BEFORE_MS = 1;
 
-export function traderCreatedRange(
+export function createdRange(
   query: { period?: DayPeriod; createdFrom?: string; createdTo?: string },
   timeZone: string,
 ): { createdFrom?: Date; createdTo?: Date } {

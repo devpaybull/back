@@ -28,8 +28,8 @@ import {
   TraderMessageDto,
   toTraderMessageDto,
 } from '../dto/trader-message.dto';
-import { UnknownSenders } from '../types/unknown-senders.enum';
-import { traderCreatedRange } from '../utils/trader-created-range';
+import { UnknownSenders } from '../../device-messages/types/unknown-senders.enum';
+import { createdRange } from '../../common/utils/created-range';
 
 const LIST_DESCRIPTION =
   'Today by default. Filters: kind, messageType (the tabs), period or createdFrom/createdTo, deviceId, sender, unknownSenders (hide by default), transactionId, search (the id or a piece of the text).';
@@ -69,7 +69,10 @@ export class TraderMessagesController {
     @CurrentUser() trader: AuthenticatedUser,
     @Query() query: TraderMessageFilterDto,
   ): Promise<TraderMessageCountersDto> {
-    return this.messages.countsOf(trader.id, this.filterOf(query));
+    return this.messages.countsOf({
+      ...this.filterOf(query),
+      userId: trader.id,
+    });
   }
 
   @Get('devices/:id/messages')
@@ -96,8 +99,9 @@ export class TraderMessagesController {
     query: ListTraderMessagesQueryDto,
   ): Promise<Page<TraderMessageDto>> {
     return (
-      await this.messages.list(trader.id, {
+      await this.messages.list({
         ...this.filterOf(query),
+        userId: trader.id,
         page: query.page,
         limit: query.limit,
         sortBy: query.sortBy,
@@ -108,7 +112,7 @@ export class TraderMessagesController {
 
   private filterOf(query: TraderMessageFilterDto): DeviceMessageFilter {
     return {
-      ...traderCreatedRange(
+      ...createdRange(
         query,
         this.config.getOrThrow<string>('BUSINESS_TIMEZONE'),
       ),

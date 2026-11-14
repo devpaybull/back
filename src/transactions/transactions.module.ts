@@ -42,7 +42,9 @@ import { MerchantCallbacksModule } from '../merchant-callbacks/merchant-callback
 import { DealCallbacksService } from './services/deal-callbacks.service';
 import { PaymentViewService } from './services/payment-view.service';
 import { DisputeDeadlineService } from './services/dispute-deadline.service';
+import { AdminDealActionsService } from './services/admin-deal-actions.service';
 import { DisputeMoneyService } from './services/dispute-money.service';
+import { TransactionCardService } from './services/transaction-card.service';
 import { DisputesService } from './services/disputes.service';
 import { PayoutPricingService } from './services/payout-pricing.service';
 import { PayoutTimersService } from './services/payout-timers.service';
@@ -98,6 +100,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
     PaymentViewService,
     DealCallbacksService,
     DisputeMoneyService,
+    AdminDealActionsService,
+    TransactionCardService,
     DisputesService,
     DisputeDeadlineService,
     TraderDealsService,
@@ -128,6 +132,8 @@ import { RequisiteRanking } from './types/requisite-ranking';
     TraderPayoutsService,
     TradingSwitchService,
     TraderPayoutActionsService,
+    AdminDealActionsService,
+    TransactionCardService,
     PayoutPricingService,
     PayoutTimersService,
     TransactionFilesService,

@@ -74,7 +74,7 @@ export class AdminDisputesController {
   @ApiOperation({
     summary: 'Decides a dispute for the client',
     description:
-      'A pay-in closes as success or success_changed and the trader pays the difference; a pay-out is canceled, its money returned to the merchant.',
+      'A pay-in closes as success or success_changed and the trader pays the difference; a pay-out is canceled, its money returned to the merchant — except a canceled pay-out an admin disputed, which becomes success (the trader is paid, the merchant charged; a balance that does not cover it needs confirmOverdraft, else 409 OVERDRAFT_NOT_CONFIRMED).',
   })
   @ApiEnvelopeResponse(DisputeDto)
   async accept(
@@ -87,6 +87,8 @@ export class AdminDisputesController {
         admin.id,
         id,
         dto.amount === undefined ? null : toFiat(dto.amount),
+        new Date(),
+        dto.confirmOverdraft ?? false,
       ),
     ]);
 

@@ -3,6 +3,7 @@ import { Transaction } from '../../transactions/entities/transaction.entity';
 import { TransactionRowDetails } from '../types/transaction-row-details';
 import { DealBankDetailsDto } from './deal-bank-details.dto';
 import { DealCounterpartyDto } from './deal-counterparty.dto';
+import { DealPayoutRecipientDto } from './deal-payout-recipient.dto';
 import { DealTraderDto } from './deal-trader.dto';
 import { toTransactionDto, TransactionDto } from './transaction.dto';
 import { UserMerchantDto } from './user-merchant.dto';
@@ -29,9 +30,26 @@ export class TransactionListItemDto extends TransactionDto {
 
   @ApiProperty({ type: DealCounterpartyDto, nullable: true })
   counterparty: DealCounterpartyDto | null;
+
+  @ApiProperty({
+    type: DealPayoutRecipientDto,
+    nullable: true,
+    description: 'Who a pay-out pays to; null on a pay-in',
+  })
+  recipient: DealPayoutRecipientDto | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'The merchant’s own order number («Номер сделки у мерчанта»)',
+  })
+  merchantTransactionId: string | null;
 }
 
 export const toTransactionListItemDto = (
   row: Transaction,
   details: TransactionRowDetails,
-): TransactionListItemDto => ({ ...toTransactionDto(row), ...details });
+): TransactionListItemDto => ({
+  ...toTransactionDto(row),
+  ...details,
+  merchantTransactionId: row.merchantTransactionId ?? null,
+});

@@ -32,6 +32,8 @@ export class ListUsersQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: UserSortField,
     default: UserSortField.CreatedAt,
+    description:
+      'balance (main balance), insuranceMin (effective pay-in minimum) and rate (the highest applicable pay-in percent) need a role filter of trader and/or lead_trader only, else 400; accounts without the value come last in both directions',
   })
   @IsEnum(UserSortField)
   sortBy: UserSortField = UserSortField.CreatedAt;

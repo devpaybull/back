@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { formatCrypto } from '../../common/utils/format-crypto';
+import { MERCHANT_SIDE_ROLES } from '../../common/utils/merchant-side-roles';
 import { LoginLinkService } from '../../auth/services/login-link.service';
 import { LOGIN_LINK_PROTECTED_ROLES } from '../../auth/types/login-link-protected-roles';
 import { PasswordService } from '../../auth/services/password.service';
@@ -38,6 +39,7 @@ import { RateService } from '../../transactions/services/rate.service';
 import { WalletService } from '../../transactions/services/wallet.service';
 import { EffectiveGeneralRates } from '../../transactions/types/effective-general-rates';
 import { RateScope } from '../../transactions/types/rate-scope.enum';
+import { RateSummary } from '../../transactions/types/rate-summary';
 import { User } from '../../users/entities/user.entity';
 import { UserAdministrationService } from '../../users/services/user-administration.service';
 import { UserDirectoryService } from '../../users/services/user-directory.service';
@@ -52,14 +54,16 @@ import { ListUsersQueryDto } from '../dto/list-users-query.dto';
 import { LoginLinkDto } from '../dto/login-link.dto';
 import { TeamMemberDto } from '../dto/team-member.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { UserCountersQueryDto } from '../dto/user-counters-query.dto';
+import { UserCountersDto } from '../dto/user-counters.dto';
 import { toUserDto, UserDto } from '../dto/user.dto';
 import { toUserListItemDto, UserListItemDto } from '../dto/user-list-item.dto';
+import { TradingStatus } from '../types/trading-status.enum';
 import { canIssueRole } from '../utils/can-issue-role';
 
-const MERCHANT_ROLES: Role[] = [
-  Role.Merchant,
-  Role.MerchantSupport,
-  Role.MerchantAgent,
+const TRADING_BLOCKED_STATUSES: UserStatus[] = [
+  UserStatus.Blocked,
+  UserStatus.Suspended,
 ];
 
 @ApiTags('Admin · Users')
@@ -91,19 +95,20 @@ export class AdminUsersController {
     const merchantIds = [
       ...new Set(
         users
-          .filter((user) => MERCHANT_ROLES.includes(user.role))
+          .filter((user) => MERCHANT_SIDE_ROLES.includes(user.role))
           .map((user) => user.merchantId)
           .filter((merchantId): merchantId is string => Boolean(merchantId)),
       ),
     ];
 
-    const [wallets, settings, leads, subordinates, merchants] =
+    const [wallets, settings, leads, subordinates, merchants, leadLinks] =
       await Promise.all([
         this.wallets.findByUserIds(tradingIds),
         this.traderSettings.findByUserIds(tradingIds),
         this.team.leadsOf(traderIds),
         this.team.subordinatesOf(leadIds),
         this.merchants.findByIds(merchantIds),
+        this.team.assignmentsLedByAny(leadIds),
       ]);
     const walletByUser = new Map(
       wallets.map((wallet) => [wallet.userId, wallet]),
@@ -112,37 +117,56 @@ export class AdminUsersController {
     const merchantById = new Map(
       merchants.map((merchant) => [merchant.id, merchant]),
     );
-    const traderRates: EffectiveGeneralRates | null = traderIds.length
-      ? await this.rates.getEffectiveGeneralRates(
-          RateScope.Trader,
-          traderIds.map((userId) => ({
-            userId,
-            individualEnabled:
-              settingsByUser.get(userId)?.individualRatesEnabled ?? false,
-          })),
-        )
-      : null;
+    const traderSubjects = traderIds.map((userId) => ({
+      userId,
+      individualEnabled:
+        settingsByUser.get(userId)?.individualRatesEnabled ?? false,
+    }));
+    const [traderRates, traderSummaries, leadSummaries]: [
+      EffectiveGeneralRates | null,
+      Map<string, RateSummary[]>,
+      Map<string, RateSummary[]>,
+    ] = await Promise.all([
+      traderIds.length
+        ? this.rates.getEffectiveGeneralRates(RateScope.Trader, traderSubjects)
+        : null,
+      traderIds.length
+        ? this.rates.traderRateSummaries(traderSubjects)
+        : new Map<string, RateSummary[]>(),
+      leadIds.length
+        ? this.rates.leadRateSummaries(leadLinks)
+        : new Map<string, RateSummary[]>(),
+    ]);
 
     return users.map((user) => {
       const isTrader = user.role === Role.Trader;
       const isLead = user.role === Role.LeadTrader;
       const rates = isTrader ? traderRates : null;
-      const wallet = isTrader || isLead ? walletByUser.get(user.id) : null;
-      const merchant = MERCHANT_ROLES.includes(user.role)
+      const isTrading = isTrader || isLead;
+      const wallet = isTrading ? walletByUser.get(user.id) : null;
+      const userSettings = settingsByUser.get(user.id);
+      const summaries = isTrader ? traderSummaries : leadSummaries;
+      const merchant = MERCHANT_SIDE_ROLES.includes(user.role)
         ? merchantById.get(user.merchantId)
         : undefined;
 
       return toUserListItemDto(user, {
         balances: wallet ? toBalancesDto(wallet) : null,
-        insurancePayInMin:
-          isTrader || isLead
-            ? formatCrypto(
-                this.traderSettings.insurancePayInMinOf(
-                  settingsByUser.get(user.id),
-                ),
-              )
-            : null,
+        insurancePayInMin: isTrading
+          ? formatCrypto(this.traderSettings.insurancePayInMinOf(userSettings))
+          : null,
+        insurancePayOutMin: isTrading
+          ? formatCrypto(this.traderSettings.insurancePayOutMinOf(userSettings))
+          : null,
+        tradingStatus: !isTrading
+          ? null
+          : TRADING_BLOCKED_STATUSES.includes(user.status)
+            ? TradingStatus.Blocked
+            : userSettings?.tradingEnabled
+              ? TradingStatus.Enabled
+              : TradingStatus.Disabled,
         rates: rates ? (rates.bySubject.get(user.id) ?? rates.base) : null,
+        rateSummary: isTrading ? (summaries.get(user.id) ?? []) : null,
         leads: isTrader ? (leads.get(user.id) ?? []) : null,
         subordinates: isLead ? (subordinates.get(user.id) ?? []) : null,
         merchant: merchant ? { id: merchant.id, name: merchant.name } : null,
@@ -176,9 +200,39 @@ export class AdminUsersController {
   async list(
     @Query() query: ListUsersQueryDto,
   ): Promise<Page<UserListItemDto>> {
-    const page = await this.directory.list(query);
+    const page = await this.directory.list({
+      ...query,
+      matchingMerchantIds: await this.merchantIdsMatching(query.search),
+      insurancePayInMinDefault: this.traderSettings.insurancePayInMinOf(null),
+    });
 
     return new Page(await this.withDetails(page.items), page.meta);
+  }
+
+  @Get('counters')
+  @ApiOperation({
+    summary:
+      'The role tabs: how many accounts each role holds under the list’s filters, role aside',
+  })
+  @ApiEnvelopeResponse(UserCountersDto)
+  async counters(
+    @Query() query: UserCountersQueryDto,
+  ): Promise<UserCountersDto> {
+    const byRole = await this.directory.countByRole({
+      search: query.search,
+      status: query.status,
+      merchantId: query.merchantId,
+      matchingMerchantIds: await this.merchantIdsMatching(query.search),
+    });
+
+    return {
+      all: Object.values(byRole).reduce((sum, count) => sum + count, 0),
+      byRole,
+    };
+  }
+
+  private async merchantIdsMatching(search?: string): Promise<string[]> {
+    return search ? this.merchants.findIdsMatching(search) : [];
   }
 
   @Get(':id')

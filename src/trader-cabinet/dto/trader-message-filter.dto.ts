@@ -17,7 +17,7 @@ import { DayPeriod } from '../../common/enums/day-period.enum';
 import { INT4_MAX } from '../../common/utils/int4-max';
 import { DeviceMessageKind } from '../../device-messages/types/device-message-kind.enum';
 import { DeviceMessageType } from '../../device-messages/types/device-message-type.enum';
-import { UnknownSenders } from '../types/unknown-senders.enum';
+import { UnknownSenders } from '../../device-messages/types/unknown-senders.enum';
 
 const trimmed = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;

@@ -1,3 +1,6 @@
+import { ConfigService } from '@nestjs/config';
+import { MulterModule } from '@nestjs/platform-express';
+import { dealFileUploadOptions } from '../file-storage/utils/deal-file-upload-options';
 import { MerchantCallbacksModule } from '../merchant-callbacks/merchant-callbacks.module';
 import { AdminMerchantCallbacksController } from './controllers/admin-merchant-callbacks.controller';
 import { AdminDisputesController } from './controllers/admin-disputes.controller';
@@ -16,6 +19,7 @@ import { MobileOperatorsModule } from '../mobile-operators/mobile-operators.modu
 import { CountriesModule } from '../countries/countries.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { DebtsModule } from '../debts/debts.module';
+import { DeviceMessagesModule } from '../device-messages/device-messages.module';
 import { DevicesModule } from '../devices/devices.module';
 import { InvitesModule } from '../invites/invites.module';
 import { MerchantRequestsModule } from '../merchant-requests/merchant-requests.module';
@@ -39,6 +43,7 @@ import { AdminCounterpartyRequisitesController } from './controllers/admin-count
 import { AdminCountriesController } from './controllers/admin-countries.controller';
 import { AdminCurrenciesController } from './controllers/admin-currencies.controller';
 import { AdminDebtsController } from './controllers/admin-debts.controller';
+import { AdminDeviceMessagesController } from './controllers/admin-device-messages.controller';
 import { AdminDevicesController } from './controllers/admin-devices.controller';
 import { AdminIdentityController } from './controllers/admin-identity.controller';
 import { AdminInvitesController } from './controllers/admin-invites.controller';
@@ -55,6 +60,10 @@ import { AdminUsersController } from './controllers/admin-users.controller';
 
 @Module({
   imports: [
+    MulterModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: dealFileUploadOptions,
+    }),
     AuthModule,
     InvitesModule,
     UsersModule,
@@ -62,6 +71,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     MessageTemplatesModule,
     MobileOperatorsModule,
     DevicesModule,
+    DeviceMessagesModule,
     BankDetailsModule,
     CountriesModule,
     CurrenciesModule,
@@ -105,6 +115,7 @@ import { AdminUsersController } from './controllers/admin-users.controller';
     AdminMessageTemplatesController,
     AdminMobileOperatorsController,
     AdminDevicesController,
+    AdminDeviceMessagesController,
     AdminBankDetailsController,
     AdminCountriesController,
     AdminCurrenciesController,

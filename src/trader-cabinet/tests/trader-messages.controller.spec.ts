@@ -15,7 +15,7 @@ import { DeviceMessageType } from '../../device-messages/types/device-message-ty
 import { UserStatus } from '../../users/types/user-status.enum';
 import { TraderMessagesController } from '../controllers/trader-messages.controller';
 import { ListTraderMessagesQueryDto } from '../dto/list-trader-messages-query.dto';
-import { UnknownSenders } from '../types/unknown-senders.enum';
+import { UnknownSenders } from '../../device-messages/types/unknown-senders.enum';
 
 const trader: AuthenticatedUser = {
   id: uuidOf(1),
@@ -88,8 +88,11 @@ describe('TraderMessagesController', () => {
     const page = await controller.list(trader, query);
 
     expect(messages.list).toHaveBeenCalledWith(
-      trader.id,
-      expect.objectContaining({ showUnknownSenders: false, page: 1 }),
+      expect.objectContaining({
+        userId: trader.id,
+        showUnknownSenders: false,
+        page: 1,
+      }),
     );
     expect(page.items[0]).toEqual(
       expect.objectContaining({
@@ -105,8 +108,7 @@ describe('TraderMessagesController', () => {
     } as ListTraderMessagesQueryDto);
 
     expect(messages.list).toHaveBeenLastCalledWith(
-      trader.id,
-      expect.objectContaining({ showUnknownSenders: true }),
+      expect.objectContaining({ userId: trader.id, showUnknownSenders: true }),
     );
   });
 
@@ -115,10 +117,11 @@ describe('TraderMessagesController', () => {
 
     await controller.counters(trader, {});
 
-    const [, filter] = messages.countsOf.mock.calls[0] as unknown as [
-      string,
-      { createdFrom: Date; createdTo: Date },
+    const [filter] = messages.countsOf.mock.calls[0] as unknown as [
+      { userId: string; createdFrom: Date; createdTo: Date },
     ];
+
+    expect(filter.userId).toBe(trader.id);
 
     expect(filter.createdTo.getTime() - filter.createdFrom.getTime()).toBe(
       24 * 60 * 60 * 1000 - 1,
@@ -139,8 +142,22 @@ describe('TraderMessagesController', () => {
 
     expect(devices.findOwn).toHaveBeenCalledWith(7, trader.id);
     expect(messages.list).toHaveBeenCalledWith(
-      trader.id,
-      expect.objectContaining({ deviceId: 7 }),
+      expect.objectContaining({ userId: trader.id, deviceId: 7 }),
+    );
+  });
+
+  it('always scopes the list and the counters to the caller, whatever the query carries', async () => {
+    const { controller, messages } = build();
+    const smuggled = { ...query, userId: uuidOf(9) } as never;
+
+    await controller.list(trader, smuggled);
+    await controller.counters(trader, smuggled);
+
+    expect(messages.list).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: trader.id }),
+    );
+    expect(messages.countsOf).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: trader.id }),
     );
   });
 });

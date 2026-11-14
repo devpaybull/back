@@ -15,6 +15,7 @@ export enum MerchantApiErrorCode {
   DealNotFound = 'DEAL_NOT_FOUND',
   DuplicateMerchantTransactionId = 'DUPLICATE_MERCHANT_TRANSACTION_ID',
   InsufficientBalance = 'INSUFFICIENT_BALANCE',
+  MerchantBalanceNegative = 'MERCHANT_BALANCE_NEGATIVE',
   DealNotCancelable = 'DEAL_NOT_CANCELABLE',
   TimerNotExtendable = 'TIMER_NOT_EXTENDABLE',
   DisputeNotAllowed = 'DISPUTE_NOT_ALLOWED',

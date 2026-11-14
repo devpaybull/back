@@ -1,15 +1,12 @@
-import { Role } from '../../common/enums/role.enum';
 import { SortOrder } from '../../common/enums/sort-order.enum';
+import { Crypto } from '../../common/types/crypto';
+import { UserListFilter } from './user-list-filter';
 import { UserSortField } from './user-sort-field.enum';
-import { UserStatus } from './user-status.enum';
 
-export interface UserListQuery {
+export interface UserListQuery extends UserListFilter {
   page: number;
   limit: number;
-  search?: string;
   sortBy: UserSortField;
   sortOrder: SortOrder;
-  role?: Role[];
-  status?: UserStatus;
-  merchantId?: string;
+  insurancePayInMinDefault?: Crypto;
 }

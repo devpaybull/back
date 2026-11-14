@@ -79,6 +79,29 @@ export class MerchantCallbacksService {
     );
   }
 
+  async deliveryStateWithin(
+    manager: EntityManager,
+    transactionId: string,
+    since: Date,
+  ): Promise<{ queued: boolean; recent: boolean }> {
+    const [queued, recent] = await Promise.all([
+      manager.exists(MerchantCallback, {
+        where: {
+          transactionId,
+          status: In([
+            MerchantCallbackStatus.Pending,
+            MerchantCallbackStatus.Retrying,
+          ]),
+        },
+      }),
+      manager.exists(MerchantCallback, {
+        where: { transactionId, createdAt: MoreThan(since) },
+      }),
+    ]);
+
+    return { queued, recent };
+  }
+
   async listOfMerchant(
     merchantId: string,
     query: MerchantCallbackListQuery,

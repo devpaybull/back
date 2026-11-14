@@ -7,6 +7,9 @@ export class DealTraderDto {
   @ApiProperty()
   login: string;
 
+  @ApiProperty({ nullable: true, description: 'The «Telegram» column' })
+  telegramUsername: string | null;
+
   @ApiProperty({
     nullable: true,
     description: 'The trader’s Telegram groups, as an admin wrote them',

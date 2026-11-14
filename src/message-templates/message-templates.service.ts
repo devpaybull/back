@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createContext, Script } from 'node:vm';
-import { FindOptionsOrder, FindOptionsWhere, ILike, Repository } from 'typeorm';
+import {
+  FindOptionsOrder,
+  FindOptionsWhere,
+  ILike,
+  In,
+  Repository,
+} from 'typeorm';
 import { BanksService } from '../banks/banks.service';
 import { Page, toPage } from '../common/types/page';
 import { Fiat } from '../common/types/fiat';
@@ -99,6 +105,15 @@ export class MessageTemplatesService {
 
   findById(id: number): Promise<BankMessageTemplate | null> {
     return this.templates.findOne({ where: { id }, relations: { bank: true } });
+  }
+
+  async findByIds(ids: number[]): Promise<BankMessageTemplate[]> {
+    if (ids.length === 0) return [];
+
+    return this.templates.find({
+      where: { id: In(ids) },
+      relations: { bank: { currency: true } },
+    });
   }
 
   async update(

@@ -4,4 +4,7 @@ export enum UserSortField {
   Role = 'role',
   Status = 'status',
   Email = 'email',
+  Balance = 'balance',
+  InsuranceMin = 'insuranceMin',
+  Rate = 'rate',
 }

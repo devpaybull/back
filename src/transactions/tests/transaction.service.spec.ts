@@ -1325,7 +1325,7 @@ describe('TransactionService.list', () => {
     );
 
     expect(repository.findAndCount).toHaveBeenCalledWith({
-      where: { amountFiat: expect.anything() },
+      where: [{ amountFiat: expect.anything() }],
       order: { amountFiat: 'DESC', id: 'DESC' },
       skip: 10,
       take: 10,
@@ -1341,7 +1341,7 @@ describe('TransactionService.list', () => {
 
     expect(repository.findAndCount).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { bankDetailsId: In([uuidOf(10), uuidOf(11)]) },
+        where: [{ bankDetailsId: In([uuidOf(10), uuidOf(11)]) }],
       }),
     );
   });
@@ -1376,7 +1376,7 @@ describe('TransactionService.list', () => {
 
     expect(repository.findAndCount).not.toHaveBeenCalled();
     expect(builder.setFindOptions).toHaveBeenCalledWith({
-      where: { merchantId: uuidOf(4) },
+      where: [{ merchantId: uuidOf(4) }],
     });
     expect(builder.orderBy).toHaveBeenCalledWith(
       expect.stringContaining('transaction.merchantId'),

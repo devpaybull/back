@@ -1,13 +1,17 @@
 import { FindOptionsOrder } from 'typeorm';
+import { SortOrder } from '../../common/enums/sort-order.enum';
 import { sortDirection } from '../../common/utils/sort-direction';
 import { User } from '../entities/user.entity';
-import { UserListQuery } from '../types/user-list-query';
+import { TradingSortField } from '../types/trading-sort-field';
 import { UserSortField } from '../types/user-sort-field.enum';
 
-export const userListOrder = (query: UserListQuery): FindOptionsOrder<User> => {
-  const direction = sortDirection(query.sortOrder);
+export const userListOrder = (
+  sortBy: Exclude<UserSortField, TradingSortField>,
+  sortOrder: SortOrder,
+): FindOptionsOrder<User> => {
+  const direction = sortDirection(sortOrder);
 
-  switch (query.sortBy) {
+  switch (sortBy) {
     case UserSortField.Id:
       return { id: direction };
     case UserSortField.CreatedAt:
